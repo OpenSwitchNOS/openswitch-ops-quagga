@@ -199,6 +199,8 @@ AC_ARG_WITH(pkg-extra-version,
 AC_ARG_WITH(pkg-git-version,
 	AS_HELP_STRING([--with-pkg-git-version], [add git information to MOTD and build version string]),
 	[ test "x$withval" != "xno" && with_pkg_git_version="yes" ])
+AC_ARG_ENABLE(ovsdb,
+[  --enable-ovsdb          enable OVSDB integration for Quagga])
 AC_ARG_ENABLE(vtysh,
   AS_HELP_STRING([--enable-vtysh], [include integrated vty shell for Quagga]))
 AC_ARG_ENABLE(doc,
@@ -330,6 +332,16 @@ fi
 
 if test "${enable_irdp}" = "yes"; then
   AC_DEFINE(HAVE_IRDP,, IRDP )
+fi
+
+if test "${enable_ovsdb}" = "yes"; then
+  AC_DEFINE(ENABLE_OVSDB,,Quagga OVSDB integration)
+  PKG_CHECK_MODULES([OVSDB], [libovscommon], [
+       CFLAGS="$CFLAGS $OVSDB_CFLAGS"
+       LIBS="$LIBS $OVSDB_LIBS"
+    ], [
+       AC_MSG_ERROR([unable to find libovsdb])
+    ])
 fi
 
 if test "${enable_isisd}" != "no" && test "${enable_isis_topology}" = yes; then
@@ -1102,6 +1114,13 @@ else
 fi
 AM_CONDITIONAL(BGPD, test "x$BGPD" = "xbgpd")
 
+if test "${enable_ovsdb}" = "no";then
+  ENABLE_OVSDB=""
+else
+  ENABLE_OVSDB="enable_ovsdb"
+fi
+AM_CONDITIONAL(ENABLE_OVSDB, test "x$ENABLE_OVSDB" = "xenable_ovsdb")
+
 if test "${enable_ripd}" = "no";then
   RIPD=""
 else
@@ -1590,6 +1609,7 @@ group to run as		: ${enable_group}
 group for vty sockets	: ${enable_vty_group}
 config file mask        : ${enable_configfile_mask}
 log file mask           : ${enable_logfile_mask}
+ovsdb integration       : ${enable_ovsdb}
 
 The above user and group must have read/write access to the state file
 directory and to the config files in the config file directory."

@@ -21,6 +21,9 @@ othersrc = zebra_fpm_netlink.c
 endif
 
 AM_CFLAGS = $(PICFLAGS)
+if ENABLE_OVSDB
+AM_CFLAGS += -I $(LOCAL_SYSROOT_DIR)/usr/local/include/ovs
+endif
 AM_LDFLAGS = $(PILDFLAGS)
 
 sbin_PROGRAMS = zebra
@@ -32,6 +35,9 @@ zebra_SOURCES = \
 	redistribute.c debug.c rtadv.c zebra_snmp.c zebra_vty.c \
 	irdp_main.c irdp_interface.c irdp_packet.c router-id.c zebra_fpm.c \
 	$(othersrc)
+if ENABLE_OVSDB
+zebra_SOURCES += zebra_ovsdb_if.c
+endif
 
 testzebra_SOURCES = test_main.c zebra_rib.c interface.c connected.c debug.c \
 	zebra_vty.c \
@@ -41,8 +47,14 @@ noinst_HEADERS = \
 	connected.h ioctl.h rib.h rt.h zserv.h redistribute.h debug.h rtadv.h \
 	interface.h ipforward.h irdp.h router-id.h kernel_socket.h \
 	rt_netlink.h zebra_fpm.h zebra_fpm_private.h
+if ENABLE_OVSDB
+noinst_HEADERS += zebra_ovsdb_if.h
+endif
 
 zebra_LDADD = $(otherobj) ../lib/libzebra.la $(LIBCAP)
+if ENABLE_OVSDB
+zebra_LDADD += -lovscommon -lovsdb -lpthread
+endif
 
 testzebra_LDADD = ../lib/libzebra.la $(LIBCAP)
 

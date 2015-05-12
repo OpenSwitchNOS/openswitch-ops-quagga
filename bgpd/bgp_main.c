@@ -50,6 +50,14 @@ Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 #include "bgpd/bgp_filter.h"
 #include "bgpd/bgp_zebra.h"
 
+#ifdef ENABLE_OVSDB
+#include "bgpd/bgp_ovsdb_if.h"
+#endif
+
+#ifdef ENABLE_OVSDB
+extern boolean exiting;
+#endif
+
 /* bgpd options, we use GNU getopt library. */
 static const struct option longopts[] = 
 {
@@ -328,12 +336,19 @@ main (int argc, char **argv)
   struct thread thread;
   int tmp_port;
 
+#ifdef ENABLE_OVSDB
+  bgp_ovsdb_init(argc, argv);
+#endif
+
   /* Set umask before anything for security */
   umask (0027);
 
   /* Preserve name of myself. */
   progname = ((p = strrchr (argv[0], '/')) ? ++p : argv[0]);
 
+  /* HALON_TODO: bpg_ovsdb_init internally calls openlog.
+   * In this case, we should make sure we don't call openzlog again.
+   */
   zlog_default = openzlog (progname, ZLOG_BGP,
 			   LOG_CONS|LOG_NDELAY|LOG_PID, LOG_DAEMON);
 
@@ -431,13 +446,20 @@ main (int argc, char **argv)
   /* BGP related initialization.  */
   bgp_init ();
 
+#ifdef ENABLE_OVSDB
+  bgp_ovsdb_init_poll_loop(bm);
+#endif
+
+#ifndef ENABLE_OVSDB
   /* Parse config file. */
   vty_read_config (config_file, config_default);
+#endif
 
   /* Start execution only if not in dry-run mode */
   if(dryrun)
     return(0);
   
+#ifndef ENABLE_OVSDB
   /* Turn into daemon if daemon_mode is set. */
   if (daemon_mode && daemon (0, 0) < 0)
     {
@@ -445,9 +467,9 @@ main (int argc, char **argv)
       return (1);
     }
 
-
   /* Process ID file creation. */
   pid_output (pid_file);
+#endif
 
   /* Make bgp vty socket. */
   vty_serv_sock (vty_addr, vty_port, BGP_VTYSH_PATH);
@@ -459,8 +481,16 @@ main (int argc, char **argv)
 	       bm->port);
 
   /* Start finite state machine, here we go! */
+#ifdef ENABLE_OVSDB
+  while (!exiting && thread_fetch (master, &thread))
+#else
   while (thread_fetch (master, &thread))
+#endif
     thread_call (&thread);
+
+#ifdef ENABLE_OVSDB
+  bgp_ovsdb_exit();
+#endif
 
   /* Not reached. */
   return (0);

@@ -41,6 +41,14 @@
 #include "zebra/rtadv.h"
 #include "zebra/zebra_fpm.h"
 
+#ifdef ENABLE_OVSDB
+#include "zebra/zebra_ovsdb_if.h"
+#endif
+
+#ifdef ENABLE_OVSDB
+extern boolean exiting;
+#endif
+
 /* Zebra instance */
 struct zebra_t zebrad =
 {
@@ -219,12 +227,19 @@ main (int argc, char **argv)
   struct thread thread;
   char *zserv_path = NULL;
 
+#ifdef ENABLE_OVSDB
+  zebra_ovsdb_init(argc, argv);
+#endif
+
   /* Set umask before anything for security */
   umask (0027);
 
   /* preserve my name */
   progname = ((p = strrchr (argv[0], '/')) ? ++p : argv[0]);
 
+  /* HALON_TODO: zebra_ovsdb_init internally calls openlog.
+   * In this case, we should make sure we don't call openzlog again.
+   */
   zlog_default = openzlog (progname, ZLOG_ZEBRA,
 			   LOG_CONS|LOG_NDELAY|LOG_PID, LOG_DAEMON);
 
@@ -353,6 +368,11 @@ main (int argc, char **argv)
   zfpm_init (zebrad.master, 0, 0);
 #endif
 
+#ifdef ENABLE_OVSDB
+  zebra_ovsdb_init_poll_loop(&zebrad);
+#endif
+
+#ifndef ENABLE_OVSDB
   /* Process the configuration file. Among other configuration
   *  directives we can meet those installing static routes. Such
   *  requests will not be executed immediately, but queued in
@@ -361,6 +381,7 @@ main (int argc, char **argv)
   *  to that after daemon() completes (if ever called).
   */
   vty_read_config (config_file, config_default);
+#endif
 
   /* Don't start execution if we are in dry-run mode */
   if (dryrun)
@@ -373,6 +394,7 @@ main (int argc, char **argv)
   if (batch_mode)
     exit (0);
 
+#ifndef ENABLE_OVSDB
   /* Daemonize. */
   if (daemon_mode && daemon (0, 0) < 0)
     {
@@ -382,6 +404,7 @@ main (int argc, char **argv)
 
   /* Output pid of zebra. */
   pid_output (pid_file);
+#endif
 
   /* After we have successfully acquired the pidfile, we can be sure
   *  about being the only copy of zebra process, which is submitting
@@ -406,8 +429,16 @@ main (int argc, char **argv)
   /* Print banner. */
   zlog_notice ("Zebra %s starting: vty@%d", QUAGGA_VERSION, vty_port);
 
+#ifdef ENABLE_OVSDB
+  while (!exiting && thread_fetch (zebrad.master, &thread))
+#else
   while (thread_fetch (zebrad.master, &thread))
+#endif
     thread_call (&thread);
+
+#ifdef ENABLE_OVSDB
+  zebra_ovsdb_exit();
+#endif
 
   /* Not reached... */
   return 0;

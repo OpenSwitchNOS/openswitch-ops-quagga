@@ -79,8 +79,13 @@ char *vty_cwd = NULL;
 /* Configure lock. */
 static int vty_config;
 
+#ifdef ENABLE_OVSDB
+/* Login password check. */
+static int no_password_check = 1;
+#else
 /* Login password check. */
 static int no_password_check = 0;
+#endif
 
 /* Restrict unauthenticated logins? */
 static const u_char restricted_mode_default = 0;

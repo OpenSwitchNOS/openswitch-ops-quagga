@@ -19,7 +19,11 @@
  * 02111-1307, USA.  
  */
 
+#ifdef ENABLE_OVSDB
+#include <stdio.h>
+#else
 #include <zebra.h>
+#endif
 
 #include <sys/un.h>
 #include <setjmp.h>
@@ -1367,6 +1371,29 @@ DEFUN (vtysh_show_memory,
   return ret;
 }
 
+#ifdef ENABLE_OVSDB
+
+DEFUN (vtysh_set_hostname,
+       vtysh_set_hostname_cmd,
+       "set-hostname WORD",
+       "Setting the hostname in ovsdb from vtysh\n"
+       "Give the string you want to set as hostname\n")
+{
+  vtysh_ovsdb_hostname_set(argv[0]);
+  return CMD_SUCCESS;
+}
+
+DEFUN (vtysh_get_hostname,
+       vtysh_get_hostname_cmd,
+       "get-hostname",
+       "Get the hostname set in ovsdb\n")
+{
+  vtysh_ovsdb_hostname_get();
+  return CMD_SUCCESS;
+}
+
+#endif /* ENABLE_OVSDB */
+
 /* Logging commands. */
 DEFUN (vtysh_show_logging,
        vtysh_show_logging_cmd,
@@ -2296,6 +2323,13 @@ vtysh_init_vty (void)
   vtysh_install_default (KEYCHAIN_NODE);
   vtysh_install_default (KEYCHAIN_KEY_NODE);
   vtysh_install_default (VTY_NODE);
+
+#ifdef ENABLE_OVSDB
+  install_element (VIEW_NODE, &vtysh_set_hostname_cmd);
+  install_element (ENABLE_NODE, &vtysh_set_hostname_cmd);
+  install_element (VIEW_NODE, &vtysh_get_hostname_cmd);
+  install_element (ENABLE_NODE, &vtysh_get_hostname_cmd);
+#endif /* ENABLE_OVSDB */
 
   install_element (VIEW_NODE, &vtysh_enable_cmd);
   install_element (ENABLE_NODE, &vtysh_config_terminal_cmd);

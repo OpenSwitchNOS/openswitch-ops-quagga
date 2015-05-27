@@ -19,7 +19,9 @@
  * 02111-1307, USA.  
  */
 
+#ifndef ENABLE_OVSDB
 #include <zebra.h>
+#endif
 
 #include <sys/un.h>
 #include <setjmp.h>
@@ -36,6 +38,9 @@
 
 #include "vtysh/vtysh.h"
 #include "vtysh/vtysh_user.h"
+#ifdef ENABLE_OVSDB
+#include "vtysh/vtysh_ovsdb_if.h"
+#endif
 
 /* VTY shell program name. */
 char *progname;
@@ -230,6 +235,10 @@ main (int argc, char **argv, char **env)
   /* Preserve name of myself. */
   progname = ((p = strrchr (argv[0], '/')) ? ++p : argv[0]);
 
+#ifdef ENABLE_OVSDB
+  vtysh_ovsdb_init(argc, argv);
+#endif
+
   /* if logging open now */
   if ((p = getenv("VTYSH_LOG")) != NULL)
       logfile = fopen(p, "a");
@@ -408,6 +417,10 @@ main (int argc, char **argv, char **env)
 
   history_truncate_file(history_file,1000);
   printf ("\n");
+
+#ifdef ENABLE_OVSDB
+  vtysh_ovsdb_exit();
+#endif
 
   /* Rest in peace. */
   exit (0);

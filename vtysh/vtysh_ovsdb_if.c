@@ -54,6 +54,20 @@ static struct ovsdb_idl_txn *txn;
 boolean exiting = false;
 
 /*
+ * Running idl run and wait to fetch the data from the DB
+ */
+static void
+vtysh_run() {
+    while(!ovsdb_idl_has_lock(idl)) {
+        ovsdb_idl_run(idl);
+        unixctl_server_run(appctl);
+
+        ovsdb_idl_wait(idl);
+        unixctl_server_wait(appctl);
+    }
+}
+
+/*
  * Create a connection to the OVSDB at db_path and create
  * the idl cache.
  */
@@ -68,20 +82,6 @@ ovsdb_init(const char *db_path) {
     ovsdb_idl_add_column(idl, &ovsrec_open_vswitch_col_hostname);
 
     vtysh_run();
-}
-
-/*
- * Running idl run and wait to fetch the data from the DB
- */
-static void
-vtysh_run() {
-    while(!ovsdb_idl_has_lock(idl)) {
-        ovsdb_idl_run(idl);
-        unixctl_server_run(appctl);
-
-        ovsdb_idl_wait(idl);
-        unixctl_server_wait(appctl);
-    }
 }
 
 static void

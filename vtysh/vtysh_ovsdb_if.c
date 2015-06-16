@@ -57,8 +57,10 @@ boolean exiting = false;
  * Running idl run and wait to fetch the data from the DB
  */
 static void
-vtysh_run() {
-    while(!ovsdb_idl_has_lock(idl)) {
+vtysh_run()
+{
+    while(!ovsdb_idl_has_lock(idl)) 
+    {
         ovsdb_idl_run(idl);
         unixctl_server_run(appctl);
 
@@ -72,7 +74,8 @@ vtysh_run() {
  * the idl cache.
  */
 static void
-ovsdb_init(const char *db_path) {
+ovsdb_init(const char *db_path)
+{
     idl = ovsdb_idl_create(db_path, &ovsrec_idl_class, false, true);
     ovsdb_idl_set_lock(idl, "halon_vtysh");
     idl_seqno = ovsdb_idl_get_seqno(idl);
@@ -91,7 +94,8 @@ ovsdb_init(const char *db_path) {
 
 static void
 halon_vtysh_exit(struct unixctl_conn *conn, int argc OVS_UNUSED,
-                    const char *argv[] OVS_UNUSED, void *exiting_){
+                    const char *argv[] OVS_UNUSED, void *exiting_)
+{
     boolean *exiting = exiting_;
     *exiting = true;
     unixctl_command_reply(conn, NULL);
@@ -100,7 +104,8 @@ halon_vtysh_exit(struct unixctl_conn *conn, int argc OVS_UNUSED,
 /*
  * The init for the ovsdb integration called in vtysh main function
  */
-void vtysh_ovsdb_init(int argc, char *argv[]) {
+void vtysh_ovsdb_init(int argc, char *argv[])
+{
     int retval;
     char *ovsdb_sock;
 
@@ -112,7 +117,8 @@ void vtysh_ovsdb_init(int argc, char *argv[]) {
     ovsrec_init();
 
     retval = unixctl_server_create(appctl_path, &appctl);
-    if(retval) {
+    if(retval)
+    {
         exit(EXIT_FAILURE);
     }
 
@@ -130,19 +136,22 @@ void vtysh_ovsdb_init(int argc, char *argv[]) {
  * The set command to set the hostname column in the
  * open_vswitch table from the set-hotname command
  */
-void vtysh_ovsdb_hostname_set(const char* in) {
+void vtysh_ovsdb_hostname_set(const char* in)
+{
     const struct ovsrec_open_vswitch *ovs= NULL;
 
     ovs = ovsrec_open_vswitch_first(idl);
 
-    if(ovs) {
+    if(ovs)
+    {
         txn = ovsdb_idl_txn_create(idl);
         ovsrec_open_vswitch_set_hostname(ovs, in);
         ovsdb_idl_txn_commit(txn);
         ovsdb_idl_txn_destroy(txn);
         VLOG_INFO("We have set the hostname in the ovsdb table %s",in);
     }
-    else {
+    else
+    {
         VLOG_ERR("We couldn't retrieve any open_vswitch table rows");
     }
 }
@@ -151,18 +160,21 @@ void vtysh_ovsdb_hostname_set(const char* in) {
  * The get command to read from the ovsdb open_vswitch table
  * hostname column from the vtysh get-hostname command
  */
-char* vtysh_ovsdb_hostname_get() {
+char* vtysh_ovsdb_hostname_get()
+{
     const struct ovsrec_open_vswitch *ovs;
     ovsdb_idl_run(idl);
     ovsdb_idl_wait(idl);
     ovs = ovsrec_open_vswitch_first(idl);
 
-    if(ovs) {
+    if(ovs)
+    {
         printf("The hostname in ovsdb table is %s\n", ovs->hostname);
         VLOG_INFO("We have read the hostname %s from ovsdb", ovs->hostname);
         return ovs->hostname;
     }
-    else {
+    else
+    {
         VLOG_ERR("We couldn't retrieve any open_vswitch table rows");
     }
 
@@ -172,6 +184,7 @@ char* vtysh_ovsdb_hostname_get() {
 /*
  * When exiting vtysh destroy the idl cache
  */
-void vtysh_ovsdb_exit(void) {
+void vtysh_ovsdb_exit(void)
+{
     ovsdb_idl_destroy(idl);
 }

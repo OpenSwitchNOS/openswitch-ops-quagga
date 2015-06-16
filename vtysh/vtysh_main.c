@@ -40,6 +40,7 @@
 #include "vtysh/vtysh_user.h"
 #ifdef ENABLE_OVSDB
 #include "vtysh/vtysh_ovsdb_if.h"
+#include "lib/lib_vtysh_ovsdb_if.h"
 #endif
 
 /* VTY shell program name. */
@@ -169,6 +170,9 @@ struct option longopts[] =
   { "dryrun",		    no_argument,	     NULL, 'C'},
   { "help",                 no_argument,             NULL, 'h'},
   { "noerror",		    no_argument,	     NULL, 'n'},
+#ifdef ENABLE_OVSDB
+  { "mininet-test",         no_argument,             NULL, 't'},
+#endif
   { 0 }
 };
 
@@ -236,6 +240,7 @@ main (int argc, char **argv, char **env)
   progname = ((p = strrchr (argv[0], '/')) ? ++p : argv[0]);
 
 #ifdef ENABLE_OVSDB
+  lib_vtysh_ovsdb_init(argc, argv);
   vtysh_ovsdb_init(argc, argv);
 #endif
 
@@ -244,9 +249,13 @@ main (int argc, char **argv, char **env)
       logfile = fopen(p, "a");
 
   /* Option handling. */
-  while (1) 
+  while (1)
     {
+#ifdef ENABLE_OVSDB
+      opt = getopt_long (argc, argv, "be:c:d:nEhCt", longopts, 0);
+#else
       opt = getopt_long (argc, argv, "be:c:d:nEhC", longopts, 0);
+#endif
     
       if (opt == EOF)
 	break;
@@ -287,6 +296,11 @@ main (int argc, char **argv, char **env)
 	case 'h':
 	  usage (0);
 	  break;
+#ifdef ENABLE_OVSDB
+        case 't':
+          enable_mininet_test_prompt = 1;
+          break;
+#endif
 	default:
 	  usage (1);
 	  break;
@@ -314,7 +328,7 @@ main (int argc, char **argv, char **env)
   /* Start execution only if not in dry-run mode */
   if(dryrun)
     return(0);
-  
+
   /* Ignore error messages */
   if (no_error)
     freopen("/dev/null", "w", stdout);
@@ -322,12 +336,14 @@ main (int argc, char **argv, char **env)
   /* Make sure we pass authentication before proceeding. */
   vtysh_auth ();
 
+#ifndef ENABLE_OVSDB
   /* Do not connect until we have passed authentication. */
   if (vtysh_connect_all (daemon_name) <= 0)
     {
       fprintf(stderr, "Exiting: failed to connect to any daemons.\n");
       exit(1);
     }
+#endif
 
   /* If eval mode. */
   if (cmd)
@@ -419,6 +435,7 @@ main (int argc, char **argv, char **env)
   printf ("\n");
 
 #ifdef ENABLE_OVSDB
+  lib_vtysh_ovsdb_exit();
   vtysh_ovsdb_exit();
 #endif
 

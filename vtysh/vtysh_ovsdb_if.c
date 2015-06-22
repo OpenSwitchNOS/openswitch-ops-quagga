@@ -80,7 +80,12 @@ ovsdb_init(const char *db_path) {
     ovsdb_idl_add_table(idl, &ovsrec_table_open_vswitch);
 
     ovsdb_idl_add_column(idl, &ovsrec_open_vswitch_col_hostname);
-
+    
+    // BGP tables
+    ovsdb_idl_add_table(idl, &ovsrec_table_bgp_router);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_asn);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_router_id);
+    
     vtysh_run();
 }
 

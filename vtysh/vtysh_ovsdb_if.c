@@ -24,7 +24,6 @@
 
 #include <stdio.h>
 
-
 #include "vswitch-idl.h"
 #include "util.h"
 #include "unixctl.h"
@@ -124,9 +123,17 @@ ovsdb_init(const char *db_path)
     ovsdb_idl_add_column(idl, &ovsrec_interface_col_link_state);
     ovsdb_idl_add_column(idl, &ovsrec_interface_col_lldp_neighbor_info);
 
-    // BGP tables
     bgp_ovsdb_init(idl);
     /* Fetch data from DB */
+
+    // VRF tables
+    ovsdb_idl_add_table(idl, &ovsrec_table_vrf);
+    ovsdb_idl_add_column(idl, &ovsrec_vrf_col_bgp_routers);
+
+    // BGP tables
+    ovsdb_idl_add_table(idl, &ovsrec_table_bgp_router);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_asn);
+
     vtysh_run();
 }
 
@@ -250,6 +257,7 @@ boolean cli_do_config_finish()
   enum ovsdb_idl_txn_status status;
 
   status = ovsdb_idl_txn_commit(status_txn);
+
   ovsdb_idl_txn_destroy(status_txn);
   status_txn = NULL;
 
@@ -259,7 +267,6 @@ boolean cli_do_config_finish()
 
   return true;
 }
-
 
 void cli_do_config_abort()
 {

@@ -351,11 +351,11 @@ vtysh_execute_func (const char *line, int pager)
   cmd_stat = ret;
   switch (ret)
     {
-#ifdef ENABLE_OVSDB
-    case CMD_OVSDB_FAILURE:
-      fprintf (stdout,"%% Command failed.\n");
-      break;
-#endif
+    #ifdef ENABLE_OVSDB
+      case CMD_OVSDB_FAILURE:
+        fprintf (stdout,"%% Command failed.\n");
+        break;
+    #endif
     case CMD_WARNING:
       if (vty->type == VTY_FILE)
 	fprintf (stdout,"Warning...\n");
@@ -2479,9 +2479,9 @@ vtysh_init_vty (void)
   install_element (BGP_IPV6_NODE, &vtysh_quit_bgpd_cmd);
   install_element (BGP_IPV6M_NODE, &vtysh_exit_bgpd_cmd);
   install_element (BGP_IPV6M_NODE, &vtysh_quit_bgpd_cmd);
-
+#ifdef ENABLE_OVSDB
   bgp_vty_init();
-
+#endif
   install_element (ISIS_NODE, &vtysh_exit_isisd_cmd);
   install_element (ISIS_NODE, &vtysh_quit_isisd_cmd);
   install_element (KEYCHAIN_NODE, &vtysh_exit_ripd_cmd);

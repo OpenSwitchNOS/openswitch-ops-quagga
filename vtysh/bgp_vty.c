@@ -17,7 +17,7 @@
  * Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
  * 02111-1307, USA.
  *
- * File: bgp_vtysh.c
+ * File: bgp_vty.c
  *
  * Purpose: This file contains implementation of all BGP related CLI commands.
  */
@@ -32,15 +32,25 @@
 #include <readline/readline.h>
 #include <readline/history.h>
 
+#include <lib/version.h>
+#include "getopt.h"
+#include "memory.h"
 #include "command.h"
 #include "vtysh/vtysh.h"
+#include "vtysh/vtysh_user.h"
+#include "vswitch-idl.h"
+#include "ovsdb-idl.h"
 #include "log.h"
 #include "bgpd/bgp_vty.h"
-#include "vswitch-idl.h"
+#include "smap.h"
 #include "openvswitch/vlog.h"
-
+#include "openhalon-idl.h"
+#include "util.h"
 
 extern struct ovsdb_idl *idl;
+
+int bgp_router_set_asn(int64_t asn);
+
 /* BGP Information flags taken from bgp_route.h
  * TODO: Remove this duplicate declaration. Need to separate 
  * these flags from bgp_route.h
@@ -61,9 +71,9 @@ extern struct ovsdb_idl *idl;
 
 #define BGP_SHOW_SCODE_HEADER "Status codes: s suppressed, d damped, "\
                               "h history, * valid, > best, = multipath,%s"\
-                "              i internal, r RIB-failure, S Stale, R Removed%s"
+                              "i internal, r RIB-failure, S Stale, R Removed%s"
 #define BGP_SHOW_OCODE_HEADER "Origin codes: i - IGP, e - EGP, ? - incomplete%s%s"
-#define BGP_SHOW_HEADER "   Network          Next Hop            Metric LocPrf Weight Path%s"
+#define BGP_SHOW_HEADER       "Network          Next Hop            Metric LocPrf Weight Path%s"
 VLOG_DEFINE_THIS_MODULE(bgp_vty);
 
 static void
@@ -161,7 +171,6 @@ DEFUN(vtysh_show_ip_bgp,
       BGP_STR)
 {
 
-  vty_out (vty, "BGP table version is 0\n", VTY_NEWLINE);
   // TODO
   const struct ovsrec_bgp_router *bgpRow = NULL;
   ovsdb_idl_run(idl);
@@ -188,7 +197,99 @@ DEFUN(vtysh_show_ip_bgp,
   return CMD_SUCCESS;
 }
 
+/* Installing command for "router bgp <asn>" */
+DEFUN(cli_router_bgp,
+      vtysh_router_bgp_cmd,
+      "router bgp " CMD_AS_RANGE,
+      ROUTER_STR
+      BGP_STR
+      AS_STR)
+{
+  return bgp_router_set_asn(atoi(argv[0]));
+}
+
+int
+bgp_router_set_asn(int64_t asn)
+{
+    struct ovsrec_bgp_router *bgp_router_row = NULL;
+    struct ovsrec_bgp_router **bgp_routers_list;
+    const struct ovsrec_vrf *vrf_row = NULL;
+    static struct ovsdb_idl_txn *bgp_router_txn=NULL;
+    enum ovsdb_idl_txn_status status;
+    bool vrf_row_found=0;
+    size_t i=0;
+
+    ovsdb_idl_run(idl);
+
+    if(!bgp_router_txn) {
+         bgp_router_txn = ovsdb_idl_txn_create(idl);
+         if (bgp_router_txn == NULL) {
+             VLOG_ERR("Transaction creation failed");
+             return TXN_ERROR;
+         }
+
+        vrf_row = ovsrec_vrf_first(idl);
+        if (vrf_row == NULL) {
+            VLOG_INFO("No VRF configured! Please configure it using"
+                      " \"ovs-vsctl add-vrf <vrf-name>\" or \"vrf VRF_NAME\"");
+            return -1;
+        }
+        else {
+            vrf_row_found = 1;
+#if 0
+            /* TODO HALON: Later when we have multiple vrf's and user enters one */
+            OVSREC_VRF_FOR_EACH(vrf_row, idl) {
+                if (!strcmp(vrf_row->name, vrf_name) {
+                    VLOG_INFO("VRF row found! Adding reference to BGP_Router table");
+                    break;
+                }
+            }
+#endif
+        }
+        if(vrf_row_found) {
+            bgp_router_row = ovsrec_bgp_router_first(idl);
+                if (bgp_router_row == NULL) {
+                    /* Create a new row with given asn in bgp router table */
+                    bgp_router_row = ovsrec_bgp_router_insert(bgp_router_txn);
+                    /* Insert BGP_router table reference in VRF table */
+                    ovsrec_vrf_set_bgp_routers(vrf_row, &bgp_router_row,
+                                               vrf_row->n_bgp_routers + 1);
+                    /* Set the asn column in the BGP_Router table */
+                    ovsrec_bgp_router_set_asn(bgp_router_row,asn);
+                }
+                else {
+                    OVSREC_BGP_ROUTER_FOR_EACH(bgp_router_row,idl) {
+                        if (!(bgp_router_row->asn==asn)) {
+                            /* Create a new row with given asn in bgp router table */
+                            bgp_router_row = ovsrec_bgp_router_insert(bgp_router_txn);
+                            /* Insert BGP_router table reference in VRF table */
+                            bgp_routers_list = xmalloc(sizeof *vrf_row->bgp_routers *
+                                                      (vrf_row->n_bgp_routers + 1));
+                            for (i = 0; i < vrf_row->n_bgp_routers; i++) {
+                                bgp_routers_list[i] = vrf_row->bgp_routers[i];
+                            }
+                            bgp_routers_list[vrf_row->n_bgp_routers] = bgp_router_row;
+                            ovsrec_vrf_set_bgp_routers(vrf_row, bgp_routers_list,
+                                                       vrf_row->n_bgp_routers + 1);
+                            free(bgp_routers_list);
+                            /* Set the asn column in the BGP_Router table */
+                            ovsrec_bgp_router_set_asn(bgp_router_row,asn);
+                        }
+                    }
+               }
+          }
+     }
+     status = ovsdb_idl_txn_commit_block(bgp_router_txn);
+     ovsdb_idl_txn_destroy(bgp_router_txn);
+     bgp_router_txn = NULL;
+     VLOG_INFO("%s Commit Status : %s", __FUNCTION__,
+               ovsdb_idl_txn_status_to_string(status));
+
+     return (status == TXN_SUCCESS);
+}
+
 void bgp_vty_init(void)
 {
-  install_element (ENABLE_NODE, &vtysh_show_ip_bgp_cmd);
+    install_element (ENABLE_NODE, &vtysh_show_ip_bgp_cmd);
+    install_element (CONFIG_NODE, &vtysh_router_bgp_cmd);
 }

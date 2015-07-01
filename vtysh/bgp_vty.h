@@ -21,4 +21,6 @@
  *
  * Purpose: This file contains function declarations of BGP CLI.
  */
+
+void
 bgp_vty_init();

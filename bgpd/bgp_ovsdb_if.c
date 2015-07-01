@@ -71,7 +71,9 @@ static char *appctl_path = NULL;
 static struct unixctl_server *appctl;
 static int system_configured = false;
 
+
 boolean exiting = false;
+
 
 static int bgp_ovspoll_enqueue (bgp_ovsdb_t *bovs_g);
 static int bovs_read_cb (struct thread *thread);
@@ -85,6 +87,73 @@ bgp_unixctl_dump(struct unixctl_conn *conn, int argc OVS_UNUSED,
 {
     unixctl_command_reply_error(conn, "Nothing to dump :)");
     //unixctl_command_reply(conn, buf);
+}
+
+static void
+bgp_ovsdb_tables_init(struct ovsdb_idl *idl)
+{
+    /* BGP router table */
+    ovsdb_idl_add_table(idl, &ovsrec_table_bgp_router);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_asn);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_router_id);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_status);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_neighbors);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_redistribute);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_graceful_restart);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_always_compare_med);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_other_config);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_bestpath);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_status);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_external_ids);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_networks);
+    
+    /* BGP neighbor table */
+    ovsdb_idl_add_table(idl, &ovsrec_table_bgp_neighbor);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_activate);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_weight);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_to_bgp_peer_group);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_to_bgp_router);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_shutdown);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_strict_capability_match);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_port);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_soft_reconfiguration);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_statistics);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_remote_as);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_override_capability);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_passive);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_maximum_prefix);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_peer_id);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_status);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_description);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_local_as);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_advertisement_interval);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_interface);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_external_ids);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_password);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_other_config);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_capability);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_send_community);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_timers);
+    
+    /* RIB table */
+    ovsdb_idl_add_table(idl, &ovsrec_table_rib);
+    ovsdb_idl_add_column(idl, &ovsrec_rib_col_prefix);
+    ovsdb_idl_add_column(idl, &ovsrec_rib_col_prefix_len);
+    ovsdb_idl_add_column(idl, &ovsrec_rib_col_from_protocol);
+    ovsdb_idl_add_column(idl, &ovsrec_rib_col_nexthop_list);
+    ovsdb_idl_add_column(idl, &ovsrec_rib_col_address_family);
+    ovsdb_idl_add_column(idl, &ovsrec_rib_col_sub_address_family);
+    ovsdb_idl_add_column(idl, &ovsrec_rib_col_protocol_specific_data);
+    ovsdb_idl_add_column(idl, &ovsrec_rib_col_flags);
+    ovsdb_idl_add_column(idl, &ovsrec_rib_col_selected_for_RIB);
+    ovsdb_idl_add_column(idl, &ovsrec_rib_col_selected_to_FIB);
+    ovsdb_idl_add_column(idl, &ovsrec_rib_col_distance);
+    ovsdb_idl_add_column(idl, &ovsrec_rib_col_metric);
+    ovsdb_idl_add_column(idl, &ovsrec_rib_col_ifindex_num);
+    ovsdb_idl_add_column(idl, &ovsrec_rib_col_message);
+    ovsdb_idl_add_column(idl, &ovsrec_rib_col_vrf);
+    ovsdb_idl_add_column(idl, &ovsrec_rib_col_interface_list);
+    ovsdb_idl_add_column(idl, &ovsrec_rib_col_next_num);
 }
 
 /* Create a connection to the OVSDB at db_path and create a dB cache
@@ -104,6 +173,9 @@ ovsdb_init (const char *db_path)
     ovsdb_idl_add_column(idl, &ovsrec_open_vswitch_col_cur_cfg);
     ovsdb_idl_add_column(idl, &ovsrec_open_vswitch_col_hostname);
 
+    /* BGP tables */
+    bgp_ovsdb_tables_init(idl);
+    
     /* Register ovs-appctl commands for this daemon. */
     unixctl_command_register("bgpd/dump", "", 0, 0, bgp_unixctl_dump, NULL);
 }

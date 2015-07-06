@@ -40,16 +40,18 @@
 
 #include "openhalon-idl.h"
 #include "vtysh/vtysh_ovsdb_if.h"
+#include "assert.h"
 
 typedef unsigned char boolean;
 
 VLOG_DEFINE_THIS_MODULE(vtysh_ovsdb_if);
 
-static struct ovsdb_idl *idl;
+struct ovsdb_idl *idl;
 static unsigned int idl_seqno;
 static char *appctl_path = NULL;
 static struct unixctl_server *appctl;
 static struct ovsdb_idl_txn *txn;
+static struct ovsdb_idl_txn *status_txn;
 
 boolean exiting = false;
 
@@ -57,8 +59,10 @@ boolean exiting = false;
  * Running idl run and wait to fetch the data from the DB
  */
 static void
-vtysh_run() {
-    while(!ovsdb_idl_has_lock(idl)) {
+vtysh_run()
+{
+    while(!ovsdb_idl_has_lock(idl)) 
+    {
         ovsdb_idl_run(idl);
         unixctl_server_run(appctl);
 
@@ -67,26 +71,70 @@ vtysh_run() {
     }
 }
 
+static void
+bgp_ovsdb_init(struct ovsdb_idl *idl)
+{
+  ovsdb_idl_add_table(idl, &ovsrec_table_bgp_router);
+  ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_asn);
+  ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_router_id);
+  ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_status);
+  ovsdb_idl_add_table(idl, &ovsrec_table_bgp_neighbor);
+  ovsdb_idl_add_table(idl, &ovsrec_table_rib);
+  ovsdb_idl_add_column(idl, &ovsrec_rib_col_prefix);
+  ovsdb_idl_add_column(idl, &ovsrec_rib_col_prefix_len);
+  ovsdb_idl_add_column(idl, &ovsrec_rib_col_from_protocol);
+  ovsdb_idl_add_column(idl, &ovsrec_rib_col_nexthop_list);
+  ovsdb_idl_add_column(idl, &ovsrec_rib_col_address_family);
+  ovsdb_idl_add_column(idl, &ovsrec_rib_col_sub_address_family);
+  ovsdb_idl_add_column(idl, &ovsrec_rib_col_protocol_specific_data);
+  ovsdb_idl_add_column(idl, &ovsrec_rib_col_flags);
+  ovsdb_idl_add_column(idl, &ovsrec_rib_col_selected_for_RIB);
+  ovsdb_idl_add_column(idl, &ovsrec_rib_col_distance);
+  ovsdb_idl_add_column(idl, &ovsrec_rib_col_metric);
+  
+  
+}
+
 /*
  * Create a connection to the OVSDB at db_path and create
  * the idl cache.
  */
 static void
-ovsdb_init(const char *db_path) {
+ovsdb_init(const char *db_path)
+{
     idl = ovsdb_idl_create(db_path, &ovsrec_idl_class, false, true);
     ovsdb_idl_set_lock(idl, "halon_vtysh");
     idl_seqno = ovsdb_idl_get_seqno(idl);
 
+    /* Add hostname columns */
     ovsdb_idl_add_table(idl, &ovsrec_table_open_vswitch);
-
     ovsdb_idl_add_column(idl, &ovsrec_open_vswitch_col_hostname);
 
+    /* Add tables and columns for LLDP configuration */
+    ovsdb_idl_add_table(idl, &ovsrec_table_open_vswitch);
+    ovsdb_idl_add_column(idl, &ovsrec_open_vswitch_col_cur_cfg);
+    ovsdb_idl_add_column(idl, &ovsrec_open_vswitch_col_other_config);
+    ovsdb_idl_add_column(idl, &ovsrec_open_vswitch_col_lldp_statistics);
+    ovsdb_idl_add_column(idl, &ovsrec_open_vswitch_col_status);
+
+    ovsdb_idl_add_table(idl, &ovsrec_table_interface);
+    ovsdb_idl_add_column(idl, &ovsrec_interface_col_name);
+    ovsdb_idl_add_column(idl, &ovsrec_interface_col_lldp_statistics);
+    ovsdb_idl_add_column(idl, &ovsrec_interface_col_other_config);
+    ovsdb_idl_add_column(idl, &ovsrec_interface_col_link_state);
+    ovsdb_idl_add_column(idl, &ovsrec_interface_col_lldp_neighbor_info);
+
+    // BGP tables
+    bgp_ovsdb_init(idl);
+    
+    /* Fetch data from DB */
     vtysh_run();
 }
 
 static void
 halon_vtysh_exit(struct unixctl_conn *conn, int argc OVS_UNUSED,
-                    const char *argv[] OVS_UNUSED, void *exiting_){
+                    const char *argv[] OVS_UNUSED, void *exiting_)
+{
     boolean *exiting = exiting_;
     *exiting = true;
     unixctl_command_reply(conn, NULL);
@@ -95,7 +143,8 @@ halon_vtysh_exit(struct unixctl_conn *conn, int argc OVS_UNUSED,
 /*
  * The init for the ovsdb integration called in vtysh main function
  */
-void vtysh_ovsdb_init(int argc, char *argv[]) {
+void vtysh_ovsdb_init(int argc, char *argv[])
+{
     int retval;
     char *ovsdb_sock;
 
@@ -107,7 +156,8 @@ void vtysh_ovsdb_init(int argc, char *argv[]) {
     ovsrec_init();
 
     retval = unixctl_server_create(appctl_path, &appctl);
-    if(retval) {
+    if(retval)
+    {
         exit(EXIT_FAILURE);
     }
 
@@ -125,19 +175,22 @@ void vtysh_ovsdb_init(int argc, char *argv[]) {
  * The set command to set the hostname column in the
  * open_vswitch table from the set-hotname command
  */
-void vtysh_ovsdb_hostname_set(const char* in) {
+void vtysh_ovsdb_hostname_set(const char* in)
+{
     const struct ovsrec_open_vswitch *ovs= NULL;
 
     ovs = ovsrec_open_vswitch_first(idl);
 
-    if(ovs) {
+    if(ovs)
+    {
         txn = ovsdb_idl_txn_create(idl);
         ovsrec_open_vswitch_set_hostname(ovs, in);
         ovsdb_idl_txn_commit(txn);
         ovsdb_idl_txn_destroy(txn);
         VLOG_INFO("We have set the hostname in the ovsdb table %s",in);
     }
-    else {
+    else
+    {
         VLOG_ERR("We couldn't retrieve any open_vswitch table rows");
     }
 }
@@ -146,18 +199,21 @@ void vtysh_ovsdb_hostname_set(const char* in) {
  * The get command to read from the ovsdb open_vswitch table
  * hostname column from the vtysh get-hostname command
  */
-char* vtysh_ovsdb_hostname_get() {
+char* vtysh_ovsdb_hostname_get()
+{
     const struct ovsrec_open_vswitch *ovs;
     ovsdb_idl_run(idl);
     ovsdb_idl_wait(idl);
     ovs = ovsrec_open_vswitch_first(idl);
 
-    if(ovs) {
+    if(ovs)
+    {
         printf("The hostname in ovsdb table is %s\n", ovs->hostname);
         VLOG_INFO("We have read the hostname %s from ovsdb", ovs->hostname);
         return ovs->hostname;
     }
-    else {
+    else
+    {
         VLOG_ERR("We couldn't retrieve any open_vswitch table rows");
     }
 
@@ -167,6 +223,46 @@ char* vtysh_ovsdb_hostname_get() {
 /*
  * When exiting vtysh destroy the idl cache
  */
-void vtysh_ovsdb_exit(void) {
+void vtysh_ovsdb_exit(void)
+{
     ovsdb_idl_destroy(idl);
+}
+
+/* This API is for fetching contents from DB to Vtysh IDL cache
+   and to do initial setup before commiting changes to IDL cache.
+   Keeping the return value as boolean so that we can handle any error cases
+   in future. */
+boolean cli_do_config_start()
+{
+  ovsdb_idl_run(idl);
+  status_txn = ovsdb_idl_txn_create(idl);
+
+  if(status_txn == NULL)
+  {
+     assert(0);
+     return false;
+  }
+  return true;
+}
+
+/* This API is for pushing Vtysh IDL contents to DB */
+boolean cli_do_config_finish()
+{
+  enum ovsdb_idl_txn_status status;
+
+  status = ovsdb_idl_txn_commit(status_txn);
+  ovsdb_idl_txn_destroy(status_txn);
+  status_txn = NULL;
+
+  if ((status != TXN_SUCCESS) && (status != TXN_INCOMPLETE)
+      && (status != TXN_UNCHANGED))
+     return false;
+
+  return true;
+}
+
+
+void cli_do_config_abort()
+{
+  ovsdb_idl_txn_destroy(status_txn);
 }

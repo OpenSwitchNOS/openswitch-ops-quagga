@@ -85,8 +85,24 @@ static void
 bgp_unixctl_dump(struct unixctl_conn *conn, int argc OVS_UNUSED,
                           const char *argv[] OVS_UNUSED, void *aux OVS_UNUSED)
 {
-    unixctl_command_reply_error(conn, "Nothing to dump :)");
-    //unixctl_command_reply(conn, buf);
+    //unixctl_command_reply_error(conn, "Nothing to dump :)");
+#if 0
+    #define BUF_LEN 4000
+    #define REM_BUF_LEN (BUF_LEN - 1 - strlen(buf))
+    struct shash_node *sh_node;
+    char *buf = xcalloc(1, BUF_LEN);
+
+    static struct shash bgp_all = SHASH_INITIALIZER(&bgp_all);
+
+    SHASH_FOR_EACH(sh_node, &bgp_all) {
+        struct bgp *bgp = sh_node->data;
+        strncat(buf,"asn\t",REM_BUF_LEN);
+        strncat(buf,bgp->as,REM_BUF_LEN);
+        strncat(buf, "\n", REM_BUF_LEN);
+    }
+    unixctl_command_reply(conn, buf);
+    free(buf);
+#endif
 }
 
 static void
@@ -373,6 +389,40 @@ bgp_apply_global_changes (void)
     }
 }
 
+/* Subscribe for changes in the BGP_Router table */
+static void
+bgp_apply_bgp_router_changes(struct ovsdb_idl *idl) {
+    const struct ovsrec_bgp_router *bgp;
+    struct bgp *bgp_cfg;
+    as_t asn;
+    int bgp_ret_status;
+
+    bgp = ovsrec_bgp_router_first(idl);
+
+    /*
+     * Check if any table changes present.
+     * If no change just return from here
+     */
+    if (bgp && !OVSREC_IDL_ANY_TABLE_ROWS_INSERTED(bgp, idl_seqno)) {
+        VLOG_DBG("No BGP_Router changes on insertion");
+        return;
+    }
+    if (bgp == NULL) {
+        VLOG_DBG("BGP_Router Table doesn't have any entries!");
+        return;
+    }
+    else {
+        VLOG_INFO("bgp_asn : %d",bgp->asn);
+        OVSREC_BGP_ROUTER_FOR_EACH(bgp, idl) {
+            if (OVSREC_IDL_ANY_TABLE_ROWS_INSERTED(bgp, idl_seqno)) {
+                bgp_ret_status = bgp_get(&bgp_cfg, &bgp->asn, NULL);
+                VLOG_INFO("bgp->asn : %d, bgp_cfg->as : %d",
+                           bgp->asn,(int)(bgp_cfg->as));
+            }
+         }
+    }
+}
+
 /* Check idl seqno. to make sure there are updates to the idl
  * and update the local structures accordingly.
  */
@@ -389,6 +439,7 @@ bgp_reconfigure(struct ovsdb_idl *idl)
 
     /* Apply the changes */
     bgp_apply_global_changes();
+    bgp_apply_bgp_router_changes(idl);
 
     /* update the seq. number */
     idl_seqno = new_idl_seqno;
@@ -397,7 +448,7 @@ bgp_reconfigure(struct ovsdb_idl *idl)
 /* Wrapper function that checks for idl updates and reconfigures the daemon
  */
 static void
-bgp_ovs_run (void)
+bgp_ovs_run ()
 {
     ovsdb_idl_run(idl);
     unixctl_server_run(appctl);
@@ -413,10 +464,8 @@ bgp_ovs_run (void)
     }
 
     bgp_chk_for_system_configured();
-
     if (system_configured) {
         bgp_reconfigure(idl);
-
         daemonize_complete();
         vlog_enable_async();
         VLOG_INFO_ONCE("%s (Halon bgpd) %s", program_name, VERSION);

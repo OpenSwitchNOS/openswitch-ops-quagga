@@ -199,7 +199,7 @@ DEFUN(vtysh_show_ip_bgp,
 
 /* Installing command for "router bgp <asn>" */
 DEFUN(cli_router_bgp,
-      vtysh_router_bgp_cmd,
+      router_bgp_cmd,
       "router bgp " CMD_AS_RANGE,
       ROUTER_STR
       BGP_STR
@@ -217,6 +217,7 @@ bgp_router_set_asn(int64_t asn)
     static struct ovsdb_idl_txn *bgp_router_txn=NULL;
     enum ovsdb_idl_txn_status status;
     bool vrf_row_found=0;
+    int ret_status = 0;
     size_t i=0;
 
     ovsdb_idl_run(idl);
@@ -258,8 +259,14 @@ bgp_router_set_asn(int64_t asn)
                     ovsrec_bgp_router_set_asn(bgp_router_row,asn);
                 }
                 else {
+                    bgp_router_row = NULL;
                     OVSREC_BGP_ROUTER_FOR_EACH(bgp_router_row,idl) {
-                        if (!(bgp_router_row->asn==asn)) {
+                        if (bgp_router_row->asn==asn) {
+                            VLOG_DBG("Row exists for given asn = %d",
+                                bgp_router_row->asn);
+                            break;
+                        }
+                        else {
                             /* Create a new row with given asn in bgp router table */
                             bgp_router_row = ovsrec_bgp_router_insert(bgp_router_txn);
                             /* Insert BGP_router table reference in VRF table */
@@ -270,11 +277,13 @@ bgp_router_set_asn(int64_t asn)
                             }
                             bgp_routers_list[vrf_row->n_bgp_routers] = bgp_router_row;
                             ovsrec_vrf_set_bgp_routers(vrf_row, bgp_routers_list,
-                                                       vrf_row->n_bgp_routers + 1);
+                                                       (vrf_row->n_bgp_routers + 1));
                             free(bgp_routers_list);
                             /* Set the asn column in the BGP_Router table */
                             ovsrec_bgp_router_set_asn(bgp_router_row,asn);
+                            break;
                         }
+                        break;
                     }
                }
           }
@@ -282,14 +291,101 @@ bgp_router_set_asn(int64_t asn)
      status = ovsdb_idl_txn_commit_block(bgp_router_txn);
      ovsdb_idl_txn_destroy(bgp_router_txn);
      bgp_router_txn = NULL;
-     VLOG_INFO("%s Commit Status : %s", __FUNCTION__,
+     VLOG_DBG("%s Commit Status : %s", __FUNCTION__,
                ovsdb_idl_txn_status_to_string(status));
+     ret_status = ((status == TXN_SUCCESS) && (status == TXN_INCOMPLETE)
+          && (status == TXN_UNCHANGED));
+     return ret_status;
+}
 
-     return (status == TXN_SUCCESS);
+/* Installing command for "no router bgp <asn>" */
+DEFUN(cli_no_router_bgp,
+      no_router_bgp_cmd,
+      "no router bgp " CMD_AS_RANGE,
+      ROUTER_STR
+      BGP_STR
+      AS_STR)
+{
+  return no_bgp_router_asn(atoi(argv[0]));
+}
+
+int
+no_bgp_router_asn(int64_t asn)
+{
+    struct ovsrec_bgp_router *bgp_router_row = NULL;
+    struct ovsrec_bgp_router **bgp_routers_list;
+    const struct ovsrec_vrf *vrf_row = NULL;
+    static struct ovsdb_idl_txn *bgp_router_txn=NULL;
+    enum ovsdb_idl_txn_status status;
+    int ret_status = 0;
+    size_t i=0;
+
+    ovsdb_idl_run(idl);
+
+    if(!bgp_router_txn) {
+         bgp_router_txn = ovsdb_idl_txn_create(idl);
+         if (bgp_router_txn == NULL) {
+             VLOG_ERR("Transaction creation failed");
+             return TXN_ERROR;
+         }
+
+        vrf_row = ovsrec_vrf_first(idl);
+        if (vrf_row == NULL) {
+            VLOG_ERR("No VRF configured! No entries in BGP_Router Table");
+            return -1;
+        }
+
+        bgp_router_row = ovsrec_bgp_router_first(idl);
+        if (bgp_router_row == NULL) {
+            VLOG_ERR("Given asn doesn't exist! can't delete!!");
+            return -1;
+        }
+        else {
+            bgp_router_row = NULL;
+            OVSREC_BGP_ROUTER_FOR_EACH(bgp_router_row,idl) {
+                VLOG_DBG("Found the row!! "
+                         "bgp_router_row->asn : %d  asn = %d",
+                          bgp_router_row->asn, asn);
+                if (bgp_router_row->asn == asn) {
+                    /* Delete BGP_router table reference in VRF table */
+                    bgp_routers_list = xmalloc(sizeof *vrf_row->bgp_routers *
+                                              (vrf_row->n_bgp_routers - 1));
+                    for (i = 0; i < vrf_row->n_bgp_routers; i++) {
+                        if(bgp_router_row != vrf_row->bgp_routers[i]) {
+                            /* Found reference from VRF table */
+                            bgp_routers_list[i] = vrf_row->bgp_routers[i];
+                        }
+                        else {
+                            continue;
+                        }
+                    }
+                    bgp_routers_list[vrf_row->n_bgp_routers] = bgp_router_row;
+                    ovsrec_vrf_set_bgp_routers(vrf_row, bgp_routers_list,
+                                              (vrf_row->n_bgp_routers - 1));
+                    free(bgp_routers_list);
+                    /* Delete the bgp row for matching asn */
+                    ovsrec_bgp_router_delete(bgp_router_row);
+                    break;
+               }
+               else {
+                    continue;
+               }
+            }
+         }
+     }
+     status = ovsdb_idl_txn_commit_block(bgp_router_txn);
+     ovsdb_idl_txn_destroy(bgp_router_txn);
+     bgp_router_txn = NULL;
+     VLOG_DBG("%s Commit Status : %s", __FUNCTION__,
+               ovsdb_idl_txn_status_to_string(status));
+     ret_status = ((status == TXN_SUCCESS) && (status == TXN_INCOMPLETE)
+          && (status == TXN_UNCHANGED));
+     return ret_status;
 }
 
 void bgp_vty_init(void)
 {
     install_element (ENABLE_NODE, &vtysh_show_ip_bgp_cmd);
-    install_element (CONFIG_NODE, &vtysh_router_bgp_cmd);
+    install_element (CONFIG_NODE, &router_bgp_cmd);
+    install_element (CONFIG_NODE, &no_router_bgp_cmd);
 }

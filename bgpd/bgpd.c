@@ -35,6 +35,7 @@ Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 #include "plist.h"
 #include "linklist.h"
 #include "workqueue.h"
+#include "openvswitch/vlog.h"
 
 #include "bgpd/bgpd.h"
 #include "bgpd/bgp_table.h"
@@ -61,6 +62,8 @@ Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 #ifdef HAVE_SNMP
 #include "bgpd/bgp_snmp.h"
 #endif /* HAVE_SNMP */
+
+VLOG_DEFINE_THIS_MODULE(bgpd);
 
 /* BGP process wide configuration.  */
 static struct bgp_master bgp_master;
@@ -1946,7 +1949,6 @@ bgp_create (as_t *as, const char *name)
   struct bgp *bgp;
   afi_t afi;
   safi_t safi;
-
   if ( (bgp = XCALLOC (MTYPE_BGP, sizeof (struct bgp))) == NULL)
     return NULL;
   
@@ -1980,7 +1982,7 @@ bgp_create (as_t *as, const char *name)
   bgp->stalepath_time = BGP_DEFAULT_STALEPATH_TIME;
 
   bgp->as = *as;
-
+  VLOG_INFO("bgp->as : %d",(int)(bgp->as));
   if (name)
     bgp->name = strdup (name);
 
@@ -2033,7 +2035,6 @@ int
 bgp_get (struct bgp **bgp_val, as_t *as, const char *name)
 {
   struct bgp *bgp;
-
   /* Multiple instance check. */
   if (bgp_option_check (BGP_OPT_MULTIPLE_INSTANCE))
     {
@@ -2062,22 +2063,26 @@ bgp_get (struct bgp **bgp_val, as_t *as, const char *name)
 
       /* Get default BGP structure if exists. */
       bgp = bgp_get_default ();
-
       if (bgp)
 	{
 	  if (bgp->as != *as)
 	    {
-	      *as = bgp->as;
-	      return BGP_ERR_AS_MISMATCH;
+	         *as = bgp->as;
+	         return BGP_ERR_AS_MISMATCH;
 	    }
-	  *bgp_val = bgp;
-	  return 0;
+	    *bgp_val = bgp;
+	    return 0;
 	}
     }
 
-  bgp = bgp_create (as, name);
+    bgp = bgp_create (as, name);
+    VLOG_INFO("BGPD structure populated with database data"
+              "bgp->as : %d, *as : %d", bgp->as,(int)(*as));
+#if 0
+/* Uncomment it when added code for router_id */
   bgp_router_id_set(bgp, &router_id_zebra);
-  *bgp_val = bgp;
+#endif
+   *bgp_val = bgp;
 
   /* Create BGP server socket, if first instance.  */
   if (list_isempty(bm->bgp)

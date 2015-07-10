@@ -65,7 +65,7 @@ static bgp_ovsdb_t glob_bgp_ovs;
 COVERAGE_DEFINE(bgp_ovsdb_cnt);
 VLOG_DEFINE_THIS_MODULE(bgp_ovsdb_if);
 
-static struct ovsdb_idl *idl;
+struct ovsdb_idl *idl;
 static unsigned int idl_seqno;
 static char *appctl_path = NULL;
 static struct unixctl_server *appctl;

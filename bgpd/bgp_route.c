@@ -55,10 +55,13 @@ Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 #include "bgpd/bgp_zebra.h"
 #include "bgpd/bgp_vty.h"
 #include "bgpd/bgp_mpath.h"
-
+#include "bgpd/bgp_ovsdb_if.h"
+#include "vswitch-idl.h"
+#include "openhalon-idl.h"
 /* Extern from bgp_dump.c */
 extern const char *bgp_origin_str[];
 extern const char *bgp_origin_long_str[];
+extern struct ovsdb_idl *idl;
 
 static struct bgp_node *
 bgp_afi_node_get (struct bgp_table *table, afi_t afi, safi_t safi, struct prefix *p,
@@ -1558,6 +1561,234 @@ bgp_process_rsclient (struct work_queue *wq, void *data)
   return WQ_SUCCESS;
 }
 
+static const char *
+get_str_from_afi(u_char family)
+{
+    if (family == AF_INET)
+        return "ipv4";
+    else if (family == AF_INET6)
+        return "ipv6";
+    else
+        return NULL;
+}
+
+static const char *
+get_str_from_safi(safi_t safi)
+{
+    if (safi == SAFI_UNICAST)
+        return "unicast";
+    else if (safi == SAFI_MULTICAST)
+        return "multicast";
+    else if (safi == SAFI_MPLS_VPN)
+        return "vpn";
+    else
+        return NULL;
+}
+
+static int
+bgp_get_zebra_flags_announce(struct bgp_info *info)
+{
+    struct peer *peer = info->peer;
+    int flags = 0;
+    if (peer->sort == BGP_PEER_IBGP || peer->sort == BGP_PEER_CONFED)
+        {
+            SET_FLAG (flags, ZEBRA_FLAG_IBGP);
+            SET_FLAG (flags, ZEBRA_FLAG_INTERNAL);
+        }
+    if ((peer->sort == BGP_PEER_EBGP && peer->ttl != 1)
+        || CHECK_FLAG (peer->flags, PEER_FLAG_DISABLE_CONNECTED_CHECK))
+        SET_FLAG (flags, ZEBRA_FLAG_INTERNAL);
+    return flags;
+}
+
+static const struct ovsrec_vrf*
+get_bgp_vrf(struct bgp *bgp)
+{
+    const struct ovsrec_vrf *vrf = NULL;
+    struct ovsrec_bgp_router *bgp_router = NULL;
+    int ii;
+
+    vrf = xmalloc(sizeof(*vrf));
+    if (!vrf) {
+        zlog_err("Failed to allocate memory for RIB-VRF entry for bgp instance %d\n", 
+                 bgp->as);
+        return NULL;
+    }
+    OVSREC_VRF_FOR_EACH(vrf, idl) {
+        zlog_debug("%s: VRF (name %s) has %d BGP routers\n", __FUNCTION__,
+                   vrf->name, vrf->n_bgp_routers);
+        for (ii = 0; ii < vrf->n_bgp_routers; ii++) {
+            bgp_router = vrf->bgp_routers[ii];
+            if (bgp_router->asn == (int64_t)bgp->as) {
+                // bgp router found
+                return vrf;
+            }
+        }
+    } // 'if for each'
+    return NULL;
+}
+
+static int
+bgp_set_rib_protocol_specific_data(const struct ovsrec_rib *rib, struct bgp_info *info,
+                                   struct bgp *bgp)
+{
+    struct smap smap;
+    struct attr *attr;
+    
+    attr = info->attr;
+    smap_init(&smap);
+    smap_add_format(&smap,
+                    OVSDB_RIB_PROT_SPECIFIC_DATA_BGP_FLAGS,
+                    "%d",
+                    info->flags);
+    smap_add(&smap,
+             OVSDB_RIB_PROT_SPECIFIC_DATA_BGP_AS_PATH,
+             aspath_print(info->attr->aspath));
+    smap_add(&smap,
+             OVSDB_RIB_PROT_SPECIFIC_DATA_BGP_ORIGIN,
+             bgp_origin_str[info->attr->origin]);
+    smap_add_format(&smap,
+                    OVSDB_RIB_PROT_SPECIFIC_DATA_BGP_LOC_PREF,
+                    "%d",
+                    attr->local_pref);
+    ovsrec_rib_set_protocol_specific_data(rib, &smap);
+    smap_destroy(&smap);
+    return 0;
+}
+
+/*
+ * This function sets nexthop entries for a route in RIB table
+ */
+static int
+bgp_set_rib_nexthop(struct ovsdb_idl_txn *txn, const struct ovsrec_rib *rib, 
+                    struct prefix *p, struct bgp_info *info, int nexthop_num)
+{
+    struct bgp_info *mpinfo;
+    struct in_addr *nexthop;
+    struct ovsrec_nexthop **nexthop_list;
+    char nexthop_buf[INET6_ADDRSTRLEN];
+    struct ovsrec_nexthop *pnexthop = NULL;
+    
+    nexthop = &info->attr->nexthop;
+    nexthop_list = xmalloc(sizeof *rib->nexthop_list * nexthop_num);
+    // Set first nexthop
+    pnexthop = ovsrec_nexthop_insert(txn);
+    inet_ntop(p->family, &nexthop, nexthop_buf, sizeof(nexthop_buf));
+    ovsrec_nexthop_set_ip_address(pnexthop, nexthop_buf);
+    pnexthop->ip_address = xstrdup(nexthop_buf);
+    nexthop_list[0] = pnexthop;
+    
+    int ii = 1;
+    // Set multipath nexthops
+    for(mpinfo = bgp_info_mpath_first (info); mpinfo;
+        mpinfo = bgp_info_mpath_next (mpinfo))
+        {
+            // Update the nexthop table.
+            nexthop = &mpinfo->attr->nexthop;
+            inet_ntop(p->family, &nexthop, nexthop_buf, sizeof(nexthop_buf));
+            pnexthop = ovsrec_nexthop_insert(txn);
+            ovsrec_nexthop_set_ip_address(pnexthop, nexthop_buf);
+            pnexthop->ip_address = xstrdup(nexthop_buf);
+            nexthop_list[ii] = pnexthop;
+            ii++;
+        }
+    ovsrec_rib_set_nexthop_list(rib, nexthop_list, nexthop_num);
+    for (ii = 0; ii < nexthop_num; ii++)
+        free(nexthop_list[ii]->ip_address);
+    free(nexthop_list);
+    return 0;
+}
+
+
+
+/*
+ * This function adds BGP route to RIB table
+ */
+static int
+bgp_set_ovsdb_rib_entry(struct prefix *p, struct bgp_info *info,
+                        struct bgp *bgp, safi_t safi)
+{
+    const struct ovsrec_rib *rib = NULL;
+    struct ovsdb_idl_txn *txn = NULL;
+    char buf[INET6_ADDRSTRLEN];
+    const char *afi, *safi_str;
+    int64_t flags = 0, distance = 0, message = 0;
+    int64_t nexthop_num = 0, ifindex_num = 0;
+    const struct ovsrec_vrf *vrf = NULL;
+    enum ovsdb_idl_txn_status status;
+
+    if (!txn) {
+        txn = ovsdb_idl_txn_create(idl);
+        if (!txn) {
+            zlog_err("%s: Failed to create new transaction for RIB table\n", __FUNCTION__);
+            return -1;
+        }
+        rib = ovsrec_rib_insert(txn);
+        inet_ntop(p->family, &p->u.prefix, buf, sizeof(buf));
+        zlog_warn("W:Prefix = %s\n", buf);
+        zlog_debug("D:Prefix = %s\n", buf);
+        ovsrec_rib_set_prefix(rib, buf);
+        ovsrec_rib_set_prefix_len(rib, p->prefixlen);
+        afi= get_str_from_afi(p->family);
+        if (!afi) {
+            zlog_err ("Invalid address family for route %s/%d\n", buf, p->prefixlen);
+            return -1;
+        }
+        ovsrec_rib_set_address_family(rib, afi);
+        safi_str = get_str_from_safi(safi);
+        if (!safi_str) {
+            zlog_err ("Invalid sub-address family for route %s/%d\n", buf, p->prefixlen);
+            return -1;
+        }
+        ovsrec_rib_set_sub_address_family(rib, safi_str);
+        ovsrec_rib_set_from_protocol(rib, "BGP");
+        flags = bgp_get_zebra_flags_announce(info);
+        ovsrec_rib_set_flags(rib, flags);
+        
+        distance = bgp_distance_apply (p, info, bgp);
+        if (distance) {
+            SET_FLAG (message, OVSDB_RIB_MESSAGE_DISTANCE);
+            ovsrec_rib_set_distance(rib, distance);
+        }
+        SET_FLAG (message, OVSDB_RIB_MESSAGE_METRIC);
+        ovsrec_rib_set_metric(rib, info->attr->med);
+        // Nexthops
+        nexthop_num = 1 + bgp_info_mpath_count (info);
+        ovsrec_rib_set_next_num(rib, nexthop_num);
+        // Nexthop list
+        bgp_set_rib_nexthop(txn, rib, p, info, nexthop_num);
+        
+        // HALON_TODO: Add interface_list parameters for IPv6
+        ifindex_num = 0;
+        ovsrec_rib_set_ifindex_num(rib, ifindex_num);
+        if (CHECK_FLAG(info->flags, BGP_INFO_SELECTED)) {
+            ovsrec_rib_set_selected_for_RIB(rib, 1);
+        } else {
+            ovsrec_rib_set_selected_for_RIB(rib, 0);
+        }
+        ovsrec_rib_set_message(rib, message);
+        // Set up VRF
+        vrf = get_bgp_vrf(bgp);
+        if (!vrf) {
+            zlog_err("VRF entry not found for this route %s/%d, BGP router ASN %d\n", 
+                     buf, p->prefixlen, bgp->as);
+            return -1;
+        }
+        ovsrec_rib_set_vrf(rib, vrf);
+
+        // Set protocol specific data
+        bgp_set_rib_protocol_specific_data(rib, info, bgp);
+        
+    } // 'if txn'
+    status = ovsdb_idl_txn_commit(txn);
+    // HALON_TODO: 1. Need to handle txn error recovery.
+    // 2. Add batching
+    ovsdb_idl_txn_destroy(txn);
+    txn = NULL;
+
+    return ((status == TXN_SUCCESS) ? 0 : -1);
+}
+
 static wq_item_status
 bgp_process_main (struct work_queue *wq, void *data)
 {
@@ -1585,9 +1816,12 @@ bgp_process_main (struct work_queue *wq, void *data)
         {
           if (CHECK_FLAG (old_select->flags, BGP_INFO_IGP_CHANGED) ||
 	      CHECK_FLAG (old_select->flags, BGP_INFO_MULTIPATH_CHG))
+#ifndef ENABLE_OVSDB
             bgp_zebra_announce (p, old_select, bgp, safi);
-          
-	  UNSET_FLAG (old_select->flags, BGP_INFO_MULTIPATH_CHG);
+#else
+            bgp_set_ovsdb_rib_entry (p, old_select, bgp, safi);
+#endif
+          UNSET_FLAG (old_select->flags, BGP_INFO_MULTIPATH_CHG);
           UNSET_FLAG (rn->flags, BGP_NODE_PROCESS_SCHEDULED);
           return WQ_SUCCESS;
         }
@@ -1616,21 +1850,31 @@ bgp_process_main (struct work_queue *wq, void *data)
       if (new_select 
 	  && new_select->type == ZEBRA_ROUTE_BGP 
 	  && new_select->sub_type == BGP_ROUTE_NORMAL)
-	bgp_zebra_announce (p, new_select, bgp, safi);
+#ifndef ENABLE_OVSDB
+      bgp_zebra_announce (p, new_select, bgp, safi);
+#else
+      bgp_set_ovsdb_rib_entry (p, new_select, bgp, safi);
+#endif
       else
 	{
 	  /* Withdraw the route from the kernel. */
 	  if (old_select 
 	      && old_select->type == ZEBRA_ROUTE_BGP
-	      && old_select->sub_type == BGP_ROUTE_NORMAL)
-	    bgp_zebra_withdraw (p, old_select, safi);
+	      && old_select->sub_type == BGP_ROUTE_NORMAL) {
+#ifndef ENABLE_OVSDB
+          bgp_zebra_withdraw (p, old_select, safi);
+#else
+          bgp_set_ovsdb_rib_entry (p, old_select, bgp, safi);
+#endif
+      }
 	}
     }
     
   /* Reap old select bgp_info, it it has been removed */
   if (old_select && CHECK_FLAG (old_select->flags, BGP_INFO_REMOVED))
     bgp_info_reap (rn, old_select);
-  
+  // HALON_TODO: Remove old best route from OVSDB RIB
+
   UNSET_FLAG (rn->flags, BGP_NODE_PROCESS_SCHEDULED);
   return WQ_SUCCESS;
 }
@@ -6120,7 +6364,7 @@ route_vty_out_detail (struct vty *vty, struct bgp *bgp, struct prefix *p,
 }
 
 #define BGP_SHOW_SCODE_HEADER "Status codes: s suppressed, d damped, "\
-			      "h history, * valid, > best, = multipath,%s"\
+                           "h history, * valid, > best, = multipath,%s"\
 		"              i internal, r RIB-failure, S Stale, R Removed%s"
 #define BGP_SHOW_OCODE_HEADER "Origin codes: i - IGP, e - EGP, ? - incomplete%s%s"
 #define BGP_SHOW_HEADER "   Network          Next Hop            Metric LocPrf Weight Path%s"

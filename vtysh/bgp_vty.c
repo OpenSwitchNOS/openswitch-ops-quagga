@@ -50,9 +50,10 @@
 extern struct ovsdb_idl *idl;
 
 int bgp_router_set_asn(int64_t asn);
+#define NET_BUFSZ    19
 
 /* BGP Information flags taken from bgp_route.h
- * TODO: Remove this duplicate declaration. Need to separate 
+ * HALON_TODO: Remove this duplicate declaration. Need to separate
  * these flags from bgp_route.h
  */
 #define BGP_INFO_IGP_CHANGED    (1 << 0)
@@ -68,99 +69,131 @@ int bgp_router_set_asn(int64_t asn);
 #define BGP_INFO_COUNTED        (1 << 10)
 #define BGP_INFO_MULTIPATH      (1 << 11)
 #define BGP_INFO_MULTIPATH_CHG  (1 << 12)
+#define BGP_ATTR_DEFAULT_WEIGHT 32768
 
 #define BGP_SHOW_SCODE_HEADER "Status codes: s suppressed, d damped, "\
                               "h history, * valid, > best, = multipath,%s"\
-                              "i internal, r RIB-failure, S Stale, R Removed%s"
+    "              i internal, r RIB-failure, S Stale, R Removed%s"
 #define BGP_SHOW_OCODE_HEADER "Origin codes: i - IGP, e - EGP, ? - incomplete%s%s"
-#define BGP_SHOW_HEADER       "Network          Next Hop            Metric LocPrf Weight Path%s"
+#define BGP_SHOW_HEADER "   Network            Next Hop            Metric LocPrf Weight Path%s"
 VLOG_DEFINE_THIS_MODULE(bgp_vty);
+
+
+typedef struct rib_psd_bgp_s {
+    int flags;
+    char *aspath;
+    char *origin;
+    int local_pref;
+} rib_psd_bgp_t;
+
+static rib_psd_bgp_t prot_data;
 
 static void
 print_route_status(struct vty *vty, int64_t flags)
 {
   /* Route status display. */
-  if (flags & BGP_INFO_REMOVED)
-    vty_out (vty, "R");
-  else if (flags & BGP_INFO_STALE)
-    vty_out (vty, "S");
-/*else if (binfo->extra && binfo->extra->suppress)
-  vty_out (vty, "s");*/
-  else if (!(flags & BGP_INFO_HISTORY))
-    vty_out (vty, "*");
-  else
-    vty_out (vty, " ");
-
-  /* Selected */
-  if (flags & BGP_INFO_HISTORY)
-    vty_out (vty, "h");
-  else if (flags & BGP_INFO_DAMPED)
-    vty_out (vty, "d");
-  else if (flags & BGP_INFO_SELECTED)
-    vty_out (vty, ">");
-  else if (flags & BGP_INFO_MULTIPATH)
-    vty_out (vty, "=");
-  else
-    vty_out (vty, " ");
-
-  /* Internal route. TODO */
-  /*
-    if ((binfo->peer->as) && (binfo->peer->as == binfo->peer->local_as))
-      vty_out (vty, "i");
+    if (flags & BGP_INFO_REMOVED)
+        vty_out (vty, "R");
+    else if (flags & BGP_INFO_STALE)
+        vty_out (vty, "S");
+    /*else if (binfo->extra && binfo->extra->suppress)
+      vty_out (vty, "s");*/
+    else if (!(flags & BGP_INFO_HISTORY))
+        vty_out (vty, "*");
     else
-    vty_out (vty, " "); */
+        vty_out (vty, " ");
+    /* Selected */
+    if (flags & BGP_INFO_HISTORY)
+        vty_out (vty, "h");
+    else if (flags & BGP_INFO_DAMPED)
+        vty_out (vty, "d");
+    else if (flags & BGP_INFO_SELECTED)
+        vty_out (vty, ">");
+    else if (flags & BGP_INFO_MULTIPATH)
+        vty_out (vty, "=");
+    else
+        vty_out (vty, " ");
+    /* Internal route. HALON_TODO */
+    /*
+      if ((binfo->peer->as) && (binfo->peer->as == binfo->peer->local_as))
+      vty_out (vty, "i");
+      else
+      vty_out (vty, " "); */
+}
+
+static void
+get_rib_protocol_specific_data(const struct ovsrec_rib *rib_row, rib_psd_bgp_t *data)
+{
+    assert(data);
+    memset(data, 0, sizeof(*data));
+
+    data->flags = smap_get_int(&rib_row->protocol_specific_data,
+                               OVSDB_RIB_PROT_SPECIFIC_DATA_BGP_FLAGS, 0);
+    data->aspath = smap_get(&rib_row->protocol_specific_data,
+                            OVSDB_RIB_PROT_SPECIFIC_DATA_BGP_AS_PATH);
+    data->origin = smap_get(&rib_row->protocol_specific_data,
+                            OVSDB_RIB_PROT_SPECIFIC_DATA_BGP_ORIGIN);
+    data->local_pref = smap_get_int(&rib_row->protocol_specific_data,
+                                    OVSDB_RIB_PROT_SPECIFIC_DATA_BGP_LOC_PREF, 0);
+    return;
 }
 
 /* Function to print route status code */
 static void show_routes (struct vty *vty)
 {
-  const struct ovsrec_rib *ribRow = NULL;
-  int ii;
+    const struct ovsrec_rib *rib_row = NULL;
+    int ii;
+    const struct ovsrec_nexthop *nexthop_row = NULL;
+    rib_psd_bgp_t psd, *ppsd = NULL;
+    ppsd = &psd;
+    // Read BGP routes from RIB table
+    OVSREC_RIB_FOR_EACH(rib_row, idl) {
+        if (strcmp(rib_row->from_protocol, OVSREC_RIB_FROM_PROTOCOL_BGP))
+            continue;
 
-  // Read RIB flags column from RIB table
-  OVSREC_RIB_FOR_EACH(ribRow, idl) {
-    if (!ribRow)
-      continue;
-    print_route_status(vty, ribRow->flags);
-    if (ribRow->prefix) {
-      char str[17] ;
-      int len = 0;
-      len = snprintf(str, sizeof(str), " %s/%d", ribRow->prefix, ribRow->prefix_len);
-      vty_out(vty, "%s", str);
-      if (len < 18)
-	vty_out (vty, "%*s", 18-len, " ");
-
-      // nexthop
-      if (!strcmp(ribRow->address_family, OVSREC_RIB_ADDRESS_FAMILY_IPV4)) {
-	if (ribRow->n_nexthop_list) {
-	  // Get the nexthop list
-	  //VLOG_INFO("No. of next hops : %d", ribRow->n_nexthop_list);
-	  const struct ovsdb_datum *datum = NULL;
-	  datum = ovsrec_rib_get_nexthop_list(ribRow, OVSDB_TYPE_STRING);
-	  for (ii = 0; ii < ribRow->n_nexthop_list; ii++) {
-	    vty_out (vty, "%-16s", datum->keys[ii].string);
-	  }
-	} else {
-	  vty_out (vty, "%-16s", " ");
-	  syslog(LOG_DEBUG, "%s:No next hops for this route\n", __FUNCTION__);
-	} // if 'ribRow->n_nexthop_list'
-	
-      } else {
-	// TODO ipv6
-	VLOG_INFO("Address family not supported\n");
-      }
-      vty_out (vty, "%10d", ribRow->metric);
-      // TODO weight, local pref, aspath
-      vty_out (vty, "%7d", 0);
-      vty_out (vty, "%7d ", 0);
-      vty_out(vty, "%s", " ");
-      // print origin
-      if (ribRow->from_protocol)
-	vty_out(vty, "%s", ribRow->from_protocol);
-      vty_out (vty, VTY_NEWLINE);
+        get_rib_protocol_specific_data(rib_row, ppsd);
+        print_route_status(vty, ppsd->flags);
+        if (rib_row->prefix) {
+            char str[NET_BUFSZ];
+            int len = 0;
+            len = snprintf(str, sizeof(str), " %s/%d", rib_row->prefix, rib_row->prefix_len);
+            vty_out(vty, "%s", str);
+            if (len < NET_BUFSZ)
+                vty_out (vty, "%*s", NET_BUFSZ+1-len, " ");
+            // nexthop
+            if (!strcmp(rib_row->address_family, OVSREC_RIB_ADDRESS_FAMILY_IPV4)) {
+                if (rib_row->n_nexthop_list) {
+                    // Get the nexthop list
+                    //VLOG_INFO("No. of next hops : %d", rib_row->n_nexthop_list);
+                    for (ii = 0; ii < rib_row->n_nexthop_list; ii++) {
+                        nexthop_row = rib_row->nexthop_list[ii];
+                        vty_out (vty, "%-16s", nexthop_row->ip_address);
+                    }
+                } else {
+                    vty_out (vty, "%-16s", " ");
+                    VLOG_INFO("%s:No next hops for this route\n", __FUNCTION__);
+                } // if 'rib_row->n_nexthop_list'
+            } else {
+                // HALON_TODO: Add ipv6 later
+                VLOG_INFO("Address family not supported\n");
+            }
+            vty_out (vty, "%10d", rib_row->metric);
+            // Print local preference
+            vty_out (vty, "%7d", ppsd->local_pref);
+            // HALON_TODO: Need to decide how to get weight for route
+            // Print weight
+            vty_out (vty, "%7d ", BGP_ATTR_DEFAULT_WEIGHT);
+            // Print AS path
+            if (ppsd->aspath) {
+                vty_out(vty, "%s", ppsd->aspath);
+                vty_out(vty, " ");
+            }
+            // print origin
+            if (ppsd->origin)
+                vty_out(vty, "%s", ppsd->origin);
+            vty_out (vty, VTY_NEWLINE);
+        }
     }
-
-  }
 }
 
 DEFUN(vtysh_show_ip_bgp,
@@ -170,31 +203,28 @@ DEFUN(vtysh_show_ip_bgp,
       IP_STR
       BGP_STR)
 {
-
-  // TODO
-  const struct ovsrec_bgp_router *bgpRow = NULL;
-  ovsdb_idl_run(idl);
-  ovsdb_idl_wait(idl);
-  
-  vty_out (vty, "BGP table version is 0\n", VTY_NEWLINE);
-  vty_out (vty, BGP_SHOW_SCODE_HEADER, VTY_NEWLINE, VTY_NEWLINE);
-  vty_out (vty, BGP_SHOW_OCODE_HEADER, VTY_NEWLINE, VTY_NEWLINE);
-  
-  OVSREC_BGP_ROUTER_FOR_EACH(bgpRow, idl) {
-    if (!bgpRow) {
-      vty_out(vty, "No bgp instance configured");
-      continue;
+    const struct ovsrec_bgp_router *bgp_row = NULL;
+    ovsdb_idl_run(idl);
+    ovsdb_idl_wait(idl);
+    vty_out (vty, BGP_SHOW_SCODE_HEADER, VTY_NEWLINE, VTY_NEWLINE);
+    vty_out (vty, BGP_SHOW_OCODE_HEADER, VTY_NEWLINE, VTY_NEWLINE);
+    bgp_row = ovsrec_rib_first(idl);
+    if (!bgp_row) {
+        vty_out(vty, "No bgp instance configured\n");
+        return CMD_SUCCESS;
     }
-    char *id = bgpRow->router_id;
-    if (id) {
-      vty_out (vty, "Local router-id %s\n", id); 
-    } else {
-      vty_out (vty, "Router-id not configured");
+    vty_out (vty, "BGP table version is 0\n", VTY_NEWLINE);
+    OVSREC_BGP_ROUTER_FOR_EACH(bgp_row, idl) {
+        char *id = bgp_row->router_id;
+        if (id) {
+            vty_out (vty, "Local router-id %s\n", id);
+        } else {
+            vty_out (vty, "Router-id not configured\n");
+        }
     }
-  }
-  vty_out (vty, BGP_SHOW_HEADER, VTY_NEWLINE);
-  show_routes(vty);
-  return CMD_SUCCESS;
+    vty_out (vty, BGP_SHOW_HEADER, VTY_NEWLINE);
+    show_routes(vty);
+    return CMD_SUCCESS;
 }
 
 /* Installing command for "router bgp <asn>" */

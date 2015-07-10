@@ -90,8 +90,6 @@ bgp_ovsdb_init(struct ovsdb_idl *idl)
   ovsdb_idl_add_column(idl, &ovsrec_rib_col_selected_for_RIB);
   ovsdb_idl_add_column(idl, &ovsrec_rib_col_distance);
   ovsdb_idl_add_column(idl, &ovsrec_rib_col_metric);
-  
-  
 }
 
 /*
@@ -133,6 +131,15 @@ ovsdb_init(const char *db_path)
     // BGP tables
     ovsdb_idl_add_table(idl, &ovsrec_table_bgp_router);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_asn);
+
+    // Nexthop table
+    ovsdb_idl_add_table(idl, &ovsrec_table_nexthop);
+    ovsdb_idl_add_column(idl, &ovsrec_nexthop_col_ip_address);
+    ovsdb_idl_add_column(idl, &ovsrec_nexthop_col_status);
+    ovsdb_idl_add_column(idl, &ovsrec_nexthop_col_weight);
+    ovsdb_idl_add_column(idl, &ovsrec_nexthop_col_port);
+    ovsdb_idl_add_column(idl, &ovsrec_nexthop_col_other_config);
+    ovsdb_idl_add_column(idl, &ovsrec_nexthop_col_external_ids);
 
     vtysh_run();
 }

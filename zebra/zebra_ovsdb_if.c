@@ -104,6 +104,25 @@ ovsdb_init (const char *db_path)
     ovsdb_idl_add_column(idl, &ovsrec_open_vswitch_col_cur_cfg);
     ovsdb_idl_add_column(idl, &ovsrec_open_vswitch_col_hostname);
 
+    /* Register for RIB table */
+    /* We need to register for columns to really get rows in the idl */
+    ovsdb_idl_add_table(idl, &ovsrec_table_rib);
+    ovsdb_idl_add_column(idl, &ovsrec_rib_col_prefix);
+    ovsdb_idl_add_column(idl, &ovsrec_rib_col_prefix_len);
+    ovsdb_idl_add_column(idl, &ovsrec_rib_col_address_family);
+    ovsdb_idl_add_column(idl, &ovsrec_rib_col_distance);
+    ovsdb_idl_add_column(idl, &ovsrec_rib_col_metric);
+    ovsdb_idl_add_column(idl, &ovsrec_rib_col_from_protocol);
+    ovsdb_idl_add_column(idl, &ovsrec_rib_col_sub_address_family);
+    ovsdb_idl_add_column(idl, &ovsrec_rib_col_nexthop_list);
+
+    /* Register for NextHop table */
+    ovsdb_idl_add_table(idl, &ovsrec_table_nexthop);
+    ovsdb_idl_add_column(idl, &ovsrec_nexthop_col_ip_address);
+    ovsdb_idl_add_column(idl, &ovsrec_nexthop_col_port);
+    ovsdb_idl_add_column(idl, &ovsrec_nexthop_col_weight);
+    ovsdb_idl_add_column(idl, &ovsrec_nexthop_col_status);
+
     /* Register ovs-appctl commands for this daemon. */
     unixctl_command_register("zebra/dump", "", 0, 0, zebra_unixctl_dump, NULL);
 }
@@ -301,6 +320,223 @@ zebra_apply_global_changes (void)
     }
 }
 
+bool is_rib_nh_rows_modified(const struct ovsrec_rib *rib)
+{
+    const struct ovsrec_nexthop *nexthop;
+    int index;
+
+    for(index=0; index < rib->n_nexthop_list; index++)
+    {
+        nexthop = rib->nexthop_list[index];
+        if ( (OVSREC_IDL_IS_ROW_INSERTED(nexthop, idl_seqno)) ||
+             (OVSREC_IDL_IS_ROW_MODIFIED(nexthop, idl_seqno)) )
+        {
+             return 1;
+        }
+    }
+
+    return 0;
+}
+
+bool is_rib_nh_rows_deleted(const struct ovsrec_rib *rib)
+{
+    const struct ovsrec_nexthop *nexthop;
+
+    nexthop = rib->nexthop_list[0];
+    if ( ( nexthop != NULL ) &&
+         ( OVSREC_IDL_ANY_TABLE_ROWS_DELETED(nexthop, idl_seqno) ) )
+    {
+        return 1;
+    }
+
+    return 0;
+}
+
+/* static route. */
+static void
+zebra_handle_rib_change(const struct ovsrec_rib *rib, int action)
+{
+  const struct ovsrec_nexthop *nexthop;
+  struct prefix p;
+  struct in_addr gate;
+  struct in6_addr ipv6_gate;
+  const char *ifname = NULL;
+  char prefix_str[256];
+  u_char flag = 0;
+  u_char distance;
+  safi_t safi = 0;
+  u_char type = 0;
+  int ipv6_addr_type = 0;
+  int ret;
+
+  VLOG_INFO("Rib prefix_str=%s len=%d", rib->prefix, rib->prefix_len);
+  memset(prefix_str, 0, sizeof(prefix_str));
+  snprintf(prefix_str, 255, "%s/%d", rib->prefix, rib->prefix_len);
+
+  VLOG_INFO("Rib prefix_str=%s", prefix_str);
+
+  /* Convert the prefix/len */
+  ret = str2prefix (prefix_str, &p);
+  if (ret <= 0)
+  {
+      VLOG_INFO ("Malformed Dest address=%s", prefix_str);
+      return;
+  }
+
+  /* Apply mask for given prefix. */
+  VLOG_INFO("Applying Mask");
+  apply_mask (&p);
+
+  /* Get Nexthop ip/interface */
+  VLOG_INFO("Read nexthop %d", rib->n_nexthop_list);
+  nexthop = rib->nexthop_list[0];
+  if (nexthop == NULL)
+  {
+      VLOG_INFO ("Null next hop");
+      return;
+  }
+
+  VLOG_INFO("!!!!***address_family %s", rib->address_family);
+  if (strcmp(rib->address_family, OVSREC_RIB_ADDRESS_FAMILY_IPV6) == 0)
+  {
+      ipv6_addr_type = 1;
+  }
+
+  if (nexthop->port)
+  {
+      ifname = nexthop->port;
+      VLOG_INFO("Rib nexthop ifname=%s", ifname);
+      if (ipv6_addr_type)
+      {
+          type = STATIC_IPV6_IFNAME;
+      }
+  }
+  else if (nexthop->ip_address)
+  {
+      VLOG_INFO("Checking nexthop ip");
+      if (ipv6_addr_type)
+      {
+          ret = inet_pton (AF_INET6, nexthop->ip_address, &ipv6_gate);
+      }
+      else
+      {
+          ret = inet_aton(nexthop->ip_address, &gate);
+      }
+
+      if (ret == 1)
+      {
+	  type = STATIC_IPV6_GATEWAY;
+          VLOG_INFO("Rib nexthop ip=%s", nexthop->ip_address);
+      }
+      else
+      {
+          VLOG_INFO("BAD! Rib nexthop ip=%s", nexthop->ip_address);
+          return;
+      }
+  }
+  else
+  {
+      VLOG_INFO("BAD! No nexthop ip or iface");
+      return;
+  }
+
+  VLOG_INFO("Checking sub-address-family=%s", rib->sub_address_family);
+  if (strcmp(rib->sub_address_family,
+             OVSREC_RIB_SUB_ADDRESS_FAMILY_UNICAST) == 0)
+  {
+      safi = SAFI_UNICAST;
+  }
+  else
+  {
+      VLOG_INFO("BAD! Not valid sub-address-family=%s",
+                rib->sub_address_family);
+      return;
+  }
+
+  distance = nexthop->weight;
+  if (action)
+  {
+      VLOG_INFO("Calling add .....");
+      if (ipv6_addr_type)
+      {
+          static_add_ipv6 (&p, type, &ipv6_gate, ifname, flag, distance, 0);
+      }
+      else
+      {
+          static_add_ipv4_safi (safi, &p, ifname ? NULL : &gate, ifname,
+                                flag, distance, 0);
+      }
+  }
+  else
+  {
+      VLOG_INFO("Calling delete .....");
+      if (ipv6_addr_type)
+      {
+          static_delete_ipv6 (&p, type, &gate, ifname, distance, 0);
+      }
+      else
+      {
+          static_delete_ipv4_safi (safi, &p, ifname ? NULL : &gate, ifname,
+                               distance, 0);
+      }
+  }
+
+  return;
+}
+
+static void
+zebra_apply_rib_changes (void)
+{
+    const struct ovsrec_rib *rib_first;
+
+    VLOG_INFO("In zebra_apply_rib_changes");
+    rib_first = ovsrec_rib_first(idl);
+    if (rib_first == NULL)
+    {
+        VLOG_INFO("No rows in RIB table");
+        return;
+    }
+
+    if ( (!OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED(rib_first, idl_seqno)) &&
+       (!OVSREC_IDL_ANY_TABLE_ROWS_DELETED(rib_first, idl_seqno))  &&
+       (!OVSREC_IDL_ANY_TABLE_ROWS_INSERTED(rib_first, idl_seqno)) )
+    {
+        VLOG_INFO("No modification in RIB table");
+        return;
+    }
+
+    if ( (OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED(rib_first, idl_seqno)) &&
+       (OVSREC_IDL_ANY_TABLE_ROWS_INSERTED(rib_first, idl_seqno)) )
+    {
+        const struct ovsrec_rib *rib_row;
+        const struct ovsrec_nexthop *nh_row;
+        VLOG_INFO("Some modification or inserts in RIB table");
+        OVSREC_RIB_FOR_EACH(rib_row, idl)
+        {
+            nh_row = rib_row->nexthop_list[0];
+            if (nh_row == NULL)
+            {
+                VLOG_INFO ("Null next hop");
+                continue;
+            }
+
+            if ( (OVSREC_IDL_IS_ROW_INSERTED(rib_row, idl_seqno)) ||
+                 (OVSREC_IDL_IS_ROW_MODIFIED(rib_row, idl_seqno)) ||
+                 (is_rib_nh_rows_modified(rib_row)) )
+            {
+                VLOG_INFO("Row modification or inserts in RIB table");
+                zebra_handle_rib_change(rib_row, 1);
+            }
+        }
+    }
+
+    if ( (OVSREC_IDL_ANY_TABLE_ROWS_DELETED(rib_first, idl_seqno) ) ||
+       ( is_rib_nh_rows_deleted( rib_first ) ) )
+    {
+        VLOG_INFO("Some deletes in RIB table");
+    }
+}
+
 /* Check if any changes are there to the idl and update
  * the local structures accordingly.
  */
@@ -317,6 +553,8 @@ zebra_reconfigure(struct ovsdb_idl *idl)
 
     /* Apply the changes */
     zebra_apply_global_changes();
+
+    zebra_apply_rib_changes();
 
     /* update the seq. number */
     idl_seqno = new_idl_seqno;

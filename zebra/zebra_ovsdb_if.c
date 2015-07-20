@@ -104,23 +104,21 @@ ovsdb_init (const char *db_path)
     ovsdb_idl_add_column(idl, &ovsrec_open_vswitch_col_cur_cfg);
     ovsdb_idl_add_column(idl, &ovsrec_open_vswitch_col_hostname);
 
-    /* Register for RIB table */
+    /* Register for ROUTE table */
     /* We need to register for columns to really get rows in the idl */
-    ovsdb_idl_add_table(idl, &ovsrec_table_rib);
-    ovsdb_idl_add_column(idl, &ovsrec_rib_col_prefix);
-    ovsdb_idl_add_column(idl, &ovsrec_rib_col_prefix_len);
-    ovsdb_idl_add_column(idl, &ovsrec_rib_col_address_family);
-    ovsdb_idl_add_column(idl, &ovsrec_rib_col_distance);
-    ovsdb_idl_add_column(idl, &ovsrec_rib_col_metric);
-    ovsdb_idl_add_column(idl, &ovsrec_rib_col_from_protocol);
-    ovsdb_idl_add_column(idl, &ovsrec_rib_col_sub_address_family);
-    ovsdb_idl_add_column(idl, &ovsrec_rib_col_nexthop_list);
+    ovsdb_idl_add_table(idl, &ovsrec_table_route);
+    ovsdb_idl_add_column(idl, &ovsrec_route_col_prefix);
+    ovsdb_idl_add_column(idl, &ovsrec_route_col_address_family);
+    ovsdb_idl_add_column(idl, &ovsrec_route_col_distance);
+    ovsdb_idl_add_column(idl, &ovsrec_route_col_metric);
+    ovsdb_idl_add_column(idl, &ovsrec_route_col_from);
+    ovsdb_idl_add_column(idl, &ovsrec_route_col_sub_address_family);
+    ovsdb_idl_add_column(idl, &ovsrec_route_col_nexthops);
 
     /* Register for NextHop table */
     ovsdb_idl_add_table(idl, &ovsrec_table_nexthop);
     ovsdb_idl_add_column(idl, &ovsrec_nexthop_col_ip_address);
-    ovsdb_idl_add_column(idl, &ovsrec_nexthop_col_port);
-    ovsdb_idl_add_column(idl, &ovsrec_nexthop_col_weight);
+    ovsdb_idl_add_column(idl, &ovsrec_nexthop_col_ports);
     ovsdb_idl_add_column(idl, &ovsrec_nexthop_col_status);
 
     /* Register ovs-appctl commands for this daemon. */
@@ -320,14 +318,14 @@ zebra_apply_global_changes (void)
     }
 }
 
-bool is_rib_nh_rows_modified(const struct ovsrec_rib *rib)
+bool is_route_nh_rows_modified(const struct ovsrec_route *route)
 {
     const struct ovsrec_nexthop *nexthop;
     int index;
 
-    for(index=0; index < rib->n_nexthop_list; index++)
+    for(index=0; index < route->n_nexthops; index++)
     {
-        nexthop = rib->nexthop_list[index];
+        nexthop = route->nexthops[index];
         if ( (OVSREC_IDL_IS_ROW_INSERTED(nexthop, idl_seqno)) ||
              (OVSREC_IDL_IS_ROW_MODIFIED(nexthop, idl_seqno)) )
         {
@@ -338,11 +336,11 @@ bool is_rib_nh_rows_modified(const struct ovsrec_rib *rib)
     return 0;
 }
 
-bool is_rib_nh_rows_deleted(const struct ovsrec_rib *rib)
+bool is_route_nh_rows_deleted(const struct ovsrec_route *route)
 {
     const struct ovsrec_nexthop *nexthop;
 
-    nexthop = rib->nexthop_list[0];
+    nexthop = route->nexthops[0];
     if ( ( nexthop != NULL ) &&
          ( OVSREC_IDL_ANY_TABLE_ROWS_DELETED(nexthop, idl_seqno) ) )
     {
@@ -354,7 +352,7 @@ bool is_rib_nh_rows_deleted(const struct ovsrec_rib *rib)
 
 /* static route. */
 static void
-zebra_handle_rib_change(const struct ovsrec_rib *rib, int action)
+zebra_handle_route_change(const struct ovsrec_route *route, int action)
 {
   const struct ovsrec_nexthop *nexthop;
   struct prefix p;
@@ -369,9 +367,9 @@ zebra_handle_rib_change(const struct ovsrec_rib *rib, int action)
   int ipv6_addr_type = 0;
   int ret;
 
-  VLOG_INFO("Rib prefix_str=%s len=%d", rib->prefix, rib->prefix_len);
+  VLOG_INFO("Rib prefix_str=%s len=%d", route->prefix);
   memset(prefix_str, 0, sizeof(prefix_str));
-  snprintf(prefix_str, 255, "%s/%d", rib->prefix, rib->prefix_len);
+  snprintf(prefix_str, 255, "%s", route->prefix);
 
   VLOG_INFO("Rib prefix_str=%s", prefix_str);
 
@@ -388,23 +386,23 @@ zebra_handle_rib_change(const struct ovsrec_rib *rib, int action)
   apply_mask (&p);
 
   /* Get Nexthop ip/interface */
-  VLOG_INFO("Read nexthop %d", rib->n_nexthop_list);
-  nexthop = rib->nexthop_list[0];
+  VLOG_INFO("Read nexthop %d", route->n_nexthops);
+  nexthop = route->nexthops[0];
   if (nexthop == NULL)
   {
       VLOG_INFO ("Null next hop");
       return;
   }
 
-  VLOG_INFO("!!!!***address_family %s", rib->address_family);
-  if (strcmp(rib->address_family, OVSREC_RIB_ADDRESS_FAMILY_IPV6) == 0)
+  VLOG_INFO("!!!!***address_family %s", route->address_family);
+  if (strcmp(route->address_family, OVSREC_ROUTE_ADDRESS_FAMILY_IPV6) == 0)
   {
       ipv6_addr_type = 1;
   }
 
-  if (nexthop->port)
+  if (nexthop->ports)
   {
-      ifname = nexthop->port;
+      ifname = nexthop->ports;
       VLOG_INFO("Rib nexthop ifname=%s", ifname);
       if (ipv6_addr_type)
       {
@@ -440,20 +438,20 @@ zebra_handle_rib_change(const struct ovsrec_rib *rib, int action)
       return;
   }
 
-  VLOG_INFO("Checking sub-address-family=%s", rib->sub_address_family);
-  if (strcmp(rib->sub_address_family,
-             OVSREC_RIB_SUB_ADDRESS_FAMILY_UNICAST) == 0)
+  VLOG_INFO("Checking sub-address-family=%s", route->sub_address_family);
+  if (strcmp(route->sub_address_family,
+             OVSREC_ROUTE_SUB_ADDRESS_FAMILY_UNICAST) == 0)
   {
       safi = SAFI_UNICAST;
   }
   else
   {
       VLOG_INFO("BAD! Not valid sub-address-family=%s",
-                rib->sub_address_family);
+                route->sub_address_family);
       return;
   }
 
-  distance = nexthop->weight;
+  distance = route->distance;
   if (action)
   {
       VLOG_INFO("Calling add .....");
@@ -472,7 +470,7 @@ zebra_handle_rib_change(const struct ovsrec_rib *rib, int action)
       VLOG_INFO("Calling delete .....");
       if (ipv6_addr_type)
       {
-          static_delete_ipv6 (&p, type, &gate, ifname, distance, 0);
+          static_delete_ipv6 (&p, type, &ipv6_gate, ifname, distance, 0);
       }
       else
       {
@@ -485,55 +483,55 @@ zebra_handle_rib_change(const struct ovsrec_rib *rib, int action)
 }
 
 static void
-zebra_apply_rib_changes (void)
+zebra_apply_route_changes (void)
 {
-    const struct ovsrec_rib *rib_first;
+    const struct ovsrec_route *route_first;
 
-    VLOG_INFO("In zebra_apply_rib_changes");
-    rib_first = ovsrec_rib_first(idl);
-    if (rib_first == NULL)
+    VLOG_INFO("In zebra_apply_route_changes");
+    route_first = ovsrec_route_first(idl);
+    if (route_first == NULL)
     {
-        VLOG_INFO("No rows in RIB table");
+        VLOG_INFO("No rows in ROUTE table");
         return;
     }
 
-    if ( (!OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED(rib_first, idl_seqno)) &&
-       (!OVSREC_IDL_ANY_TABLE_ROWS_DELETED(rib_first, idl_seqno))  &&
-       (!OVSREC_IDL_ANY_TABLE_ROWS_INSERTED(rib_first, idl_seqno)) )
+    if ( (!OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED(route_first, idl_seqno)) &&
+       (!OVSREC_IDL_ANY_TABLE_ROWS_DELETED(route_first, idl_seqno))  &&
+       (!OVSREC_IDL_ANY_TABLE_ROWS_INSERTED(route_first, idl_seqno)) )
     {
-        VLOG_INFO("No modification in RIB table");
+        VLOG_INFO("No modification in ROUTE table");
         return;
     }
 
-    if ( (OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED(rib_first, idl_seqno)) &&
-       (OVSREC_IDL_ANY_TABLE_ROWS_INSERTED(rib_first, idl_seqno)) )
+    if ( (OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED(route_first, idl_seqno)) &&
+       (OVSREC_IDL_ANY_TABLE_ROWS_INSERTED(route_first, idl_seqno)) )
     {
-        const struct ovsrec_rib *rib_row;
+        const struct ovsrec_route *route_row;
         const struct ovsrec_nexthop *nh_row;
-        VLOG_INFO("Some modification or inserts in RIB table");
-        OVSREC_RIB_FOR_EACH(rib_row, idl)
+        VLOG_INFO("Some modification or inserts in ROUTE table");
+        OVSREC_ROUTE_FOR_EACH(route_row, idl)
         {
-            nh_row = rib_row->nexthop_list[0];
+            nh_row = route_row->nexthops[0];
             if (nh_row == NULL)
             {
                 VLOG_INFO ("Null next hop");
                 continue;
             }
 
-            if ( (OVSREC_IDL_IS_ROW_INSERTED(rib_row, idl_seqno)) ||
-                 (OVSREC_IDL_IS_ROW_MODIFIED(rib_row, idl_seqno)) ||
-                 (is_rib_nh_rows_modified(rib_row)) )
+            if ( (OVSREC_IDL_IS_ROW_INSERTED(route_row, idl_seqno)) ||
+                 (OVSREC_IDL_IS_ROW_MODIFIED(route_row, idl_seqno)) ||
+                 (is_route_nh_rows_modified(route_row)) )
             {
-                VLOG_INFO("Row modification or inserts in RIB table");
-                zebra_handle_rib_change(rib_row, 1);
+                VLOG_INFO("Row modification or inserts in ROUTE table");
+                zebra_handle_route_change(route_row, 1);
             }
         }
     }
 
-    if ( (OVSREC_IDL_ANY_TABLE_ROWS_DELETED(rib_first, idl_seqno) ) ||
-       ( is_rib_nh_rows_deleted( rib_first ) ) )
+    if ( (OVSREC_IDL_ANY_TABLE_ROWS_DELETED(route_first, idl_seqno) ) ||
+       ( is_route_nh_rows_deleted( route_first ) ) )
     {
-        VLOG_INFO("Some deletes in RIB table");
+        VLOG_INFO("Some deletes in ROUTE table");
     }
 }
 
@@ -554,7 +552,7 @@ zebra_reconfigure(struct ovsdb_idl *idl)
     /* Apply the changes */
     zebra_apply_global_changes();
 
-    zebra_apply_rib_changes();
+    zebra_apply_route_changes();
 
     /* update the seq. number */
     idl_seqno = new_idl_seqno;

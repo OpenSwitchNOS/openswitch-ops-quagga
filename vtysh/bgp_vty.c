@@ -81,12 +81,12 @@ VLOG_DEFINE_THIS_MODULE(bgp_vty);
 
 typedef struct rib_psd_bgp_s {
     int flags;
-    char *aspath;
-    char *origin;
+    const char *aspath;
+    const char *origin;
     int local_pref;
 } rib_psd_bgp_t;
 
-static rib_psd_bgp_t prot_data;
+
 
 static void
 print_route_status(struct vty *vty, int64_t flags)

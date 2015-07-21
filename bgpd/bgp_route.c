@@ -1629,7 +1629,7 @@ get_bgp_vrf(struct bgp *bgp)
 }
 
 static int
-bgp_set_rib_protocol_specific_data(const struct ovsrec_rib *rib, struct bgp_info *info,
+bgp_set_rib_protocol_specific_data(const struct ovsrec_route *rib, struct bgp_info *info,
                                    struct bgp *bgp)
 {
     struct smap smap;
@@ -1651,7 +1651,7 @@ bgp_set_rib_protocol_specific_data(const struct ovsrec_rib *rib, struct bgp_info
                     OVSDB_RIB_PROT_SPECIFIC_DATA_BGP_LOC_PREF,
                     "%d",
                     attr->local_pref);
-    ovsrec_rib_set_protocol_specific_data(rib, &smap);
+    ovsrec_route_set_protocol_specific(rib, &smap);
     smap_destroy(&smap);
     return 0;
 }
@@ -1660,7 +1660,7 @@ bgp_set_rib_protocol_specific_data(const struct ovsrec_rib *rib, struct bgp_info
  * This function sets nexthop entries for a route in RIB table
  */
 static int
-bgp_set_rib_nexthop(struct ovsdb_idl_txn *txn, const struct ovsrec_rib *rib, 
+bgp_set_rib_nexthop(struct ovsdb_idl_txn *txn, const struct ovsrec_route *rib,
                     struct prefix *p, struct bgp_info *info, int nexthop_num)
 {
     struct bgp_info *mpinfo;
@@ -1670,7 +1670,7 @@ bgp_set_rib_nexthop(struct ovsdb_idl_txn *txn, const struct ovsrec_rib *rib,
     struct ovsrec_nexthop *pnexthop = NULL;
     
     nexthop = &info->attr->nexthop;
-    nexthop_list = xmalloc(sizeof *rib->nexthop_list * nexthop_num);
+    nexthop_list = xmalloc(sizeof *rib->nexthops * nexthop_num);
     // Set first nexthop
     pnexthop = ovsrec_nexthop_insert(txn);
     inet_ntop(p->family, &nexthop, nexthop_buf, sizeof(nexthop_buf));
@@ -1692,7 +1692,7 @@ bgp_set_rib_nexthop(struct ovsdb_idl_txn *txn, const struct ovsrec_rib *rib,
             nexthop_list[ii] = pnexthop;
             ii++;
         }
-    ovsrec_rib_set_nexthop_list(rib, nexthop_list, nexthop_num);
+    ovsrec_route_set_nexthops(rib, nexthop_list, nexthop_num);
     for (ii = 0; ii < nexthop_num; ii++)
         free(nexthop_list[ii]->ip_address);
     free(nexthop_list);
@@ -1708,14 +1708,15 @@ static int
 bgp_set_ovsdb_rib_entry(struct prefix *p, struct bgp_info *info,
                         struct bgp *bgp, safi_t safi)
 {
-    const struct ovsrec_rib *rib = NULL;
+    const struct ovsrec_route *rib = NULL;
     struct ovsdb_idl_txn *txn = NULL;
-    char buf[INET6_ADDRSTRLEN];
+    char buf[INET6_ADDRSTRLEN], pr[INET6_ADDRSTRLEN];
     const char *afi, *safi_str;
-    int64_t flags = 0, distance = 0, message = 0;
+    int64_t distance = 0, message = 0;
     int64_t nexthop_num = 0, ifindex_num = 0;
     const struct ovsrec_vrf *vrf = NULL;
     enum ovsdb_idl_txn_status status;
+    bool prot_priv = 0;
 
     if (!txn) {
         txn = ovsdb_idl_txn_create(idl);
@@ -1723,50 +1724,52 @@ bgp_set_ovsdb_rib_entry(struct prefix *p, struct bgp_info *info,
             zlog_err("%s: Failed to create new transaction for RIB table\n", __FUNCTION__);
             return -1;
         }
-        rib = ovsrec_rib_insert(txn);
+        rib = ovsrec_route_insert(txn);
         inet_ntop(p->family, &p->u.prefix, buf, sizeof(buf));
         zlog_warn("W:Prefix = %s\n", buf);
         zlog_debug("D:Prefix = %s\n", buf);
-        ovsrec_rib_set_prefix(rib, buf);
-        ovsrec_rib_set_prefix_len(rib, p->prefixlen);
+        snprintf(pr, sizeof(pr), "%s/%d", buf, p->prefixlen);
+        ovsrec_route_set_prefix(rib, pr);
         afi= get_str_from_afi(p->family);
         if (!afi) {
             zlog_err ("Invalid address family for route %s/%d\n", buf, p->prefixlen);
             return -1;
         }
-        ovsrec_rib_set_address_family(rib, afi);
+        ovsrec_route_set_address_family(rib, afi);
         safi_str = get_str_from_safi(safi);
         if (!safi_str) {
             zlog_err ("Invalid sub-address family for route %s/%d\n", buf, p->prefixlen);
             return -1;
         }
-        ovsrec_rib_set_sub_address_family(rib, safi_str);
-        ovsrec_rib_set_from_protocol(rib, "BGP");
+        ovsrec_route_set_sub_address_family(rib, safi_str);
+        ovsrec_route_set_from(rib, "BGP");
+        // HALON_TODO
+#if 0
         flags = bgp_get_zebra_flags_announce(info);
-        ovsrec_rib_set_flags(rib, flags);
-        
+        ovsrec_route_set_flags(rib, flags);
+#endif
         distance = bgp_distance_apply (p, info, bgp);
         if (distance) {
             SET_FLAG (message, OVSDB_RIB_MESSAGE_DISTANCE);
-            ovsrec_rib_set_distance(rib, distance);
+            ovsrec_route_set_distance(rib, &distance, 1);
         }
         SET_FLAG (message, OVSDB_RIB_MESSAGE_METRIC);
-        ovsrec_rib_set_metric(rib, info->attr->med);
+        ovsrec_route_set_metric(rib, &info->attr->med, 1);
         // Nexthops
         nexthop_num = 1 + bgp_info_mpath_count (info);
-        ovsrec_rib_set_next_num(rib, nexthop_num);
         // Nexthop list
         bgp_set_rib_nexthop(txn, rib, p, info, nexthop_num);
         
-        // HALON_TODO: Add interface_list parameters for IPv6
-        ifindex_num = 0;
-        ovsrec_rib_set_ifindex_num(rib, ifindex_num);
         if (CHECK_FLAG(info->flags, BGP_INFO_SELECTED)) {
-            ovsrec_rib_set_selected_for_RIB(rib, 1);
+            prot_priv = 0;
         } else {
-            ovsrec_rib_set_selected_for_RIB(rib, 0);
+            prot_priv = 1;
         }
-        ovsrec_rib_set_message(rib, message);
+        ovsrec_route_set_protocol_private(rib, &prot_priv, 1);
+        // HALON_TODO
+#if 0
+        ovsrec_route_set_message(rib, message);
+#endif
         // Set up VRF
         vrf = get_bgp_vrf(bgp);
         if (!vrf) {
@@ -1774,7 +1777,7 @@ bgp_set_ovsdb_rib_entry(struct prefix *p, struct bgp_info *info,
                      buf, p->prefixlen, bgp->as);
             return -1;
         }
-        ovsrec_rib_set_vrf(rib, vrf);
+        ovsrec_route_set_vrf(rib, vrf);
 
         // Set protocol specific data
         bgp_set_rib_protocol_specific_data(rib, info, bgp);

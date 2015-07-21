@@ -152,24 +152,17 @@ bgp_ovsdb_tables_init(struct ovsdb_idl *idl)
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_timers);
     
     /* RIB table */
-    ovsdb_idl_add_table(idl, &ovsrec_table_rib);
-    ovsdb_idl_add_column(idl, &ovsrec_rib_col_prefix);
-    ovsdb_idl_add_column(idl, &ovsrec_rib_col_prefix_len);
-    ovsdb_idl_add_column(idl, &ovsrec_rib_col_from_protocol);
-    ovsdb_idl_add_column(idl, &ovsrec_rib_col_nexthop_list);
-    ovsdb_idl_add_column(idl, &ovsrec_rib_col_address_family);
-    ovsdb_idl_add_column(idl, &ovsrec_rib_col_sub_address_family);
-    ovsdb_idl_add_column(idl, &ovsrec_rib_col_protocol_specific_data);
-    ovsdb_idl_add_column(idl, &ovsrec_rib_col_flags);
-    ovsdb_idl_add_column(idl, &ovsrec_rib_col_selected_for_RIB);
-    ovsdb_idl_add_column(idl, &ovsrec_rib_col_selected_to_FIB);
-    ovsdb_idl_add_column(idl, &ovsrec_rib_col_distance);
-    ovsdb_idl_add_column(idl, &ovsrec_rib_col_metric);
-    ovsdb_idl_add_column(idl, &ovsrec_rib_col_ifindex_num);
-    ovsdb_idl_add_column(idl, &ovsrec_rib_col_message);
-    ovsdb_idl_add_column(idl, &ovsrec_rib_col_vrf);
-    ovsdb_idl_add_column(idl, &ovsrec_rib_col_interface_list);
-    ovsdb_idl_add_column(idl, &ovsrec_rib_col_next_num);
+    ovsdb_idl_add_table(idl, &ovsrec_table_route);
+    ovsdb_idl_add_column(idl, &ovsrec_route_col_prefix);
+    ovsdb_idl_add_column(idl, &ovsrec_route_col_from);
+    ovsdb_idl_add_column(idl, &ovsrec_route_col_nexthops);
+    ovsdb_idl_add_column(idl, &ovsrec_route_col_sub_address_family);
+    ovsdb_idl_add_column(idl, &ovsrec_route_col_protocol_specific);
+    ovsdb_idl_add_column(idl, &ovsrec_route_col_selected);
+    ovsdb_idl_add_column(idl, &ovsrec_route_col_protocol_private);
+    ovsdb_idl_add_column(idl, &ovsrec_route_col_distance);
+    ovsdb_idl_add_column(idl, &ovsrec_route_col_metric);
+    ovsdb_idl_add_column(idl, &ovsrec_route_col_vrf);
 }
 
 /* Create a connection to the OVSDB at db_path and create a dB cache

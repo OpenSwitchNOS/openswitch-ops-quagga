@@ -112,43 +112,38 @@ bgp_ovsdb_tables_init(struct ovsdb_idl *idl)
     ovsdb_idl_add_table(idl, &ovsrec_table_bgp_router);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_asn);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_router_id);
-    ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_status);
-    ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_neighbors);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_redistribute);
-    ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_graceful_restart);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_gr_stale_timer);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_always_compare_med);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_other_config);
-    ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_bestpath);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_status);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_external_ids);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_networks);
     
     /* BGP neighbor table */
     ovsdb_idl_add_table(idl, &ovsrec_table_bgp_neighbor);
-    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_activate);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_active);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_weight);
-    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_to_bgp_peer_group);
-    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_to_bgp_router);
-    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_shutdown);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_bgp_peer_group);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_bgp_router);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_strict_capability_match);
-    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_port);
-    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_soft_reconfiguration);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_tcp_port_number);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_inbound_soft_reconfiguration);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_statistics);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_remote_as);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_override_capability);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_passive);
-    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_maximum_prefix);
-    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_peer_id);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_maximum_prefix_limit);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_name);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_status);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_description);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_local_as);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_advertisement_interval);
-    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_interface);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_local_interface);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_external_ids);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_password);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_other_config);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_capability);
-    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_send_community);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_timers);
     
     /* RIB table */

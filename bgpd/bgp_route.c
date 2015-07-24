@@ -1614,6 +1614,7 @@ get_bgp_vrf(struct bgp *bgp)
                  bgp->as);
         return NULL;
     }
+#if 0
     OVSREC_VRF_FOR_EACH(vrf, idl) {
         zlog_debug("%s: VRF (name %s) has %d BGP routers\n", __FUNCTION__,
                    vrf->name, vrf->n_bgp_routers);
@@ -1625,6 +1626,7 @@ get_bgp_vrf(struct bgp *bgp)
             }
         }
     } // 'if for each'
+#endif // 0
     return NULL;
 }
 

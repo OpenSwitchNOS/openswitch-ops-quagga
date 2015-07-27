@@ -20,7 +20,7 @@ libbgp_a_SOURCES = \
 	bgp_dump.c bgp_snmp.c bgp_ecommunity.c bgp_mplsvpn.c bgp_nexthop.c \
 	bgp_damp.c bgp_table.c bgp_advertise.c bgp_vty.c bgp_mpath.c
 if ENABLE_OVSDB
-libbgp_a_SOURCES += bgp_ovsdb_if.c
+libbgp_a_SOURCES += bgp_ovsdb_if.c bgp_ovsdb_route.c
 endif
 
 noinst_HEADERS = \
@@ -30,7 +30,7 @@ noinst_HEADERS = \
 	bgp_ecommunity.h bgp_mplsvpn.h bgp_nexthop.h bgp_damp.h bgp_table.h \
 	bgp_advertise.h bgp_snmp.h bgp_vty.h bgp_mpath.h
 if ENABLE_OVSDB
-noinst_HEADERS += bgp_ovsdb_if.h
+noinst_HEADERS += bgp_ovsdb_if.h bgp_ovsdb_route.h
 endif
 
 bgpd_SOURCES = bgp_main.c

@@ -50,6 +50,7 @@
 #include "bgpd/bgp_regex.h"
 #include "bgpd/bgp_mpath.h"
 #include "bgpd/bgp_ovsdb_route.h"
+#include "openvswitch/vlog.h"
 
 extern struct ovsdb_idl *idl;
 extern const char *bgp_origin_str[];
@@ -58,6 +59,7 @@ extern const char *bgp_origin_long_str[];
 static struct ovsdb_idl_txn *rib_txn = NULL;
 
 #define PREFIX_MAXLEN    50
+VLOG_DEFINE_THIS_MODULE(bgp_ovsdb_route);
 
 /* Structure definition for protocol specific data (psd) column in the
  * OVSDB Route table. These fields are owned by bgpd and shared
@@ -98,7 +100,7 @@ get_str_from_safi(safi_t safi)
 }
 
 
-static const struct ovsrec_vrf*
+const struct ovsrec_vrf*
 bgp_ovsdb_get_vrf(struct bgp *bgp)
 {
     const struct ovsrec_bgp_router *bgp_row = NULL;
@@ -167,6 +169,22 @@ bgp_ovsdb_set_rib_protocol_specific_data(const struct ovsrec_route *rib,
     return 0;
 }
 
+static const struct ovsrec_nexthop*
+bgp_ovsdb_lookup_nexthop(char *ip)
+{
+    const struct ovsrec_nexthop *row = NULL;
+    if (!ip)
+        assert(0);
+
+    OVSREC_NEXTHOP_FOR_EACH(row, idl) {
+        if (strcmp(ip, row->ip_address) == 0) {
+            /* Match */
+            return row;
+        }
+    }
+    return NULL;
+}
+
 /*
  * This function sets nexthop entries for a route in Route table
  */
@@ -181,17 +199,22 @@ bgp_ovsdb_set_rib_nexthop(struct ovsdb_idl_txn *txn,
     struct in_addr *nexthop;
     struct ovsrec_nexthop **nexthop_list;
     char nexthop_buf[INET6_ADDRSTRLEN];
-    struct ovsrec_nexthop *pnexthop = NULL;
+    const struct ovsrec_nexthop *pnexthop = NULL;
     bool selected;
 
     nexthop = &info->attr->nexthop;
     nexthop_list = xmalloc(sizeof *rib->nexthops * nexthop_num);
     // Set first nexthop
-    pnexthop = ovsrec_nexthop_insert(txn);
     inet_ntop(p->family, &nexthop, nexthop_buf, sizeof(nexthop_buf));
-    ovsrec_nexthop_set_ip_address(pnexthop, nexthop_buf);
-    pnexthop->ip_address = xstrdup(nexthop_buf);
+    pnexthop = bgp_ovsdb_lookup_nexthop(nexthop_buf);
+    if (!pnexthop) {
+        pnexthop = ovsrec_nexthop_insert(txn);
+        ovsrec_nexthop_set_ip_address(pnexthop, nexthop_buf);
+    }
+    selected = 1;
+    ovsrec_nexthop_set_selected(pnexthop, &selected, 1);
     nexthop_list[0] = pnexthop;
+    nexthop_list[0]->ip_address = xstrdup(nexthop_buf);
 
     int ii = 1;
     // Set multipath nexthops
@@ -201,12 +224,15 @@ bgp_ovsdb_set_rib_nexthop(struct ovsdb_idl_txn *txn,
             // Update the nexthop table.
             nexthop = &mpinfo->attr->nexthop;
             inet_ntop(p->family, &nexthop, nexthop_buf, sizeof(nexthop_buf));
-            pnexthop = ovsrec_nexthop_insert(txn);
-            ovsrec_nexthop_set_ip_address(pnexthop, nexthop_buf);
+            pnexthop = bgp_ovsdb_lookup_nexthop(nexthop_buf);
+            if (!pnexthop) {
+                pnexthop = ovsrec_nexthop_insert(txn);
+                ovsrec_nexthop_set_ip_address(pnexthop, nexthop_buf);
+            }
             selected = 1;
             ovsrec_nexthop_set_selected(pnexthop, &selected, 1);
-            pnexthop->ip_address = xstrdup(nexthop_buf);
             nexthop_list[ii] = pnexthop;
+            nexthop_list[ii]->ip_address = xstrdup(nexthop_buf);
             ii++;
         }
     ovsrec_route_set_nexthops(rib, nexthop_list, nexthop_num);
@@ -271,12 +297,12 @@ bgp_ovsdb_lookup_rib_entry(struct prefix *p,
 
         afi= get_str_from_afi(p->family);
         if (!afi) {
-            zlog_err ("Invalid address family for route %s\n", pr);
+            VLOG_ERR ("Invalid address family for route %s\n", pr);
             continue;
         }
         safi_str = get_str_from_safi(safi);
         if (!safi_str) {
-            zlog_err ("Invalid sub-address family for route %s\n", pr);
+            VLOG_ERR ("Invalid sub-address family for route %s\n", pr);
             continue;
         }
         if ((strcmp(pr, rib_row->prefix) == 0)
@@ -310,7 +336,7 @@ bgp_ovsdb_withdraw_rib_entry(struct prefix *p,
     if (create_txn) {
         txn = ovsdb_idl_txn_create(idl);
         if (!txn) {
-            zlog_err("%s: Failed to create new transaction for Route table\n",
+            VLOG_ERR("%s: Failed to create new transaction for Route table\n",
                      __FUNCTION__);
             return -1;
         }
@@ -318,7 +344,7 @@ bgp_ovsdb_withdraw_rib_entry(struct prefix *p,
     prefix2str(p, pr, sizeof(pr));
     rib_row = bgp_ovsdb_lookup_rib_entry(p, info, bgp, safi);
     if (CHECK_FLAG(info->flags, BGP_INFO_SELECTED)) {
-        zlog_err("%s:BGP info flag is set to selected, cannot withdraw route %s",
+        VLOG_ERR("%s:BGP info flag is set to selected, cannot withdraw route %s",
                  __FUNCTION__, pr);
         return -1;
     }
@@ -331,7 +357,7 @@ bgp_ovsdb_withdraw_rib_entry(struct prefix *p,
         status = ovsdb_idl_txn_commit(txn);
         ovsdb_idl_txn_destroy(txn);
         if (status != TXN_SUCCESS) {
-            zlog_err("%s: Failed to withdraw route %s, status %d\n",
+            VLOG_ERR("%s: Failed to withdraw route %s, status %d\n",
                      __FUNCTION__, pr, status);
             return -1;
         }
@@ -359,7 +385,7 @@ bgp_ovsdb_announce_rib_entry(struct prefix *p,
     if (create_txn) {
         txn = ovsdb_idl_txn_create(idl);
         if (!txn) {
-            zlog_err("%s: Failed to create new transaction for Route table\n",
+            VLOG_ERR("%s: Failed to create new transaction for Route table\n",
                      __FUNCTION__);
             return -1;
         }
@@ -367,7 +393,7 @@ bgp_ovsdb_announce_rib_entry(struct prefix *p,
     prefix2str(p, pr, sizeof(pr));
     rib_row = bgp_ovsdb_lookup_rib_entry(p, info, bgp, safi);
     if (!CHECK_FLAG(info->flags, BGP_INFO_SELECTED)) {
-        zlog_err("%s:BGP info flag is not set to selected, cannot \
+        VLOG_ERR("%s:BGP info flag is not set to selected, cannot \
 announce route %s",
                  __FUNCTION__, pr);
         return -1;
@@ -381,7 +407,7 @@ announce route %s",
         status = ovsdb_idl_txn_commit(txn);
         ovsdb_idl_txn_destroy(txn);
         if (status != TXN_SUCCESS) {
-            zlog_err("%s: Failed to announce route %s, status %d\n",
+            VLOG_ERR("%s: Failed to announce route %s, status %d\n",
                      __FUNCTION__, pr, status);
             return -1;
         }
@@ -407,7 +433,7 @@ bgp_ovsdb_delete_rib_entry(struct prefix *p,
     if (create_txn) {
         txn = ovsdb_idl_txn_create(idl);
         if (!txn) {
-            zlog_err("%s: Failed to create new transaction for Route table\n",
+            VLOG_ERR("%s: Failed to create new transaction for Route table\n",
                      __FUNCTION__);
             return -1;
         }
@@ -415,7 +441,7 @@ bgp_ovsdb_delete_rib_entry(struct prefix *p,
     prefix2str(p, pr, sizeof(pr));
     rib_row = bgp_ovsdb_lookup_rib_entry(p, info, bgp, safi);
     if (CHECK_FLAG(info->flags, BGP_INFO_SELECTED)) {
-        zlog_err("%s:BGP info flag is set to selected, cannot \
+        VLOG_ERR("%s:BGP info flag is set to selected, cannot \
 remove route %s",
                  __FUNCTION__, pr);
         return -1;
@@ -426,7 +452,7 @@ remove route %s",
         status = ovsdb_idl_txn_commit(txn);
         ovsdb_idl_txn_destroy(txn);
         if (status != TXN_SUCCESS) {
-            zlog_err("%s: Failed to remove route %s, status %d\n",
+            VLOG_ERR("%s: Failed to remove route %s, status %d\n",
                      __FUNCTION__, pr, status);
             return -1;
         }
@@ -457,7 +483,7 @@ bgp_ovsdb_add_rib_entry(struct prefix *p,
     if (create_txn) {
         txn = ovsdb_idl_txn_create(idl);
         if (!txn) {
-            zlog_err("%s: Failed to create new transaction for Route table\n",
+            VLOG_ERR("%s: Failed to create new transaction for Route table\n",
                      __FUNCTION__);
             return -1;
         }
@@ -469,13 +495,13 @@ bgp_ovsdb_add_rib_entry(struct prefix *p,
 
     afi= get_str_from_afi(p->family);
     if (!afi) {
-        zlog_err ("Invalid address family for route %s\n", pr);
+        VLOG_ERR ("Invalid address family for route %s\n", pr);
         return -1;
     }
     ovsrec_route_set_address_family(rib, afi);
     safi_str = get_str_from_safi(safi);
     if (!safi_str) {
-        zlog_err ("Invalid sub-address family for route %s\n", pr);
+        VLOG_ERR ("Invalid sub-address family for route %s\n", pr);
         return -1;
     }
     ovsrec_route_set_sub_address_family(rib, safi_str);
@@ -501,7 +527,7 @@ bgp_ovsdb_add_rib_entry(struct prefix *p,
     // Set up VRF
     vrf = bgp_ovsdb_get_vrf(bgp);
     if (!vrf) {
-        zlog_err("VRF entry not found for this route %s, BGP router ASN %d\n",
+        VLOG_ERR("VRF entry not found for this route %s, BGP router ASN %d\n",
                  pr, bgp->as);
         return -1;
     }
@@ -513,7 +539,7 @@ bgp_ovsdb_add_rib_entry(struct prefix *p,
         // HALON_TODO: Need to handle txn error recovery.
         ovsdb_idl_txn_destroy(txn);
         if (status != TXN_SUCCESS) {
-            zlog_err("%s: Failed to add route %s, status %d\n",
+            VLOG_ERR("%s: Failed to add route %s, status %d\n",
                      __FUNCTION__, pr, status);
             return -1;
         }
@@ -531,7 +557,7 @@ bgp_ovsdb_rib_txn_create(void)
     }
     txn = ovsdb_idl_txn_create(idl);
     if (!txn) {
-        zlog_err("%s: Failed to create new transaction for Route table\n",
+        VLOG_ERR("%s: Failed to create new transaction for Route table\n",
                  __FUNCTION__);
         assert(0);
     }
@@ -549,7 +575,7 @@ bgp_ovsdb_rib_txn_commit(void)
     ovsdb_idl_txn_destroy(rib_txn);
     rib_txn = NULL;
     if (status != TXN_SUCCESS) {
-        zlog_err("%s: Failed to commit Route transactions, status %d\n",
+        VLOG_ERR("%s: Failed to commit Route transactions, status %d\n",
                  __FUNCTION__, status);
         return -1;
     }

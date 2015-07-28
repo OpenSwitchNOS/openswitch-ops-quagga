@@ -33,6 +33,9 @@ struct bgp_info;
 struct prefix;
 struct bgp;
 
+extern const struct ovsrec_vrf*
+bgp_ovsdb_get_vrf(struct bgp *bgp);
+
 extern const struct ovsrec_route*
 bgp_ovsdb_lookup_rib_entry(struct prefix *p, struct bgp_info *info,
                            struct bgp *bgp, safi_t safi);

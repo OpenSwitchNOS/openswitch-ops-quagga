@@ -302,6 +302,85 @@ class demoTest( HalonTest ):
 
         info('\n******IPv6 Ping completed******\n')
 
+    def testV4_route_delete(self):
+        h1 = self.net.hosts[ 0 ]
+        h2 = self.net.hosts[ 1 ]
+        s1 = self.net.switches[ 0 ]
+
+        info( '\n********* Running test ipv4 route delete on sw1 ********\n')
+        # Ping host2 from host1
+        info( '\n*** Ping host1 from host2 ***\n')
+        ret = h1.cmd("ping -c 1 10.0.30.1")
+
+        sent, received = demoTest._parsePing(ret)
+
+        #return code means whether the test is successful
+        if sent == received:
+            info('Ping Passed!\n\n')
+        else:
+            info('Ping Failed!\n\n')
+            #return False
+
+        # Delete IPv4 route on switch1 towards host2 network
+        info( '\n*** Delete ip route on sw1 to h2 network ***\n')
+        s1.cmdCLI("no ip route 10.0.30.0/24 10.0.20.2")
+
+        time.sleep(2)
+        # Ping host1 from host2
+        info( '\n*** Ping host1 from host2, it should fail ***\n')
+        ret = h1.cmd("ping -c 1 10.0.30.1")
+
+        sent, received = demoTest._parsePing(ret)
+        # Test successful if ping fails
+        if received == 0:
+            info('Success: Ping Failed!\n\n')
+        else:
+            info('Failed: Ping Successful!\n\n')
+            #return False
+
+        info('\n********IPv4 route delete test completed******\n')
+
+    def testV6_route_delete(self):
+        h1 = self.net.hosts[ 0 ]
+        h2 = self.net.hosts[ 1 ]
+        s1 = self.net.switches[ 0 ]
+
+        info( '\n******* Running test ipv6 route delete on sw1 ********\n')
+
+        # Ping host1 from host2
+        info( '*** Ping host1 from host2 ***\n')
+        ret = h1.cmd("ping6 -c 1 2002::1")
+
+        sent, received = demoTest._parsePing(ret)
+
+        # Return code means whether the test is successful
+        if sent == received:
+            info('Ping Passed!\n\n')
+        else:
+            info('Ping Failed!\n\n')
+            #return False
+
+        # Delete IPv6 route to host2 on switch1
+        info( '\n*** Delete ipv6 route on sw1 to h2 network ***\n')
+        s1.cmdCLI("no ipv6 route 2002::0/120 2001::2")
+
+        time.sleep(2)
+        # Ping host1 from host2
+        info( '\n*** Ping host1 from host2, it should fail ***\n')
+        ret = h1.cmd("ping6 -c 1 2002::1")
+
+        sent, received = demoTest._parsePing(ret)
+
+        # Test successful if ping fails
+        if received == 0:
+            info('Success: Ping Failed!\n\n')
+        else:
+            info('Failed: Ping Successful!\n\n')
+            #return False
+
+        info('\n********IPv6 route delete test completed******\n')
+
+
 class Test_vtysh_static_routes:
 
     # Create a test topology.
@@ -323,6 +402,16 @@ class Test_vtysh_static_routes:
     def test_testV6(self):
         # Function to test V6 ping
         self.test.testV6()
+        #CLI(self.test.net)
+
+    def test_testV4_route_delete(self):
+        # Function to test V4 route delete
+        self.test.testV4_route_delete()
+        #CLI(self.test.net)
+
+    def test_testV6_route_delete(self):
+        # Function to test V6 route delete
+        self.test.testV6_route_delete()
         #CLI(self.test.net)
 
     def __del__(self):

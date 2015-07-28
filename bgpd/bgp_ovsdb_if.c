@@ -114,13 +114,14 @@ bgp_ovsdb_tables_init(struct ovsdb_idl *idl)
     ovsdb_idl_add_table(idl, &ovsrec_table_bgp_router);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_asn);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_router_id);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_networks);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_vrf);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_redistribute);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_gr_stale_timer);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_always_compare_med);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_other_config);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_status);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_external_ids);
-    ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_networks);
     
     /* BGP neighbor table */
     ovsdb_idl_add_table(idl, &ovsrec_table_bgp_neighbor);

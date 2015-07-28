@@ -3728,7 +3728,7 @@ bgp_static_withdraw_vpnv4 (struct bgp *bgp, struct prefix *p, afi_t afi,
 
 /* Configure static BGP network.  When user don't run zebra, static
    route should be installed as valid.  */
-static int
+int
 bgp_static_set (struct vty *vty, struct bgp *bgp, const char *ip_str, 
                 afi_t afi, safi_t safi, const char *rmap, int backdoor)
 {

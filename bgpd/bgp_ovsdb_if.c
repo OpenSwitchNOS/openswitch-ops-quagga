@@ -75,8 +75,6 @@ static int system_configured = false;
 
 
 boolean exiting = false;
-
-
 static int bgp_ovspoll_enqueue (bgp_ovsdb_t *bovs_g);
 static int bovs_read_cb (struct thread *thread);
 
@@ -561,77 +559,44 @@ bgp_apply_bgp_router_changes(struct ovsdb_idl *idl) {
     }
 }
 
-static void
-delete_all_bgp_neighbors (void)
-{
-}
-
-static void
-delete_all_bgp_peer_groups (void)
-{
-}
-
-static void
-create_new_bgp_peer_group (struct ovsrec_bgp_neighbor *bgpn)
-{
-}
-
-static void
-create_new_bgp_neighbor (struct ovsrec_bgp_neighbor *bgpn)
-{
-}
-
 /*
 ** Process potential changes in the BGP_Neighbor table
 */
 static void
 bgp_apply_bgp_neighbor_changes (struct ovsdb_idl *idl)
 {
-    struct ovsrec_bgp_neighbor *bgpn;
-    bool row_deleted, something_changed;
-
-    bgpn = ovsrec_bgp_neighbor_first(idl);
-
-    /* if no entries, delete everything to sync with db */
-    if (!bgpn) {
-	VLOG_DBG("bgp neighbor table is empty, cleaning all neighbors");
-	delete_all_bgp_neighbors();
-	delete_all_bgp_peer_groups();
-	return;
-    }
+    struct ovsrec_bgp_neighbor *ovs_bgp;
+    struct bgp *bgp_instance;
+    bool modified;
 
     /*
-    ** Note that when a row gets deleted, we cannot find which one
-    ** since it is no longer in the table.  We have to find which
-    ** actual row by comparing what is in the db against what is
-    ** in the bgpd, one by one.  Therefore, delete is treated
-    ** in a special way.
-    **
-    ** The logic below ensures that if *any* changes have occured,
-    ** whether it is an insertion, deletion or modification, we can
-    ** process them all ine one pass of the rows.  And if no changes
-    ** have occured, we dont need to make any passes thru the rows.
+    ** handle any new bgp neighbor additions or
+    ** existing bgp neighbor modifications.
+    ** Note that deletion is handled differently.
     */
-    row_deleted = OVSREC_IDL_ANY_TABLE_ROWS_DELETED(bgpn, idl_seqno);
-    something_changed = row_deleted ||
-	OVSREC_IDL_ANY_TABLE_ROWS_INSERTED(bgpn, idl_seqno) ||
-	OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED(bgpn, idl_seqno);
-    if (something_changed) {
-	OVSREC_BGP_NEIGHBOR_FOR_EACH(bgpn, idl) {
-	    if (OVSREC_IDL_IS_ROW_INSERTED(bgpn, idl_seqno)) {
-		if (bgpn->is_peer_group) {
-		    create_new_bgp_peer_group(bgpn);
-		} else {
-		    create_new_bgp_neighbor(bgpn);
+    ovs_bgp = ovsrec_bgp_neighbor_first(idl);
+    modified =
+	ovs_bgp && /* if this is NULL, modification could not have happened */
+	(OVSREC_IDL_ANY_TABLE_ROWS_INSERTED(ovs_bgp, idl_seqno) ||
+	 OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED(ovs_bgp, idl_seqno));
+    if (modified) {
+	OVSREC_BGP_NEIGHBOR_FOR_EACH(ovs_bgp, idl) {
+	    if (OVSREC_IDL_IS_ROW_INSERTED(ovs_bgp, idl_seqno) ||
+		OVSREC_IDL_IS_ROW_MODIFIED(ovs_bgp, idl_seqno))
+	    {
+		bgp_instance = bgp_lookup(ovs_bgp->bgp_router->asn, NULL);
+		if (!bgp_instance) {
+		    VLOG_ERR("%%cannot find daemon bgp router instance %d %%\n",
+			ovs_bgp->bgp_router->asn);
+		    return;
 		}
-	    } else {
-		if (OVSREC_IDL_IS_ROW_MODIFIED(bgpn, idl_seqno)) {
-		}
-	    }
-	    if (row_deleted) {
+		set_neighbor_remote_as(bgp_instance, ovs_bgp->name,
+		    ovs_bgp->remote_as, AFI_IP, SAFI_UNICAST);
 	    }
 	}
     }
+
+    // if OVSREC_IDL_ANY_TABLE_ROWS_DELETED(bgpn, idl_seqno);
 }
 
 static void

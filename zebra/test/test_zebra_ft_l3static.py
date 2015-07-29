@@ -41,12 +41,7 @@ class myTopo( Topo ):
         self.addLink('h2', 's2')
         self.addLink('s1', 's2')
 
-class demoTest( HalonTest ):
-
-    """override the setupNet routine to create custom Topo.
-    pass the global variables switch,host,link to mininet topo
-    as HalonSwitch,HalonHost,HalonLink
-    """
+class staticRouteTest( HalonTest ):
 
     def setupNet(self):
         self.net = Mininet(topo=myTopo(hsts=2, sws=2,
@@ -58,7 +53,7 @@ class demoTest( HalonTest ):
                                        build=True)
 
     def testConfigure(self):
-        info('\n*** Configuring the topology ***\n')
+        info('\n########## Configuring the topology ##########\n')
         s1 = self.net.switches[ 0 ]
         s2 = self.net.switches[ 1 ]
         h1 = self.net.hosts[ 0 ]
@@ -155,15 +150,15 @@ class demoTest( HalonTest ):
         s2.cmd("/usr/bin/ovs-vsctl set interface 2 user_config:admin=up")
 
         info('admin up configured on sw1 & sw2\n')
-        info('configuration complete ...\n\n')
+        info('\n########## Configuration complete ##########\n')
 
 
     def testV4(self):
+        info('\n########## IPv4 Ping test ##########\n')
         h1 = self.net.hosts[ 0 ]
         h2 = self.net.hosts[ 1 ]
-        info( '\n*** Running ping test between host1-sw1-sw2-host2 ***\n')
         # Ping host2 from host1
-        info( '\n*** Ping host2 from host1 ***\n')
+        info( '\n### Ping host2 from host1 ###\n')
         ret = h1.cmd("ping -c 1 10.0.30.1")
 
         status = parsePing(ret)
@@ -176,7 +171,7 @@ class demoTest( HalonTest ):
             #return False
 
         # Ping host1 from host2
-        info( '\n*** Ping host1 from host2 ***\n')
+        info( '\n### Ping host1 from host2 ###\n')
         ret = h2.cmd("ping -c 1 10.0.10.1")
 
         status = parsePing(ret)
@@ -188,9 +183,10 @@ class demoTest( HalonTest ):
             info('Ping Failed!\n\n')
             #return False
 
-        info('\n******IPv4 Ping completed******\n')
+        info('\n########## IPv4 Ping completed ##########\n')
 
     def testV6(self):
+        info('\n########## IPv6 Ping test ##########\n')
         h1 = self.net.hosts[ 0 ]
         h2 = self.net.hosts[ 1 ]
         s1 = self.net.switches[ 0 ]
@@ -200,9 +196,8 @@ class demoTest( HalonTest ):
         # correctly, direct ping from h1 to h2 is not taking place. After subsequent
         # pings between adjacent devices, end to end ping works. We suspect that there
         # is some learning going on in the kernel as regards to neighbour advertisements.
-        info( '\n*** Running IPv6 ping test between host1-sw1 ***\n')
         # Ping s1 from host1
-        info( '*** Ping s1 from host1 ***\n')
+        info( '### Ping s1 from host1 ###\n')
         ret = h1.cmd("ping6 -c 1 2000::2")
 
         status = parsePing(ret)
@@ -214,9 +209,8 @@ class demoTest( HalonTest ):
             info('Ping Failed!\n\n')
             #return False
 
-        info( '\n*** Running IPv6 ping test between sw2-host2 ***\n')
         # Ping s2 from h2
-        info( '*** Ping s2 from h2 ***\n')
+        info( '### Ping s2 from h2 ###\n')
         ret = h2.cmd("ping6 -c 1 2002::2")
 
         status = parsePing(ret)
@@ -228,9 +222,8 @@ class demoTest( HalonTest ):
             info('Ping Failed!\n\n')
             #return False
 
-        info( '\n*** Running IPv6 ping test between sw1-sw2 ***\n')
         # Ping s2 from s1
-        info( '*** Ping s2 from s1 ***\n')
+        info( '### Ping s2 from s1 ###\n')
         ret = s1.cmd("ip netns exec swns ping6 -c 1 2001::2")
 
         status = parsePing(ret)
@@ -242,9 +235,8 @@ class demoTest( HalonTest ):
             info('Ping Failed!\n\n')
             #return False
 
-        info( '\n*** Running IPv6 ping test between host1-sw1-sw2-host2 ***\n')
         # Ping host2 from host1
-        info( '*** Ping host2 from host1 ***\n')
+        info( '### Ping host2 from host1 ###\n')
         ret = h1.cmd("ping6 -c 1 2002::1")
 
         status = parsePing(ret)
@@ -257,7 +249,7 @@ class demoTest( HalonTest ):
             #return False
 
         # Ping host1 from host2
-        info( '\n*** Ping host1 from host2 ***\n')
+        info( '\n### Ping host1 from host2 ###\n')
         ret = h2.cmd("ping6 -c 1 2000::1")
 
         status = parsePing(ret)
@@ -269,16 +261,16 @@ class demoTest( HalonTest ):
             info('Ping Failed!\n\n')
             #return False
 
-        info('\n******IPv6 Ping completed******\n')
+        info('\n########## IPv6 Ping completed ##########\n')
 
     def testV4_route_delete(self):
         h1 = self.net.hosts[ 0 ]
         h2 = self.net.hosts[ 1 ]
         s1 = self.net.switches[ 0 ]
 
-        info( '\n********* Running test ipv4 route delete on sw1 ********\n')
+        info( '\n######### Verify deletion of IPv4 static routes ##########\n')
         # Ping host2 from host1
-        info( '\n*** Ping host1 from host2 ***\n')
+        info( '\n### Ping host1 from host2 ###\n')
         ret = h1.cmd("ping -c 1 10.0.30.1")
 
         status = parsePing(ret)
@@ -291,32 +283,32 @@ class demoTest( HalonTest ):
             #return False
 
         # Delete IPv4 route on switch1 towards host2 network
-        info( '\n*** Delete ip route on sw1 to h2 network ***\n')
+        info( '\n### Delete ip route on sw1 to h2 network ###\n')
         s1.cmdCLI("no ip route 10.0.30.0/24 10.0.20.2")
 
         # Ping host1 from host2
-        info( '\n*** Ping host1 from host2, it should fail ***\n')
+        info( '\n### Ping host1 from host2, it should fail ###\n')
         ret = h1.cmd("ping -c 1 10.0.30.1")
 
         status = parsePing(ret)
         # Test successful if ping fails
-        if received == 0:
+        if not status:
             info('Success: Ping Failed!\n\n')
         else:
             info('Failed: Ping Successful!\n\n')
             #return False
 
-        info('\n********IPv4 route delete test completed******\n')
+        info('\n########## IPv4 route delete test completed ##########\n')
 
     def testV6_route_delete(self):
         h1 = self.net.hosts[ 0 ]
         h2 = self.net.hosts[ 1 ]
         s1 = self.net.switches[ 0 ]
 
-        info( '\n******* Running test ipv6 route delete on sw1 ********\n')
+        info( '\n######### Verify deletion of IPv6 static routes ##########\n')
 
         # Ping host1 from host2
-        info( '*** Ping host1 from host2 ***\n')
+        info( '### Ping host1 from host2 ###\n')
         ret = h1.cmd("ping6 -c 1 2002::1")
 
         status = parsePing(ret)
@@ -329,42 +321,44 @@ class demoTest( HalonTest ):
             #return False
 
         # Delete IPv6 route to host2 on switch1
-        info( '\n*** Delete ipv6 route on sw1 to h2 network ***\n')
+        info( '\n### Delete ipv6 route on sw1 to h2 network ###\n')
         s1.cmdCLI("no ipv6 route 2002::0/120 2001::2")
 
         # Ping host1 from host2
-        info( '\n*** Ping host1 from host2, it should fail ***\n')
+        info( '\n### Ping host1 from host2, it should fail ###\n')
         ret = h1.cmd("ping6 -c 1 2002::1")
 
         status = parsePing(ret)
 
         # Test successful if ping fails
-        if received == 0:
+        if not status:
             info('Success: Ping Failed!\n\n')
         else:
             info('Failed: Ping Successful!\n\n')
             #return False
 
-        info('\n********IPv6 route delete test completed******\n')
+        info('\n########## IPv6 route delete test completed ##########\n')
 
 
-class Test_vtysh_static_routes:
+class Test_zebra_static_routes_ft:
 
-    # Create a test topology.
-    test = demoTest()
+    def setup_class(cls):
+        Test_zebra_static_routes_ft.test = staticRouteTest()
 
     def teardown_class(cls):
         # Stop the Docker containers, and
         # mininet topology
-        Test_vtysh_static_routes.test.net.stop()
+        Test_zebra_static_routes_ft.test.net.stop()
 
     def test_testConfigure(self):
         # Function to configure the topology
         self.test.testConfigure()
+        #CLI(self.test.net)
 
     def test_testV4(self):
         # Function to test V4 ping
         self.test.testV4()
+        #CLI(self.test.net)
 
     def test_testV6(self):
         # Function to test V6 ping

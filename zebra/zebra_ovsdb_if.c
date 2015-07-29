@@ -44,6 +44,8 @@
 #include "openvswitch/vlog.h"
 #include "vswitch-idl.h"
 #include "coverage.h"
+#include "hash.h"
+#include "jhash.h"
 
 #include "openhalon-idl.h"
 
@@ -72,9 +74,16 @@ static struct unixctl_server *appctl;
 static int system_configured = false;
 
 boolean exiting = false;
+/* Hash for ovsdb route.*/
+static struct hash *zebra_route_hash;
+
+/* List of delete route */
+struct list *zebra_route_del_list;
 
 static int zebra_ovspoll_enqueue (zebra_ovsdb_t *zovs_g);
 static int zovs_read_cb (struct thread *thread);
+
+#define HASH_BUCKET_SIZE 32768
 
 /* ovs appctl dump function for this daemon
  * This is useful for debugging
@@ -103,6 +112,27 @@ ovsdb_init (const char *db_path)
 
     ovsdb_idl_add_column(idl, &ovsrec_open_vswitch_col_cur_cfg);
     ovsdb_idl_add_column(idl, &ovsrec_open_vswitch_col_hostname);
+
+    /* Register for ROUTE table */
+    /* We need to register for columns to really get rows in the idl */
+    ovsdb_idl_add_table(idl, &ovsrec_table_route);
+    ovsdb_idl_add_column(idl, &ovsrec_route_col_prefix);
+    ovsdb_idl_add_column(idl, &ovsrec_route_col_address_family);
+    ovsdb_idl_add_column(idl, &ovsrec_route_col_distance);
+    ovsdb_idl_add_column(idl, &ovsrec_route_col_metric);
+    ovsdb_idl_add_column(idl, &ovsrec_route_col_from);
+    ovsdb_idl_add_column(idl, &ovsrec_route_col_sub_address_family);
+    ovsdb_idl_add_column(idl, &ovsrec_route_col_nexthops);
+
+    /* Register for NextHop table */
+    ovsdb_idl_add_table(idl, &ovsrec_table_nexthop);
+    ovsdb_idl_add_column(idl, &ovsrec_nexthop_col_ip_address);
+    ovsdb_idl_add_column(idl, &ovsrec_nexthop_col_ports);
+    ovsdb_idl_add_column(idl, &ovsrec_nexthop_col_status);
+
+    /* Register for port table */
+    ovsdb_idl_add_table(idl, &ovsrec_table_port);
+    ovsdb_idl_add_column(idl, &ovsrec_port_col_name);
 
     /* Register ovs-appctl commands for this daemon. */
     unixctl_command_register("zebra/dump", "", 0, 0, zebra_unixctl_dump, NULL);
@@ -301,6 +331,506 @@ zebra_apply_global_changes (void)
     }
 }
 
+bool is_route_nh_rows_modified(const struct ovsrec_route *route)
+{
+    const struct ovsrec_nexthop *nexthop;
+    int index;
+
+    for(index=0; index < route->n_nexthops; index++)
+    {
+        nexthop = route->nexthops[index];
+        if ( (OVSREC_IDL_IS_ROW_INSERTED(nexthop, idl_seqno)) ||
+             (OVSREC_IDL_IS_ROW_MODIFIED(nexthop, idl_seqno)) )
+        {
+             return 1;
+        }
+    }
+
+    return 0;
+}
+
+bool is_rib_nh_rows_deleted(const struct ovsrec_route *route)
+{
+    const struct ovsrec_nexthop *nexthop;
+
+    nexthop = route->nexthops[0];
+    if ( ( nexthop != NULL ) &&
+         ( OVSREC_IDL_ANY_TABLE_ROWS_DELETED(nexthop, idl_seqno) ) )
+    {
+        return 1;
+    }
+
+    return 0;
+}
+
+/* Hash route key */
+unsigned int
+zebra_route_key_make(void *p)
+{
+    const struct zebra_route_key *rkey = (struct zebra_route_key *) p;
+    unsigned int key = 0;
+
+     key = jhash2((const uint32_t *)rkey,
+                  (sizeof(struct zebra_route_key)) / sizeof(uint32_t), 0);
+
+    return key;
+}
+
+/* Compare two keys */
+static int
+zebra_route_key_cmp(const void *arg1, const void *arg2)
+{
+    const struct zebra_route_key *rkey_1 = (struct zebra_route_key *) arg1;
+
+    const struct zebra_route_key *rkey_2 = (struct zebra_route_key *) arg2;
+
+    if (!memcmp(rkey_1, rkey_2, sizeof(struct zebra_route_key))) {
+        return 1;
+    } else {
+       return 0;
+    }
+}
+
+/* Init hash table and size of table */
+static void
+zebra_route_hash_init (void)
+{
+    zebra_route_hash = hash_create_size(HASH_BUCKET_SIZE, zebra_route_key_make,
+                                        zebra_route_key_cmp);
+}
+
+/* Allocate route key */
+static void *
+zebra_route_hash_alloc (void *p)
+{
+    struct zebra_route_key *val = (struct zebra_route_key *) p;
+    struct zebra_route_key *addr;
+
+    addr = XMALLOC(MTYPE_TMP, sizeof (struct zebra_route_key));
+    assert(addr);
+    memcpy(addr, val, sizeof(struct zebra_route_key));
+
+    return addr;
+}
+
+/* Add ovsdb routes to hash table */
+static void
+zebra_route_hash_add(const struct ovsrec_route *route)
+{
+    struct zebra_route_key tmp_key;
+    struct zebra_route_key *add;
+    int ret;
+    size_t i;
+    struct ovsrec_nexthop *nexthop;
+    struct prefix p;
+    int addr_family;
+
+    if (!route || !route->prefix)
+        return;
+
+    ret = str2prefix(route->prefix, &p);
+    if (ret <= 0) {
+        VLOG_INFO("Malformed Dest address=%s", route->prefix);
+        return;
+    }
+
+    memset(&tmp_key, 0, sizeof(struct zebra_route_key));
+    if (strcmp(route->address_family,
+               OVSREC_ROUTE_ADDRESS_FAMILY_IPV4) == 0) {
+        addr_family = AF_INET;
+        tmp_key.prefix.u.ipv4_addr = p.u.prefix4;
+    } else if (strcmp(route->address_family,
+               OVSREC_ROUTE_ADDRESS_FAMILY_IPV6) == 0) {
+        addr_family = AF_INET6;
+        tmp_key.prefix.u.ipv6_addr = p.u.prefix6;
+    }
+
+    tmp_key.prefix_len = p.prefixlen;
+
+    for (i = 0; i < route->n_nexthops; i++) {
+        nexthop = route->nexthops[i];
+        if (nexthop) {
+            if (nexthop->ip_address) {
+                if(addr_family == AF_INET) {
+                    inet_pton(AF_INET, nexthop->ip_address,
+                              &tmp_key.nexthop.u.ipv4_addr);
+                } else if (addr_family == AF_INET6) {
+                    inet_pton(AF_INET6, nexthop->ip_address,
+                              &tmp_key.nexthop.u.ipv6_addr);
+                }
+            }
+
+            if (nexthop->ports) {
+                strncpy(tmp_key.ifname, nexthop->ports[0]->name,
+                        IF_NAMESIZE);
+            }
+
+            VLOG_INFO ("Hash insert prefix %s nexthop %s, interface %s",
+                        route->prefix,
+                        nexthop->ip_address ? nexthop->ip_address : "NONE",
+                        tmp_key.ifname[0] ? tmp_key.ifname : "NONE");
+
+            add = hash_get(zebra_route_hash, &tmp_key,
+                           zebra_route_hash_alloc);
+            assert(add);
+        }
+    }
+}
+
+/* Free hash key memory */
+static void
+zebra_route_hash_free(struct zebra_route_key *p)
+{
+    XFREE (MTYPE_TMP, p);
+}
+
+/* Free hash table memory */
+static void
+zebra_route_hash_finish (void)
+{
+    hash_clean(zebra_route_hash, (void (*) (void *)) zebra_route_hash_free);
+    hash_free(zebra_route_hash);
+    zebra_route_hash = NULL;
+}
+
+/* Free link list data memory */
+static void
+zebra_route_list_free_data(struct zebra_route_del_data *data)
+{
+    XFREE (MTYPE_TMP, data);
+}
+
+/* Add delated route to list */
+static void
+zebra_route_list_add_data(struct route_node *rnode, struct rib *rib_p,
+                          struct nexthop *nhop)
+{
+    struct zebra_route_del_data *data;
+
+    data = XCALLOC (MTYPE_TMP, sizeof (struct zebra_route_del_data));
+    assert (data);
+
+    data->rnode = rnode;
+    data->rib = rib_p;
+    data->nexthop = nhop;
+    listnode_add(zebra_route_del_list, data);
+}
+
+/* Init link list and hash table */
+static void
+zebra_route_del_init(void)
+{
+    zebra_route_hash_init();
+    zebra_route_del_list = list_new();
+    zebra_route_del_list->del = (void (*) (void *)) zebra_route_list_free_data;
+}
+
+/* Run through list and call delete for each list route */
+static void
+zebra_route_del_process(void)
+{
+    struct listnode *node, *nnode;
+    struct zebra_route_del_data *rdata;
+    rib_table_info_t *info;
+    struct prefix *pprefix;
+
+    for (ALL_LIST_ELEMENTS (zebra_route_del_list, node, nnode, rdata)) {
+        if (rdata->rnode && rdata->rib && rdata->nexthop) {
+            info = rib_table_info (rdata->rnode->table);
+            if (info->safi != SAFI_UNICAST){
+                continue ;
+            }
+            pprefix = &rdata->rnode->p;
+
+            if (pprefix->family == AF_INET6) {
+                static_delete_ipv6 (pprefix,
+                                    (rdata->nexthop->ifname ?
+                                     STATIC_IPV6_IFNAME : STATIC_IPV6_GATEWAY),
+                                    &rdata->nexthop->gate.ipv6,
+                                    rdata->nexthop->ifname,
+                                    rdata->rib->distance,
+                                    info->vrf->id);
+            } else if (pprefix->family == AF_INET){
+                static_delete_ipv4_safi (info->safi, pprefix,
+                                         (rdata->nexthop->ifname ?
+                                          NULL : &rdata->nexthop->gate.ipv4),
+                                         rdata->nexthop->ifname,
+                                         rdata->rib->distance,
+                                         info->vrf->id);
+            }
+        }
+    }
+}
+
+/* Free hash and link list memory */
+static
+void zebra_route_del_finish(void) {
+    list_free(zebra_route_del_list);
+    zebra_route_hash_finish();
+}
+
+/* Find routes not in ovsdb and add it to list.
+  List is used to delete routeis from system*/
+static void
+zebra_find_ovsdb_deleted_routes(afi_t afi, safi_t safi, u_int32_t id)
+{
+    struct route_table *table;
+    struct route_node *rn;
+    struct rib *rib;
+    struct nexthop *nexthop;
+    struct zebra_route_key rkey;
+    char prefix_str[256];
+    char nexthop_str[256];
+
+    VLOG_INFO("Walk RIB table to find deleted routes");
+    table = vrf_table (afi, safi, id);
+    if (!table)
+        return;
+
+    for (rn = route_top (table); rn; rn = route_next (rn)) {
+        if (!rn) {
+            continue;
+        }
+
+        RNODE_FOREACH_RIB (rn, rib) {
+            if (rib->type != ZEBRA_ROUTE_STATIC || !rib->nexthop)
+                continue;
+
+            for (nexthop = rib->nexthop; nexthop; nexthop = nexthop->next) {
+                memset(&rkey, 0, sizeof (struct zebra_route_key));
+                memset(prefix_str, 0, sizeof(prefix_str));
+                memset(nexthop_str, 0, sizeof(nexthop_str));
+
+                if (afi == AFI_IP) {
+                    rkey.prefix.u.ipv4_addr = rn->p.u.prefix4;
+                    rkey.prefix_len = rn->p.prefixlen;
+                    if (nexthop->type == NEXTHOP_TYPE_IPV4) {
+                        rkey.nexthop.u.ipv4_addr = nexthop->gate.ipv4;
+                        inet_ntop(AF_INET, &nexthop->gate.ipv4,
+                                  nexthop_str, sizeof(nexthop_str));
+                    }
+                } else if (afi == AFI_IP6) {
+                    rkey.prefix.u.ipv6_addr = rn->p.u.prefix6;
+                    rkey.prefix_len = rn->p.prefixlen;
+                    if (nexthop->type == NEXTHOP_TYPE_IPV6) {
+                        rkey.nexthop.u.ipv6_addr = nexthop->gate.ipv6;
+                        inet_ntop(AF_INET6, &nexthop->gate.ipv6,
+                                  nexthop_str, sizeof(nexthop_str));
+                    }
+                }
+
+                if ((nexthop->type == NEXTHOP_TYPE_IFNAME) ||
+                    (nexthop->type == NEXTHOP_TYPE_IPV4_IFNAME) ||
+                    (nexthop->type == NEXTHOP_TYPE_IPV6_IFNAME)) {
+                        strncpy(rkey.ifname, nexthop->ifname, IF_NAMESIZE);
+                }
+
+                if (!hash_get(zebra_route_hash, &rkey, NULL)){
+                    zebra_route_list_add_data(rn, rib, nexthop);
+                    prefix2str(&rn->p, prefix_str, sizeof(prefix_str));
+                    VLOG_INFO ("Delete route, prefix %s, nexthop %s, interface %s",
+                               prefix_str[0] ? prefix_str : "NONE",
+                               nexthop_str[0] ? nexthop_str : "NONE",
+                               nexthop->ifname ? nexthop->ifname : "NONE");
+                }
+
+            }
+        } /* RNODE_FOREACH_RIB */
+    }
+}
+
+/* static route. */
+static void
+zebra_handle_route_change(const struct ovsrec_route *route)
+{
+  const struct ovsrec_nexthop *nexthop;
+  struct prefix p;
+  struct in_addr gate;
+  struct in6_addr ipv6_gate;
+  const char *ifname = NULL;
+  char prefix_str[256];
+  u_char flag = 0;
+  u_char distance;
+  safi_t safi = 0;
+  u_char type = 0;
+  int ipv6_addr_type = 0;
+  int ret;
+
+  VLOG_INFO("Rib prefix_str=%s", route->prefix);
+  memset(prefix_str, 0, sizeof(prefix_str));
+  snprintf(prefix_str, 255, "%s", route->prefix);
+
+  VLOG_INFO("Rib prefix_str=%s", prefix_str);
+
+  /* Convert the prefix/len */
+  ret = str2prefix (prefix_str, &p);
+  if (ret <= 0)
+  {
+      VLOG_INFO ("Malformed Dest address=%s", prefix_str);
+      return;
+  }
+
+  /* Apply mask for given prefix. */
+  VLOG_INFO("Applying Mask");
+  apply_mask (&p);
+
+  /* Get Nexthop ip/interface */
+  VLOG_INFO("Read nexthop %d", route->n_nexthops);
+  nexthop = route->nexthops[0];
+  if (nexthop == NULL)
+  {
+      VLOG_INFO ("Null next hop");
+      return;
+  }
+
+  VLOG_INFO("!!!!***address_family %s", route->address_family);
+  if (strcmp(route->address_family, OVSREC_ROUTE_ADDRESS_FAMILY_IPV6) == 0)
+  {
+      ipv6_addr_type = 1;
+  }
+
+  if (nexthop->ports)
+  {
+      ifname = nexthop->ports[0]->name;
+      VLOG_INFO("Rib nexthop ifname=%s", ifname);
+      if (ipv6_addr_type)
+      {
+          type = STATIC_IPV6_IFNAME;
+      }
+  }
+  else if (nexthop->ip_address)
+  {
+      VLOG_INFO("Checking nexthop ip");
+      if (ipv6_addr_type)
+      {
+          ret = inet_pton (AF_INET6, nexthop->ip_address, &ipv6_gate);
+      }
+      else
+      {
+          ret = inet_aton(nexthop->ip_address, &gate);
+      }
+
+      if (ret == 1)
+      {
+	  type = STATIC_IPV6_GATEWAY;
+          VLOG_INFO("Rib nexthop ip=%s", nexthop->ip_address);
+      }
+      else
+      {
+          VLOG_INFO("BAD! Rib nexthop ip=%s", nexthop->ip_address);
+          return;
+      }
+  }
+  else
+  {
+      VLOG_INFO("BAD! No nexthop ip or iface");
+      return;
+  }
+
+  VLOG_INFO("Checking sub-address-family=%s", route->sub_address_family);
+  if (strcmp(route->sub_address_family,
+             OVSREC_ROUTE_SUB_ADDRESS_FAMILY_UNICAST) == 0)
+  {
+      safi = SAFI_UNICAST;
+  }
+  else
+  {
+      VLOG_INFO("BAD! Not valid sub-address-family=%s",
+                route->sub_address_family);
+      return;
+  }
+
+  distance = route->distance[0];
+  VLOG_INFO("Calling add .....");
+  if (ipv6_addr_type)
+  {
+     static_add_ipv6 (&p, type, &ipv6_gate, ifname, flag, distance, 0);
+  }
+  else
+  {
+     static_add_ipv4_safi (safi, &p, ifname ? NULL : &gate, ifname,
+                           flag, distance, 0);
+  }
+  return;
+}
+
+/* Find deleted route in ovsdb and remove from route table */
+static void
+zebra_route_delete(void)
+{
+    const struct ovsrec_route *route_row;
+
+    zebra_route_del_init();
+    /* Add ovsdb route and nexthop in hash */
+    OVSREC_ROUTE_FOR_EACH(route_row, idl) {
+        zebra_route_hash_add(route_row);
+    }
+
+    zebra_find_ovsdb_deleted_routes(AFI_IP, SAFI_UNICAST, 0);
+    zebra_find_ovsdb_deleted_routes(AFI_IP6, SAFI_UNICAST, 0);
+
+    zebra_route_del_process();
+    zebra_route_del_finish();
+}
+
+/* route add/delete in ovsdb */
+static void
+zebra_apply_route_changes (void)
+{
+    const struct ovsrec_route *route_first;
+    const struct ovsrec_route *route_row;
+    const struct ovsrec_nexthop *nh_row;
+
+    VLOG_INFO("In zebra_apply_route_changes");
+    route_first = ovsrec_route_first(idl);
+    if (route_first == NULL)
+    {
+        VLOG_INFO("No rows in ROUTE table");
+        /* Possible last row gets deleted */
+        zebra_route_delete();
+        return;
+    }
+
+    if ( (!OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED(route_first, idl_seqno)) &&
+       (!OVSREC_IDL_ANY_TABLE_ROWS_DELETED(route_first, idl_seqno))  &&
+       (!OVSREC_IDL_ANY_TABLE_ROWS_INSERTED(route_first, idl_seqno)) )
+    {
+        VLOG_INFO("No modification in ROUTE table");
+        return;
+    }
+
+    if ( (OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED(route_first, idl_seqno)) &&
+       (OVSREC_IDL_ANY_TABLE_ROWS_INSERTED(route_first, idl_seqno)) )
+    {
+        VLOG_INFO("Some modification or inserts in ROUTE table");
+
+        OVSREC_ROUTE_FOR_EACH(route_row, idl)
+        {
+            nh_row = route_row->nexthops[0];
+            if (nh_row == NULL)
+            {
+                VLOG_INFO ("Null next hop");
+                continue;
+            }
+
+            if ( (OVSREC_IDL_IS_ROW_INSERTED(route_row, idl_seqno)) ||
+                 (OVSREC_IDL_IS_ROW_MODIFIED(route_row, idl_seqno)) ||
+                 (is_route_nh_rows_modified(route_row)) )
+            {
+                VLOG_INFO("Row modification or inserts in ROUTE table");
+                zebra_handle_route_change(route_row);
+            }
+        }
+    }
+
+    if ( (OVSREC_IDL_ANY_TABLE_ROWS_DELETED(route_first, idl_seqno) ) ||
+       ( is_rib_nh_rows_deleted( route_first ) ) )
+    {
+        VLOG_INFO("Deletes in RIB table");
+        zebra_route_delete();
+    }
+}
+
 /* Check if any changes are there to the idl and update
  * the local structures accordingly.
  */
@@ -317,6 +847,8 @@ zebra_reconfigure(struct ovsdb_idl *idl)
 
     /* Apply the changes */
     zebra_apply_global_changes();
+
+    zebra_apply_route_changes();
 
     /* update the seq. number */
     idl_seqno = new_idl_seqno;

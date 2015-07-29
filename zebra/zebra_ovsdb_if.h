@@ -39,4 +39,26 @@ void zebra_ovsdb_exit(void);
 
 /* Initialize and integrate the ovs poll loop with the daemon */
 void zebra_ovsdb_init_poll_loop (struct zebra_t *zebrad);
+
+struct ipv4v6_addr {
+   union {
+       struct in_addr ipv4_addr;
+       struct in6_addr ipv6_addr;
+   }u;
+};
+
+struct zebra_route_key {
+    struct ipv4v6_addr prefix;
+    int64_t prefix_len;
+    struct ipv4v6_addr nexthop;
+    char ifname[IF_NAMESIZE+1];
+    /* HALON_TODO: add vrf support */
+};
+
+struct zebra_route_del_data {
+    struct route_node *rnode;
+    struct rib *rib;
+    struct nexthop *nexthop;
+};
+
 #endif /* ZEBRA_OVSDB_IF_H */

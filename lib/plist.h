@@ -80,4 +80,17 @@ extern int prefix_bgp_orf_set (char *, afi_t, struct orf_prefix *, int, int);
 extern void prefix_bgp_orf_remove_all (char *);
 extern int prefix_bgp_show_prefix_list (struct vty *, afi_t, char *);
 
+#ifdef HALON
+void prefix_list_entry_add (struct prefix_list *plist,
+                       struct prefix_list_entry *pentry);
+void prefix_list_entry_free (struct prefix_list_entry *pentry);
+struct prefix_list * prefix_list_get (afi_t afi, const char *name);
+struct prefix_list_entry *
+prefix_list_entry_make (struct prefix *prefix, enum prefix_list_type type,
+                        int seq, int le, int ge, int any);
+struct prefix_list_entry *
+prefix_entry_dup_check (struct prefix_list *plist,
+                        struct prefix_list_entry *new);
+#endif
+
 #endif /* _QUAGGA_PLIST_H */

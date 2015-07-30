@@ -56,11 +56,11 @@ Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 #include "bgpd/bgp_vty.h"
 #include "bgpd/bgp_mpath.h"
 #include "bgpd/bgp_ovsdb_route.h"
-
+#include "openvswitch/vlog.h"
 /* Extern from bgp_dump.c */
 extern const char *bgp_origin_str[];
 extern const char *bgp_origin_long_str[];
-
+VLOG_DEFINE_THIS_MODULE(bgp_route);
 
 static struct bgp_node *
 bgp_afi_node_get (struct bgp_table *table, afi_t afi, safi_t safi, struct prefix *p,
@@ -1590,7 +1590,7 @@ bgp_process_main (struct work_queue *wq, void *data)
 #ifndef ENABLE_OVSDB
             bgp_zebra_announce (p, old_select, bgp, safi);
 #else
-            bgp_ovsdb_announce_rib_entry (p, old_select, bgp, safi, 0);
+            bgp_ovsdb_announce_rib_entry (p, old_select, bgp, safi, 1);
 #endif
           }
           UNSET_FLAG (old_select->flags, BGP_INFO_MULTIPATH_CHG);
@@ -1608,7 +1608,6 @@ bgp_process_main (struct work_queue *wq, void *data)
       UNSET_FLAG (new_select->flags, BGP_INFO_MULTIPATH_CHG);
     }
 
-
   /* Check each BGP peer. */
   for (ALL_LIST_ELEMENTS (bgp->peer, node, nnode, peer))
     {
@@ -1625,7 +1624,7 @@ bgp_process_main (struct work_queue *wq, void *data)
 #ifndef ENABLE_OVSDB
       bgp_zebra_announce (p, new_select, bgp, safi);
 #else
-      bgp_ovsdb_announce_rib_entry (p, new_select, bgp, safi, 0);
+      bgp_ovsdb_announce_rib_entry (p, new_select, bgp, safi, 1);
 #endif
       }
       else
@@ -1637,7 +1636,7 @@ bgp_process_main (struct work_queue *wq, void *data)
 #ifndef ENABLE_OVSDB
           bgp_zebra_withdraw (p, old_select, safi);
 #else
-          bgp_ovsdb_withdraw_rib_entry (p, old_select, bgp, safi, 0);
+          bgp_ovsdb_withdraw_rib_entry (p, old_select, bgp, safi, 1);
 #endif
       }
 	}
@@ -1647,16 +1646,11 @@ bgp_process_main (struct work_queue *wq, void *data)
   if (old_select && CHECK_FLAG (old_select->flags, BGP_INFO_REMOVED)) {
     bgp_info_reap (rn, old_select);
 #ifdef ENABLE_OVSDB
-    bgp_ovsdb_delete_rib_entry(p, old_select, bgp, safi, 0);
+    bgp_ovsdb_delete_rib_entry(p, old_select, bgp, safi, 1);
 #endif
   }
 
   UNSET_FLAG (rn->flags, BGP_NODE_PROCESS_SCHEDULED);
-
-#ifdef ENABLE_OVSDB
-  // Commit to OVSDB
-  bgp_ovsdb_rib_txn_commit();
-#endif
   return WQ_SUCCESS;
 }
 
@@ -2385,8 +2379,7 @@ bgp_update_main (struct peer *peer, struct prefix *p, struct attr *attr,
   bgp_info_add (rn, new);
 #ifdef ENABLE_OVSDB
   /* Add new route entry in OVSDB route table */
-  bgp_ovsdb_rib_txn_create();
-  bgp_ovsdb_add_rib_entry(p, new, bgp, safi, 0);
+  bgp_ovsdb_add_rib_entry(p, new, bgp, safi, 1);
 #endif
   
   /* route_node_get lock */
@@ -3586,8 +3579,7 @@ bgp_static_update_main (struct bgp *bgp, struct prefix *p,
   bgp_info_add (rn, new);
 #ifdef ENABLE_OVSDB
   /* Add new route entry in OVSDB route table */
-  bgp_ovsdb_rib_txn_create();
-  bgp_ovsdb_add_rib_entry(p, new, bgp, safi, 0);
+  bgp_ovsdb_add_rib_entry(p, new, bgp, safi, 1);
 #endif
   
   /* route_node_get lock */

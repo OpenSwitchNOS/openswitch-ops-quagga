@@ -127,7 +127,7 @@ bgp_ovsdb_set_rib_protocol_specific_data(const struct ovsrec_route *rib,
     smap_init(&smap);
     smap_add_format(&smap,
                     OVSDB_ROUTE_PROTOCOL_SPECIFIC_BGP_FLAGS,
-                    "%x",
+                    "%d",
                     info->flags);
     smap_add(&smap,
              OVSDB_ROUTE_PROTOCOL_SPECIFIC_BGP_AS_PATH,
@@ -205,11 +205,12 @@ bgp_ovsdb_set_rib_nexthop(struct ovsdb_idl_txn *txn,
     nexthop = &info->attr->nexthop;
     nexthop_list = xmalloc(sizeof *rib->nexthops * nexthop_num);
     // Set first nexthop
-    inet_ntop(p->family, &nexthop, nexthop_buf, sizeof(nexthop_buf));
+    inet_ntop(p->family, nexthop, nexthop_buf, sizeof(nexthop_buf));
     pnexthop = bgp_ovsdb_lookup_nexthop(nexthop_buf);
     if (!pnexthop) {
         pnexthop = ovsrec_nexthop_insert(txn);
         ovsrec_nexthop_set_ip_address(pnexthop, nexthop_buf);
+        VLOG_DBG("Setting nexthop IP address %s\n", nexthop_buf);
     }
     selected = 1;
     ovsrec_nexthop_set_selected(pnexthop, &selected, 1);
@@ -223,11 +224,13 @@ bgp_ovsdb_set_rib_nexthop(struct ovsdb_idl_txn *txn,
         {
             // Update the nexthop table.
             nexthop = &mpinfo->attr->nexthop;
-            inet_ntop(p->family, &nexthop, nexthop_buf, sizeof(nexthop_buf));
+            inet_ntop(p->family, nexthop, nexthop_buf, sizeof(nexthop_buf));
             pnexthop = bgp_ovsdb_lookup_nexthop(nexthop_buf);
             if (!pnexthop) {
                 pnexthop = ovsrec_nexthop_insert(txn);
                 ovsrec_nexthop_set_ip_address(pnexthop, nexthop_buf);
+                VLOG_DBG("Setting nexthop IP address %s, count %d\n",
+                         nexthop_buf, ii);
             }
             selected = 1;
             ovsrec_nexthop_set_selected(pnexthop, &selected, 1);
@@ -340,6 +343,8 @@ bgp_ovsdb_withdraw_rib_entry(struct prefix *p,
                      __FUNCTION__);
             return -1;
         }
+    } else {
+        txn = rib_txn;
     }
     prefix2str(p, pr, sizeof(pr));
     rib_row = bgp_ovsdb_lookup_rib_entry(p, info, bgp, safi);
@@ -382,6 +387,7 @@ bgp_ovsdb_announce_rib_entry(struct prefix *p,
     int flags;
     bool proto_priv;
 
+
     if (create_txn) {
         txn = ovsdb_idl_txn_create(idl);
         if (!txn) {
@@ -389,8 +395,11 @@ bgp_ovsdb_announce_rib_entry(struct prefix *p,
                      __FUNCTION__);
             return -1;
         }
+    } else {
+        txn = rib_txn;
     }
     prefix2str(p, pr, sizeof(pr));
+    VLOG_DBG("%s: Announcing route %s\n", __FUNCTION__, pr);
     rib_row = bgp_ovsdb_lookup_rib_entry(p, info, bgp, safi);
     if (!CHECK_FLAG(info->flags, BGP_INFO_SELECTED)) {
         VLOG_ERR("%s:BGP info flag is not set to selected, cannot \
@@ -437,6 +446,8 @@ bgp_ovsdb_delete_rib_entry(struct prefix *p,
                      __FUNCTION__);
             return -1;
         }
+    } else {
+        txn = rib_txn;
     }
     prefix2str(p, pr, sizeof(pr));
     rib_row = bgp_ovsdb_lookup_rib_entry(p, info, bgp, safi);
@@ -487,11 +498,14 @@ bgp_ovsdb_add_rib_entry(struct prefix *p,
                      __FUNCTION__);
             return -1;
         }
+    } else {
+        txn = rib_txn;
+
     }
     rib = ovsrec_route_insert(txn);
-
     prefix2str(p, pr, sizeof(pr));
     ovsrec_route_set_prefix(rib, pr);
+    VLOG_INFO("%s: setting prefix %s\n", __FUNCTION__, pr);
 
     afi= get_str_from_afi(p->family);
     if (!afi) {
@@ -514,6 +528,8 @@ bgp_ovsdb_add_rib_entry(struct prefix *p,
     ovsrec_route_set_metric(rib, (const int64_t *)&info->attr->med, 1);
     // Nexthops
     nexthop_num = 1 + bgp_info_mpath_count (info);
+    VLOG_DBG("Setting nexthop num %d, metric %d, bgp_info_flags 0x%x\n",
+             nexthop_num, info->attr->med, info->flags);
     // Nexthop list
     bgp_ovsdb_set_rib_nexthop(txn, rib, p, info, nexthop_num);
 
@@ -569,8 +585,10 @@ bgp_ovsdb_rib_txn_commit(void)
 {
     enum ovsdb_idl_txn_status status;
 
-    if (!rib_txn)
-        assert(0);
+    if (!rib_txn) {
+        VLOG_ERR("Trying to commit txn w/o creating txn\n");
+        return;
+    }
     status = ovsdb_idl_txn_commit(rib_txn);
     ovsdb_idl_txn_destroy(rib_txn);
     rib_txn = NULL;

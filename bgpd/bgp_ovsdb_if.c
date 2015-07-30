@@ -152,6 +152,7 @@ bgp_ovsdb_tables_init(struct ovsdb_idl *idl)
     ovsdb_idl_add_column(idl, &ovsrec_route_col_prefix);
     ovsdb_idl_add_column(idl, &ovsrec_route_col_from);
     ovsdb_idl_add_column(idl, &ovsrec_route_col_nexthops);
+    ovsdb_idl_add_column(idl, &ovsrec_route_col_address_family);
     ovsdb_idl_add_column(idl, &ovsrec_route_col_sub_address_family);
     ovsdb_idl_add_column(idl, &ovsrec_route_col_protocol_specific);
     ovsdb_idl_add_column(idl, &ovsrec_route_col_selected);
@@ -159,6 +160,15 @@ bgp_ovsdb_tables_init(struct ovsdb_idl *idl)
     ovsdb_idl_add_column(idl, &ovsrec_route_col_distance);
     ovsdb_idl_add_column(idl, &ovsrec_route_col_metric);
     ovsdb_idl_add_column(idl, &ovsrec_route_col_vrf);
+
+    /* nexthop table */
+    ovsdb_idl_add_table(idl, &ovsrec_table_nexthop);
+    ovsdb_idl_add_column(idl, &ovsrec_nexthop_col_ip_address);
+    ovsdb_idl_add_column(idl, &ovsrec_nexthop_col_selected);
+    ovsdb_idl_add_column(idl, &ovsrec_nexthop_col_weight);
+    ovsdb_idl_add_column(idl, &ovsrec_nexthop_col_status);
+    ovsdb_idl_add_column(idl, &ovsrec_nexthop_col_other_config);
+    ovsdb_idl_add_column(idl, &ovsrec_nexthop_col_external_ids);
 }
 
 /* Create a connection to the OVSDB at db_path and create a dB cache
@@ -170,7 +180,7 @@ ovsdb_init (const char *db_path)
     idl = ovsdb_idl_create(db_path, &ovsrec_idl_class, false, true);
     idl_seqno = ovsdb_idl_get_seqno(idl);
     ovsdb_idl_set_lock(idl, "halon_bgp");
-    ovsdb_idl_verify_write_only(idl);
+    //ovsdb_idl_verify_write_only(idl);
 
     /* Cache OpenVSwitch table */
     ovsdb_idl_add_table(idl, &ovsrec_table_open_vswitch);

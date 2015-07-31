@@ -1455,17 +1455,15 @@ ALIAS (no_bgp_default_local_preference,
        "Configure default local preference value\n")
 
 int
-set_neighbor_remote_as (struct bgp *bgp, char *peer_str,
-    char *as_str, afi_t afi, safi_t safi)
+daemon_neighbor_remote_as_cmd_execute (struct bgp *bgp, char *peer_str,
+    as_t as, afi_t afi, safi_t safi)
 {
   int ret;
-  as_t as;
   union sockunion su;
 
-  VLOG_INFO("set_neighbor_remote_as, peer_str %s, as_str %s\n");
+  VLOG_INFO("daemon_neighbor_remote_as_cmd_execute, peer_str %s, as %u\n",
+    peer_str, as);
 
-  /* Get AS number.  */
-  as = atoi(as_str);
   if ((as < 1) || (as > BGP_AS4_MAX)) {
     LOG_ERROR("%% incorrect as number %d", as);
     return CMD_WARNING;
@@ -1499,7 +1497,7 @@ set_neighbor_remote_as (struct bgp *bgp, char *peer_str,
       LOG_ERROR("%% Peer-group AS %u. Cannot configure remote-as for member", as);
       return CMD_WARNING;
     case BGP_ERR_PEER_GROUP_PEER_TYPE_DIFFERENT:
-      LOG_ERROR("%% The AS# can not be changed from %u to %s, peer-group members must be all internal or all external", as, as_str);
+      LOG_ERROR("%% The AS# can not be changed from %u to %u, peer-group members must be all internal or all external", as, as);
       return CMD_WARNING;
     }
   return log_bgp_error(ret);
@@ -1515,7 +1513,7 @@ DEFUN (neighbor_remote_as,
        AS_STR)
 {
     return
-	set_neighbor_remote_as(NULL, argv[0], argv[1], AFI_IP, SAFI_UNICAST);
+	daemon_neighbor_remote_as_cmd_execute(NULL, argv[0], argv[1], AFI_IP, SAFI_UNICAST);
 }
 #endif
 
@@ -1538,9 +1536,9 @@ DEFUN (neighbor_peer_group,
   return CMD_SUCCESS;
 }
 
-/* no version of set_neighbor_remote_as */
-static int
-unset_neighbor_remote_as (struct vty *vty, char *peer_str)
+/* no version of daemon_neighbor_remote_as_cmd_execute */
+int
+daemon_no_neighbor_remote_as_cmd_execute (struct vty *vty, char *peer_str)
 {
   int ret;
   union sockunion su;

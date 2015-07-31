@@ -2076,10 +2076,7 @@ bgp_get (struct bgp **bgp_val, as_t *as, const char *name)
     }
 
     bgp = bgp_create (as, name);
-    VLOG_INFO("BGPD structure populated with database data"
-              "bgp->as : %d, *as : %d", bgp->as,(int)(*as));
-#if 0
-/* Uncomment it when added code for router_id */
+#ifndef ENABLE_OVSDB
   bgp_router_id_set(bgp, &router_id_zebra);
 #endif
    *bgp_val = bgp;

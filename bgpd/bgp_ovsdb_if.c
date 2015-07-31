@@ -390,13 +390,10 @@ bgp_apply_global_changes (void)
 
 /* Subscribe for changes in the BGP_Router table */
 static void
-bgp_apply_bgp_router_changes(struct ovsdb_idl *idl) {
+bgp_apply_bgp_router_changes(struct ovsdb_idl *idl)
+{
     const struct ovsrec_bgp_router *bgp_first;
     struct bgp *bgp_cfg;
-    struct in_addr addr, addr1;
-    as_t as;
-    int bgp_ret_status, ret_status;
-    int i = 0;
 
     bgp_first = ovsrec_bgp_router_first(idl);
     /*
@@ -419,153 +416,127 @@ bgp_apply_bgp_router_changes(struct ovsdb_idl *idl) {
         }
     }
     else {
+        /* Check if any row deletion */
         if (OVSREC_IDL_ANY_TABLE_ROWS_DELETED(bgp_first, idl_seqno)) {
-            const struct ovsrec_bgp_router *bgp_del_row;
-            OVSREC_BGP_ROUTER_FOR_EACH(bgp_del_row, idl) {
-                bgp_cfg = bgp_lookup_by_name(NULL);
-                if (bgp_cfg->as != bgp_del_row->asn) {
-                    VLOG_DBG("bgp_cfg->as : %d will be deleted from BGPD\n",
-                              (int)(bgp_cfg->as));
-                    bgp_delete(bgp_cfg);
-                }
-            }
-        }
-
+            delete_bgp_router_config(idl);
+	}
+        /* Check if any row insertion */
         if (OVSREC_IDL_ANY_TABLE_ROWS_INSERTED(bgp_first, idl_seqno)) {
-            const struct ovsrec_bgp_router *bgp_next_row;
-            bgp_next_row = bgp_first;
-            VLOG_INFO("First row insertion to BGP config\n");
-            if (!ovsrec_bgp_router_next(bgp_next_row)) {
-                /* Check if it is a first row insertion */
-                bgp_ret_status = bgp_get(&bgp_cfg, (as_t)&bgp_first->asn, NULL);
-                VLOG_INFO("First Row: bgp_first->asn : %d, bgp_cfg->as : %d",
-                           bgp_first->asn,(int)(bgp_cfg->as));
-            }
-            else {
-                const struct ovsrec_bgp_router *bgp_insert_row;
-                OVSREC_BGP_ROUTER_FOR_EACH(bgp_insert_row, idl) {
-                    VLOG_INFO("Some insertion to BGP config\n");
-                    if (OVSREC_IDL_IS_ROW_INSERTED(bgp_insert_row, idl_seqno)) {
-                        bgp_ret_status = bgp_get(&bgp_cfg, (as_t)&bgp_insert_row->asn,
-                                                 NULL);
-                        VLOG_INFO("bgp_insert_row->asn : %d, bgp_cfg->as : %d",
-                                  bgp_insert_row->asn,(int)(bgp_cfg->as));
-                    }
-                }
+	    insert_bgp_router_config(idl, bgp_first);
+	}
+	else {
+            /* Check if any row modification */
+	    if (OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED(bgp_first, idl_seqno)) {
+                modify_bgp_router_config(idl, bgp_first);
             }
         }
-        else {
-            if (OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED(bgp_first, idl_seqno)) {
-                const struct ovsrec_bgp_router *bgp_next_row;
-                const struct ovsdb_idl_column *column;
-                bgp_next_row = bgp_first;
-                if (!ovsrec_bgp_router_next(bgp_next_row)) {
-                    /* Check if it is a first row modification */
-                    VLOG_INFO("First row modification to BGP config\n");
-                    bgp_cfg = bgp_lookup_by_name(NULL);
-                    VLOG_INFO("First row: bgp_cfg->asn : %d",(int)(bgp_cfg->as));
+    }
+}
 
-                    OVSREC_IDL_GET_COLUMN(column, bgp_next_row, "router_id");
-                    if(column) {
-                        if (OVSREC_IDL_IS_COLUMN_MODIFIED(column, idl_seqno)) {
-                            addr.s_addr = inet_addr(bgp_first->router_id);
-                            bgp_router_id_set(bgp_cfg, &(addr.s_addr));
-                            VLOG_INFO("First Row: bgp_cfg->router_id : %s",
-                                       inet_ntoa(bgp_cfg->router_id));
-                        }
-                    }
+void
+delete_bgp_router_config(struct ovsdb_idl *idl)
+{
+    const struct ovsrec_bgp_router *bgp_del_row;
+    struct bgp *bgp_cfg;
 
-                    OVSREC_IDL_GET_COLUMN(column, bgp_next_row, "networks");
-                    if(column) {
-                        struct bgp_static *bgp_static;
-                        struct prefix p;
-                        struct vty *vty;
-                        struct bgp_node *rn;
-                        afi_t afi;
-                        safi_t safi;
-
-                        if (OVSREC_IDL_IS_COLUMN_MODIFIED(column, idl_seqno)) {
-                            for (i = 0; i < bgp_next_row->n_networks; i++) {
-                                VLOG_INFO("bgp_next_row->networks[%d]: %s",i,bgp_next_row->networks[i]);
-                                int ret = str2prefix(bgp_next_row->networks[i], &p);
-                                if (! ret) {
-                                    VLOG_ERR("Malformed prefix");
-                                }
-                                afi = family2afi(p.family);
-                                safi = SAFI_UNICAST;
-                                rn = bgp_node_lookup(bgp_cfg->route[afi][safi], &p);
-                                if (!rn) {
-                                    VLOG_INFO("First Row: Can't find specified "
-                                              "static route configuration..\n");
-                                    VLOG_INFO("First Row: Adding new static route\n");
-                                    ret_status = bgp_static_set(vty, bgp_cfg,
-                                                                bgp_next_row->networks[i],
-                                                                afi, safi,
-                                                                NULL, 0);
-                                    VLOG_INFO("First Row: New static route added to bgp routing table");
-                                }
-                            }
-                        }
-                    }
-                }
-                else {
-                    const struct ovsrec_bgp_router *bgp_mod_row;
-                    const struct ovsdb_idl_column *column;
-
-                    OVSREC_BGP_ROUTER_FOR_EACH(bgp_mod_row, idl) {
-                        if (OVSREC_IDL_IS_ROW_MODIFIED(bgp_mod_row, idl_seqno)) {
-                            /* Some row modification */
-                            VLOG_INFO("Some modification to BGP config\n");
-                            bgp_cfg = bgp_lookup_by_name(NULL);
-                            VLOG_INFO("bgp_cfg->asn : %d",(int)(bgp_cfg->as));
-
-                            OVSREC_IDL_GET_COLUMN(column, bgp_mod_row, "networks");
-                            if(column) {
-                                struct bgp_static *bgp_static;
-                                struct prefix p;
-                                struct vty *vty;
-                                struct bgp_node *rn;
-                                afi_t afi;
-                                safi_t safi;
-
-                                if (OVSREC_IDL_IS_COLUMN_MODIFIED(column, idl_seqno)) {
-                                    for (i = 0; i < bgp_mod_row->n_networks; i++) {
-                                        VLOG_INFO("bgp_mod_row->networks[%d]: %s",i,bgp_mod_row->networks[i]);
-                                        int ret = str2prefix(bgp_mod_row->networks[i], &p);
-                                        if (! ret) {
-                                            VLOG_ERR("Malformed prefix");
-                                        }
-                                        afi = family2afi(p.family);
-                                        safi = SAFI_UNICAST;
-                                        rn = bgp_node_lookup(bgp_cfg->route[afi][safi], &p);
-                                        if (!rn) {
-                                            VLOG_INFO("Can't find specified "
-                                                      "static route configuration..\n");
-                                            VLOG_INFO("Adding new static route\n");
-                                            ret_status = bgp_static_set(vty, bgp_cfg,
-                                                                        bgp_mod_row->networks[i],
-                                                                        afi, safi,
-                                                                        NULL, 0);
-                                            VLOG_INFO("New static route added to bgp routing table");
-                                        }
-                                    }
-                                }
-                            }
-
-                            OVSREC_IDL_GET_COLUMN(column, bgp_mod_row, "router_id");
-                            if(column) {
-                                if (OVSREC_IDL_IS_COLUMN_MODIFIED(column, idl_seqno)) {
-                                    addr1.s_addr = inet_addr(bgp_mod_row->router_id);
-                                    bgp_router_id_set(bgp_cfg, &(addr1.s_addr));
-                                    VLOG_INFO("bgp_cfg->router_id : %s",
-                                               inet_ntoa(bgp_cfg->router_id));
-                                }
-                            }
-                        }
-                    }
-                }
+    while(bgp_cfg = bgp_lookup_by_name(NULL)) {
+        bool match_found = 0;
+        OVSREC_BGP_ROUTER_FOR_EACH(bgp_del_row, idl) {
+            if (bgp_cfg->as == bgp_del_row->asn) {
+                match_found = 1;
+                break;
             }
         }
+        if (!match_found) {
+            VLOG_DBG("bgp_cfg->as : %d will be deleted from BGPD\n",
+	             (int)(bgp_cfg->as));
+            bgp_delete(bgp_cfg);
+        }
+    }
+}
+
+void
+insert_bgp_router_config(struct ovsdb_idl *idl, const struct ovsrec_bgp_router *bgp_first)
+{
+    const struct ovsrec_bgp_router *bgp_insert_row = bgp_first;
+    struct bgp *bgp_cfg;
+    int ret_status;
+
+    OVSREC_BGP_ROUTER_FOR_EACH(bgp_insert_row, idl) {
+        VLOG_INFO("New row insertion to BGP config\n");
+        if (OVSREC_IDL_IS_ROW_INSERTED(bgp_insert_row, idl_seqno)) {
+            ret_status = bgp_get(&bgp_cfg, (as_t)&bgp_insert_row->asn, NULL);
+            if (!ret_status) {
+                VLOG_INFO("bgp_insert_row->asn : %d, bgp_cfg->as : %d",
+                           bgp_insert_row->asn,(int)(bgp_cfg->as));
+            }
+        }
+    }
+}
+
+void
+modify_bgp_router_config(struct ovsdb_idl *idl, const struct ovsrec_bgp_router *bgp_first)
+{
+    const struct ovsrec_bgp_router *bgp_mod_row = bgp_first;
+    const struct ovsdb_idl_column *column;
+    struct bgp *bgp_cfg;
+    struct in_addr addr;
+    as_t as;
+    int ret_status;
+    int i = 0;
+
+    OVSREC_BGP_ROUTER_FOR_EACH(bgp_mod_row, idl) {
+        if (OVSREC_IDL_IS_ROW_MODIFIED(bgp_mod_row, idl_seqno)) {
+            bgp_cfg = bgp_lookup((as_t)bgp_mod_row->asn, NULL);
+	    /* Check if router_id is modified */
+	    OVSREC_IDL_GET_COLUMN(column, bgp_mod_row, "router_id");
+            if(column) {
+                if (OVSREC_IDL_IS_COLUMN_MODIFIED(column, idl_seqno)) {
+                    addr.s_addr = inet_addr(bgp_mod_row->router_id);
+                    ret_status = bgp_router_id_set(bgp_cfg, &addr.s_addr);
+                    if (!ret_status) {
+                        VLOG_INFO("BGP router_id set to %s",
+                                   inet_ntoa(bgp_cfg->router_id));
+                    }
+		}
+	    }
+            /* Check if network is modified */
+            OVSREC_IDL_GET_COLUMN(column, bgp_mod_row, "networks");
+            if(column) {
+                struct bgp_static *bgp_static;
+                struct prefix p;
+                struct vty *vty;
+                struct bgp_node *rn;
+                afi_t afi;
+                safi_t safi;
+
+                if (OVSREC_IDL_IS_COLUMN_MODIFIED(column, idl_seqno)) {
+                    for (i = 0; i < bgp_mod_row->n_networks; i++) {
+                        VLOG_INFO("bgp_mod_row->networks[%d]: %s",
+			           i, bgp_mod_row->networks[i]);
+                        int ret = str2prefix(bgp_mod_row->networks[i], &p);
+                        if (! ret) {
+                            VLOG_ERR("Malformed prefix");
+                        }
+                        afi = family2afi(p.family);
+                        safi = SAFI_UNICAST;
+                        rn = bgp_node_lookup(bgp_cfg->route[afi][safi], &p);
+                        if (!rn) {
+                            VLOG_INFO("Can't find specified static "
+                                      "route configuration..\n");
+                            VLOG_INFO("Adding new static route\n");
+                            ret_status = bgp_static_set(vty, bgp_cfg,
+                                                        bgp_mod_row->networks[i],
+                                                        afi, safi,
+                                                        NULL, 0);
+                            if (!ret_status) {
+                                VLOG_INFO("New static route added to bgp routing table");
+                            }
+                        }
+                    }
+                }
+	    }
+	}
     }
 }
 

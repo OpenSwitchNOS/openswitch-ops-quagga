@@ -347,7 +347,14 @@ bgp_ovsdb_withdraw_rib_entry(struct prefix *p,
         txn = rib_txn;
     }
     prefix2str(p, pr, sizeof(pr));
+    VLOG_DBG("%s: Withdrawing route %s, flags %d\n",
+             __FUNCTION__, pr, info->flags);
     rib_row = bgp_ovsdb_lookup_rib_entry(p, info, bgp, safi);
+    if (!rib_row) {
+        VLOG_ERR("%s: Failed to find route %s in Route table\n",
+                 __FUNCTION__, pr);
+        return -1;
+    }
     if (CHECK_FLAG(info->flags, BGP_INFO_SELECTED)) {
         VLOG_ERR("%s:BGP info flag is set to selected, cannot withdraw route %s",
                  __FUNCTION__, pr);
@@ -361,10 +368,13 @@ bgp_ovsdb_withdraw_rib_entry(struct prefix *p,
     if (create_txn) {
         status = ovsdb_idl_txn_commit(txn);
         ovsdb_idl_txn_destroy(txn);
-        if (status != TXN_SUCCESS) {
+        if ((status != TXN_SUCCESS) && (status != TXN_INCOMPLETE)) {
             VLOG_ERR("%s: Failed to withdraw route %s, status %d\n",
                      __FUNCTION__, pr, status);
             return -1;
+        } else {
+            VLOG_DBG("Route %s withdraw txn sent, rc = %d\n",
+                     pr, status);
         }
     }
     return 0;
@@ -399,8 +409,16 @@ bgp_ovsdb_announce_rib_entry(struct prefix *p,
         txn = rib_txn;
     }
     prefix2str(p, pr, sizeof(pr));
-    VLOG_DBG("%s: Announcing route %s\n", __FUNCTION__, pr);
+    VLOG_INFO("%s: Announcing route %s, flags %d\n",
+              __FUNCTION__, pr, info->flags);
     rib_row = bgp_ovsdb_lookup_rib_entry(p, info, bgp, safi);
+    if (!rib_row) {
+        VLOG_ERR("%s: Failed to find route %s in Route table\n",
+                 __FUNCTION__, pr);
+        return -1;
+    }
+    VLOG_DBG("%s: Found route %s from peer %s\n",
+             __FUNCTION__, pr, info->peer->host);
     if (!CHECK_FLAG(info->flags, BGP_INFO_SELECTED)) {
         VLOG_ERR("%s:BGP info flag is not set to selected, cannot \
 announce route %s",
@@ -415,10 +433,13 @@ announce route %s",
     if (create_txn) {
         status = ovsdb_idl_txn_commit(txn);
         ovsdb_idl_txn_destroy(txn);
-        if (status != TXN_SUCCESS) {
+        if ((status != TXN_SUCCESS) && (status != TXN_INCOMPLETE)) {
             VLOG_ERR("%s: Failed to announce route %s, status %d\n",
                      __FUNCTION__, pr, status);
             return -1;
+        } else {
+            VLOG_DBG("Route %s announce txn sent, rc = %d\n",
+                     pr, status);
         }
     }
     return 0;
@@ -450,7 +471,14 @@ bgp_ovsdb_delete_rib_entry(struct prefix *p,
         txn = rib_txn;
     }
     prefix2str(p, pr, sizeof(pr));
+    VLOG_DBG("%s: Deleting route %s, flags %d\n",
+             __FUNCTION__, pr, info->flags);
     rib_row = bgp_ovsdb_lookup_rib_entry(p, info, bgp, safi);
+    if (!rib_row) {
+        VLOG_ERR("%s: Failed to find route %s in Route table\n",
+                 __FUNCTION__, pr);
+        return -1;
+    }
     if (CHECK_FLAG(info->flags, BGP_INFO_SELECTED)) {
         VLOG_ERR("%s:BGP info flag is set to selected, cannot \
 remove route %s",
@@ -462,10 +490,13 @@ remove route %s",
     if (create_txn) {
         status = ovsdb_idl_txn_commit(txn);
         ovsdb_idl_txn_destroy(txn);
-        if (status != TXN_SUCCESS) {
+        if ((status != TXN_SUCCESS) && (status != TXN_INCOMPLETE)) {
             VLOG_ERR("%s: Failed to remove route %s, status %d\n",
                      __FUNCTION__, pr, status);
             return -1;
+        } else {
+            VLOG_DBG("Route %s delete txn sent, rc = %d\n",
+                     pr, status);
         }
     }
     return 0;
@@ -500,7 +531,6 @@ bgp_ovsdb_add_rib_entry(struct prefix *p,
         }
     } else {
         txn = rib_txn;
-
     }
     rib = ovsrec_route_insert(txn);
     prefix2str(p, pr, sizeof(pr));
@@ -522,6 +552,7 @@ bgp_ovsdb_add_rib_entry(struct prefix *p,
     ovsrec_route_set_from(rib, "BGP");
 
     distance = bgp_distance_apply (p, info, bgp);
+    VLOG_DBG("distance %d\n", distance);
     if (distance) {
         ovsrec_route_set_distance(rib, (const int64_t *)&distance, 1);
     }
@@ -554,10 +585,13 @@ bgp_ovsdb_add_rib_entry(struct prefix *p,
         status = ovsdb_idl_txn_commit(txn);
         // HALON_TODO: Need to handle txn error recovery.
         ovsdb_idl_txn_destroy(txn);
-        if (status != TXN_SUCCESS) {
+        if ((status != TXN_SUCCESS) && (status != TXN_INCOMPLETE)) {
             VLOG_ERR("%s: Failed to add route %s, status %d\n",
                      __FUNCTION__, pr, status);
             return -1;
+        } else {
+            VLOG_DBG("Route %s add txn sent, rc = %d\n",
+                     pr, status);
         }
     }
     return 0;

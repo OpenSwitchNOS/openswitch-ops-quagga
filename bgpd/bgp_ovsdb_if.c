@@ -465,7 +465,7 @@ insert_bgp_router_config(struct ovsdb_idl *idl, const struct ovsrec_bgp_router *
     OVSREC_BGP_ROUTER_FOR_EACH(bgp_insert_row, idl) {
         VLOG_INFO("New row insertion to BGP config\n");
         if (OVSREC_IDL_IS_ROW_INSERTED(bgp_insert_row, idl_seqno)) {
-            ret_status = bgp_get(&bgp_cfg, (as_t)&bgp_insert_row->asn, NULL);
+            ret_status = bgp_get(&bgp_cfg, (as_t *)&bgp_insert_row->asn, NULL);
             if (!ret_status) {
                 VLOG_INFO("bgp_insert_row->asn : %d, bgp_cfg->as : %d",
                            bgp_insert_row->asn,(int)(bgp_cfg->as));

@@ -138,12 +138,20 @@ class bgpTest (HalonTest):
             # Configure the IPs of the interfaces
             if isinstance(switch, HalonSwitch):
                 # Configure the gateways for the switches
-                switch.swns_cmd("ifconfig 1 %s netmask %s" %
-                                (BGP_GATEWAYS[i], BGP_GW_NETMASK))
+                switch.cmd("ovs-vsctl add-vrf-port vrf_default 1")
+                switch.cmdCLI("configure terminal")
+                switch.cmdCLI("interface 1")
+                switch.cmdCLI("ip address %s/%s" % (BGP_GATEWAYS[i], BGP_GW_PREFIX))
+                switch.cmdCLI("exit")
+                switch.cmd("/usr/bin/ovs-vsctl set interface 1 user_config:admin=up")
 
                 # Configure the IPs for the interfaces between the switches
-                switch.swns_cmd("ifconfig 2 %s netmask %s" %
-                                (BGP_ROUTER_IDS[i], BGP_NETWORK_MASK))
+                switch.cmd("ovs-vsctl add-vrf-port vrf_default 2")
+                switch.cmdCLI("configure terminal")
+                switch.cmdCLI("interface 2")
+                switch.cmdCLI("ip address %s/%s" % (BGP_ROUTER_IDS[i], BGP_NETWORK_PL))
+                switch.cmdCLI("exit")
+                switch.cmd("/usr/bin/ovs-vsctl set interface 2 user_config:admin=up")
             else:
                 # Configure the gateways for the switches
                 switch.setIP(ip=BGP_GATEWAYS[i], prefixLen=BGP_GW_PREFIX,

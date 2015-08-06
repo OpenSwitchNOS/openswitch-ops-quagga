@@ -114,8 +114,12 @@ class bgpTest (HalonTest):
         for switch in self.net.switches:
             # Configure the IPs between the switches
             if isinstance(switch, HalonSwitch):
-                switch.swns_cmd("ifconfig 1 %s netmask %s" %
-                                (BGP_ROUTER_IDS[i], BGP_NETWORK_MASK))
+                switch.cmd("ovs-vsctl add-vrf-port vrf_default 1")
+                switch.cmdCLI("configure terminal")
+                switch.cmdCLI("interface 1")
+                switch.cmdCLI("ip address %s/%s" % (BGP_ROUTER_IDS[i], BGP_NETWORK_PL))
+                switch.cmdCLI("exit")
+                switch.cmd("/usr/bin/ovs-vsctl set interface 1 user_config:admin=up")
             else:
                 switch.setIP(ip=BGP_ROUTER_IDS[i], intf="%s-eth1" % switch.name)
             i += 1
@@ -141,6 +145,33 @@ class bgpTest (HalonTest):
             i += 1
 
             SwitchVtyshUtils.vtysh_cfg_cmd(switch, cfg_array)
+
+    def unconfigure_network_bgp (self):
+        info("Unconfiguring network for BGP1...\n")
+
+        switch = self.net.switches[0]
+
+        cfg_array = []
+        cfg_array.append("router bgp %s" % BGP1_ASN)
+        cfg_array.append("no network %s/%s" % (BGP1_NETWORK, BGP_NETWORK_PL))
+
+        SwitchVtyshUtils.vtysh_cfg_cmd(switch, cfg_array)
+
+    def verify_bgp_route_removed (self):
+        info("Verifying route from BGP1 on BGP2 removed...\n")
+
+        switch = self.net.switches[1]
+        network = BGP1_NETWORK
+        next_hop = BGP1_ROUTER_ID
+
+        # Wait some time to let BGP converge
+        sleep(BGP_CONVERGENCE_DELAY_S)
+
+        found = SwitchVtyshUtils.verify_bgp_route(switch, network,
+                                                  next_hop)
+
+        assert found == False, "Route (%s) was not successfully removed" % \
+                               network
 
     def verify_bgp_routes (self):
         info("\nVerifying bgp routes..\n")
@@ -200,3 +231,5 @@ class Test_bgp:
         self.test_var.configure_bgp()
         # self.test_var.verify_configs()
         self.test_var.verify_bgp_routes()
+        self.test_var.unconfigure_network_bgp()
+        self.test_var.verify_bgp_route_removed()

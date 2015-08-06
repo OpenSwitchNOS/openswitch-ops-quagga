@@ -208,6 +208,9 @@ extern void bgp_static_delete (struct bgp *);
 extern void bgp_static_update (struct bgp *, struct prefix *, struct bgp_static *,
 			afi_t, safi_t);
 extern void bgp_static_withdraw (struct bgp *, struct prefix *, afi_t, safi_t);
+
+extern int bgp_static_set (struct vty *vty, struct bgp *bgp, const char *ip_str,
+			   afi_t afi, safi_t safi, const char *rmap, int backdoor);
                      
 extern int bgp_static_set_vpnv4 (struct vty *vty, const char *, 
                           const char *, const char *);

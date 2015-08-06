@@ -201,4 +201,3 @@ vtysh_ovsdb_init_ovstableclients()
 
   return e_vtysh_ok;
 }
-

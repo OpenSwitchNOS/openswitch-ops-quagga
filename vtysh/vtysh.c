@@ -861,7 +861,7 @@ DEFUNSH (VTYSH_ALL,
 {
   return vtysh_end ();
 }
-
+#if 0
 DEFUNSH (VTYSH_BGPD,
 	 router_bgp,
 	 router_bgp_cmd,
@@ -883,7 +883,7 @@ ALIAS_SH (VTYSH_BGPD,
 	  AS_STR
 	  "BGP view\n"
 	  "view name\n")
-
+#endif
 DEFUNSH (VTYSH_BGPD,
 	 address_family_vpnv4,
 	 address_family_vpnv4_cmd,
@@ -2564,8 +2564,10 @@ vtysh_init_vty (void)
 #endif
   install_element (CONFIG_NODE, &router_babel_cmd);
   install_element (CONFIG_NODE, &router_isis_cmd);
+#if 0
   install_element (CONFIG_NODE, &router_bgp_cmd);
   install_element (CONFIG_NODE, &router_bgp_view_cmd);
+#endif
   install_element (BGP_NODE, &address_family_vpnv4_cmd);
   install_element (BGP_NODE, &address_family_vpnv4_unicast_cmd);
   install_element (BGP_NODE, &address_family_ipv4_unicast_cmd);

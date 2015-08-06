@@ -160,7 +160,11 @@ route_map_lookup_by_name (const char *name)
 
 /* Lookup route map.  If there isn't route map create one and return
    it. */
+#ifdef HALON
+struct route_map *
+#else
 static struct route_map *
+#endif
 route_map_get (const char *name)
 {
   struct route_map *map;
@@ -393,7 +397,11 @@ route_map_index_add (struct route_map *map, enum route_map_type type,
 }
 
 /* Get route map index. */
+#ifdef HALON
+struct route_map_index *
+#else
 static struct route_map_index *
+#endif
 route_map_index_get (struct route_map *map, enum route_map_type type, 
 		     int pref)
 {

@@ -440,6 +440,7 @@ main (int argc, char **argv, char **env)
   printf ("\n");
 
 #ifdef ENABLE_OVSDB
+  lib_vtysh_ovsdb_exit();
   vtysh_ovsdb_exit();
 #endif
 

@@ -1,4 +1,4 @@
-/* BGP CLI implementation with Halon vtysh.
+/* policy ovsdb integration.
  *
  * Hewlett-Packard Company Confidential (C) Copyright 2015 Hewlett-Packard Development Company, L.P.
  *
@@ -17,9 +17,49 @@
  * Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
  * 02111-1307, USA.
  *
- * File: bgp_vty.h
+ * File: policy_ovsdb.h
  *
- * Purpose: This file contains function declarations of BGP CLI.
+ * Purpose: Policy integrating with ovsdb.
  */
-void
-bgp_vty_init();
+#ifndef POLICY_OVSDB_H
+#define POLICY_OVSDB_H
+
+enum
+{
+  SET_COMMUNITY,
+  SET_METRIC,
+  SET_MAX,
+} set;
+
+enum
+{
+  MATCH_PREFIX,
+  MATCH_MAX,
+} match;
+
+enum
+{
+  RT_MAP_NAME,
+  RT_MAP_ACTION,
+  RT_MAP_PREFERENCE,
+  RT_MAP_DESCRIPTION,
+  RT_MAP_MAX,
+} rt_map;
+
+
+enum
+{
+  PREFIX_LIST_NAME,
+  PREFIX_LIST_ACTION,
+  PREFIX_LIST_PREFIX,
+  PREFIX_LIST_MAX,
+} prefix_list;
+
+
+
+
+int policy_ovsdb_prefix_list_get (struct ovsdb_idl *idl);
+int policy_ovsdb_rt_map(struct ovsdb_idl *idl);
+
+
+#endif /* POLICY_OVSDB */

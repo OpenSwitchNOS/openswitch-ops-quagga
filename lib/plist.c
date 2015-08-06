@@ -174,7 +174,11 @@ prefix_list_entry_new (void)
   return new;
 }
 
+#ifdef HALON
+void
+#else
 static void
+#endif
 prefix_list_entry_free (struct prefix_list_entry *pentry)
 {
   XFREE (MTYPE_PREFIX_LIST_ENTRY, pentry);
@@ -272,7 +276,11 @@ prefix_list_insert (afi_t afi, const char *name)
   return plist;
 }
 
+#ifdef HALON
+struct prefix_list *
+#else
 static struct prefix_list *
+#endif
 prefix_list_get (afi_t afi, const char *name)
 {
   struct prefix_list *plist;
@@ -334,7 +342,11 @@ prefix_list_delete (struct prefix_list *plist)
     (*master->delete_hook) (NULL);
 }
 
+#ifdef HALON
+struct prefix_list_entry *
+#else
 static struct prefix_list_entry *
+#endif
 prefix_list_entry_make (struct prefix *prefix, enum prefix_list_type type,
 			int seq, int le, int ge, int any)
 {
@@ -462,7 +474,11 @@ prefix_list_entry_delete (struct prefix_list *plist,
     }
 }
 
+#ifdef HALON
+void
+#else
 static void
+#endif
 prefix_list_entry_add (struct prefix_list *plist,
 		       struct prefix_list_entry *pentry)
 {
@@ -623,7 +639,11 @@ prefix_list_print (struct prefix_list *plist)
 }
 
 /* Retrun 1 when plist already include pentry policy. */
+#ifdef HALON
+struct prefix_list_entry *
+#else
 static struct prefix_list_entry *
+#endif
 prefix_entry_dup_check (struct prefix_list *plist,
 			struct prefix_list_entry *new)
 {

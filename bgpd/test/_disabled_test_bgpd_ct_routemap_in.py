@@ -87,8 +87,12 @@ class bgpTest (HalonTest):
 
             # Configure the IPs between the switches
             if isinstance(switch, HalonSwitch):
-                switch.swns_cmd("ifconfig 1 %s netmask %s" %
-                                (bgp_cfg.routerid, DEFAULT_NETMASK))
+                switch.cmd("ovs-vsctl add-vrf-port vrf_default 1")
+                switch.cmdCLI("configure terminal")
+                switch.cmdCLI("interface 1")
+                switch.cmdCLI("ip address %s/%s" % (bgp_cfg.routerid, DEFAULT_PL))
+                switch.cmdCLI("exit")
+                switch.cmd("/usr/bin/ovs-vsctl set interface 1 user_config:admin=up")
             else:
                 switch.setIP(ip=bgp_cfg.routerid, intf="%s-eth1" % switch.name)
 

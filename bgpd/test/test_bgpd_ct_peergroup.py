@@ -121,8 +121,12 @@ class bgpTest (HalonTest):
         for switch in self.net.switches:
             # Configure the IPs between the switches
             if isinstance(switch, HalonSwitch):
-                switch.swns_cmd("ifconfig 1 %s netmask %s" %
-                                (BGP_ROUTER_IDS[i], BGP_NETWORK_MASK))
+                switch.cmd("ovs-vsctl add-vrf-port vrf_default 1")
+                switch.cmdCLI("configure terminal")
+                switch.cmdCLI("interface 1")
+                switch.cmdCLI("ip address %s/%s" % (BGP_ROUTER_IDS[i], BGP_NETWORK_PL))
+                switch.cmdCLI("exit")
+                switch.cmd("/usr/bin/ovs-vsctl set interface 1 user_config:admin=up")
             else:
                 switch.setIP(ip=BGP_ROUTER_IDS[i], intf="%s-eth1" % switch.name)
             i += 1

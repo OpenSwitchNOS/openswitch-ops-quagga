@@ -47,6 +47,8 @@ NUM_OF_SWITCHES = 1
 NUM_HOSTS_PER_SWITCH = 0
 SWITCH_PREFIX = "s"
 
+BGP_ROUTER_ID = "9.0.0.1"
+
 class myTopo(Topo):
     def build (self, hsts=0, sws=2, **_opts):
 
@@ -79,38 +81,75 @@ class bgpTest (HalonTest):
         info("bgpd process exists on switch %s\n" % switch.name)
         info("\n")
 
-    def verify_router_bgp_asn (self):
-        config = "router bgp"
-        info("Verifying \"%s\"..\n" % config)
+    def configure_bgp (self):
+        info("Configuring BGP...\n")
 
         switch = self.net.switches[0]
         cfg_array = []
-        cfg_array.append("%s %s" % (config, BGP_ASN))
+        cfg_array.append("router bgp %s" % BGP_ASN)
+
+        # Append network so that we can utilize "sh ip bgp" for verification
+        cfg_array.append("bgp router-id %s" % BGP_ROUTER_ID)
+        cfg_array.append("network 11.0.0.0/8")
 
         SwitchVtyshUtils.vtysh_cfg_cmd(switch, cfg_array)
 
-        res = SwitchVtyshUtils.verify_cfg_value(switch, [config], BGP_ASN)
-        assert res, "Config \"%s\" not correctly configured!" % config
+    def unconfigure_bgp (self):
+        info("Unconfiguring BGP...\n")
 
-        info("Config \"%s\" was correctly configured.\n" % config)
+        switch = self.net.switches[0]
+        cfg_array = []
+        cfg_array.append("no router bgp %s" % BGP_ASN)
+
+        SwitchVtyshUtils.vtysh_cfg_cmd(switch, cfg_array)
+
+    def verify_router_bgp_asn (self):
+        info("Verifying BGP configured..\n")
+
+        res = self.does_router_bgp_exist(BGP_ROUTER_ID)
+        assert res, "Config \"%s\" not correctly configured!"
+
+        info("Config was correctly configured.\n")
         info("\n")
 
     def verify_no_router_bgp_asn (self):
-        config = "router bgp"
-        info("Verifying \"no %s\"..\n" % config)
+        info("Verifying BGP unconfigured..\n")
 
+        res = self.does_router_bgp_exist(BGP_ROUTER_ID)
+        assert res == False, "Config was not removed!"
+
+        info("Config was successfully removed.\n")
+        info("\n")
+
+    def does_router_bgp_exist (self, val):
+        # For now, using verification via "sh ip bgp" command since
+        # "sh running-config" is not yet implemented.
+        if 0:
+            res = self.router_bgp_exists_via_sh_running_config()
+        else:
+            res = self.router_bgp_exists_via_sh_ip_bgp(val)
+
+        return res
+
+    def router_bgp_exists_via_sh_running_config (self):
+        switch = self.net.switches[0]
+        res = SwitchVtyshUtils.verify_cfg_exist(switch, ["router bgp"])
+
+        return res
+
+    def router_bgp_exists_via_sh_ip_bgp (self, val):
         switch = self.net.switches[0]
 
-        cfg_array = []
-        cfg_array.append("no %s %s" % (config, BGP_ASN))
+        output = SwitchVtyshUtils.vtysh_cmd(switch, "sh ip bgp")
 
-        SwitchVtyshUtils.vtysh_cfg_cmd(switch, cfg_array)
+        # The output should contain information about the router-id if
+        # configurations exist
+        if output.find(val) >= 0:
+            res = True
+        else:
+            res = False
 
-        res = SwitchVtyshUtils.verify_cfg_exist(switch, [config])
-        assert res == False, "Config \"%s\" was not removed!" % config
-
-        info("Config \"%s\" was successfully removed.\n" % config)
-        info("\n")
+        return res
 
 class Test_bgp:
     def setup (self):
@@ -136,5 +175,7 @@ class Test_bgp:
 
     def test_bgp_full (self):
         self.test_var.verify_bgp_running()
+        self.test_var.configure_bgp()
         self.test_var.verify_router_bgp_asn()
+        self.test_var.unconfigure_bgp()
         self.test_var.verify_no_router_bgp_asn()

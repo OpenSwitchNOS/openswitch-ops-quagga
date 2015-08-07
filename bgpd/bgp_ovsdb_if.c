@@ -15,7 +15,7 @@
  * You should have received a copy of the GNU General Public License
  * along with GNU Zebra; see the file COPYING.  If not, write to the Free
  * Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
- * 02111-1307, USA.  
+ * 02111-1307, USA.
  *
  * File: bgp_ovsdb_if.c
  *
@@ -120,7 +120,7 @@ bgp_ovsdb_tables_init (struct ovsdb_idl *idl)
     ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_other_config);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_status);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_external_ids);
-    
+
     /* BGP neighbor table */
     ovsdb_idl_add_table(idl, &ovsrec_table_bgp_neighbor);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_active);
@@ -146,7 +146,7 @@ bgp_ovsdb_tables_init (struct ovsdb_idl *idl)
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_other_config);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_capability);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_timers);
-    
+
     /* RIB table */
     ovsdb_idl_add_table(idl, &ovsrec_table_route);
     ovsdb_idl_add_column(idl, &ovsrec_route_col_prefix);
@@ -190,7 +190,7 @@ ovsdb_init (const char *db_path)
 
     /* BGP tables */
     bgp_ovsdb_tables_init(idl);
-    
+
     /* Register ovs-appctl commands for this daemon. */
     unixctl_command_register("bgpd/dump", "", 0, 0, bgp_unixctl_dump, NULL);
 }
@@ -589,6 +589,13 @@ bgp_apply_bgp_neighbor_changes (struct ovsdb_idl *idl)
 			daemon_neighbor_remote_as_cmd_execute
 			    (bgp_instance, ovs_bgpn->name,
 				ovs_bgpn->remote_as, AFI_IP, SAFI_UNICAST);
+                       if (ovs_bgpn->description) {
+                           daemon_neighbor_decription_cmd_execute(bgp_instance,
+                                ovs_bgpn->name, ovs_bgpn->description);
+                       } else {
+                           daemon_neighbor_decription_cmd_execute(bgp_instance,
+                                ovs_bgpn->name, NULL);
+                       }
 		    } else {
 			VLOG_ERR("%%cannot find daemon bgp router instance %d %%\n",
 			    ovs_bgpn->bgp_router->asn);

@@ -1950,6 +1950,54 @@ DEFUN (no_neighbor_passive,
   return peer_flag_unset_vty (vty, argv[0], PEER_FLAG_PASSIVE);
 }
 
+static struct peer *
+bgp_peer_and_group_lookup (struct bgp *bgp, const char *peer_str)
+{
+  int ret;
+  union sockunion su;
+  struct peer *peer;
+  struct peer_group *group;
+
+
+  ret = str2sockunion (peer_str, &su);
+  if (ret == 0)
+    {
+      peer = peer_lookup (bgp, &su);
+      if (peer)
+        return peer;
+    }
+  else
+    {
+      group = peer_group_lookup (bgp, peer_str);
+      if (group)
+        return group->conf;
+    }
+
+  return NULL;
+}
+
+/*
+ *
+ */
+int
+daemon_neighbor_decription_cmd_execute (struct bgp *bgp, char *peer_str, char *description)
+{
+    struct peer *peer;
+
+    peer= bgp_peer_and_group_lookup (bgp, peer_str);
+    if (! peer) return 1;
+
+    if (description) {
+        VLOG_DBG("neighbor %s set description %s \n", peer_str, description);
+        peer_description_set (peer, description);
+        return 0;
+    } else {
+        peer_description_unset (peer);
+        return 0;
+    }
+}
+
+
 /* neighbor shutdown. */
 DEFUN (neighbor_shutdown,
        neighbor_shutdown_cmd,

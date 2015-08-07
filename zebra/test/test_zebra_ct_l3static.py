@@ -52,7 +52,7 @@ class staticRouteConfigTest( HalonTest ):
         else:
             assert 0, ('IP route configuration failed')
 
-        info('### Verify deletion of ip route with nexthop address ###\n')
+        info('\n### Verify deletion of ip route with nexthop address ###\n')
         s1.cmdCLI("no ip route 192.168.3.1/24 192.168.2.2 2")
         ret = s1.cmdCLI("do show ip route")
 
@@ -61,7 +61,7 @@ class staticRouteConfigTest( HalonTest ):
         else:
             assert 0, ('Deletion of ip route failed')
 
-        info('### Verify prefix format ###\n')
+        info('\n### Verify prefix format ###\n')
         s1.cmdCLI("ip route 192.168.3.1 192.168.2.2 2")
         ret = s1.cmdCLI("do show ip route")
 
@@ -70,7 +70,7 @@ class staticRouteConfigTest( HalonTest ):
         else:
             assert 0, ('Prefix format verification failed')
 
-        info('### Verify ip route configuration with nexthop interface ###\n')
+        info('\n### Verify ip route configuration with nexthop interface ###\n')
         s1.cmdCLI("ip route 192.168.3.1/24 2 2")
         ret = s1.cmdCLI("do show ip route")
 
@@ -83,7 +83,7 @@ class staticRouteConfigTest( HalonTest ):
         else:
             assert 0, ('IP route configuration failed')
 
-        info('### Verify deletion of ip route with nexthop interface ###\n')
+        info('\n### Verify deletion of ip route with nexthop interface ###\n')
         s1.cmdCLI("no ip route 192.168.3.1/24 2 2")
         ret = s1.cmdCLI("do show ip route")
 
@@ -92,18 +92,21 @@ class staticRouteConfigTest( HalonTest ):
         else:
             assert 0, ('Deletion of ip routes failed')
 
-        info('### Verify setting of default distance ###\n')
+        info('\n### Verify setting of default distance ###\n')
         s1.cmdCLI("ip route 192.168.3.1/24 192.168.2.2")
         ret = s1.cmdCLI("do show ip route")
 
+        intf_check = 0
         for index, word in enumerate(ret.split(" ")):
-            if index == 15 and word == '[1/0]':
+            if index == 15 and word == '[1/0],':
                 intf_check = 1
 
         if intf_check == 1:
             info('### Default distance verification success ###\n\n')
         else:
             assert 0, ('Default distance verification failed')
+
+        s1.cmdCLI("no ip route 192.168.3.1/24 192.168.2.2")
 
     def test_ipv6(self):
         info('\n########## Test  to verify IPv6 static routes ##########\n')
@@ -119,16 +122,16 @@ class staticRouteConfigTest( HalonTest ):
         s1.cmdCLI("exit")
 
         info('### Verify ip route configuration with nexthop address ###\n')
-        s1.cmdCLI("ipv6 route 2002::1/120 2001::2 2")
+        s1.cmdCLI("ipv6 route 2002::/120 2001::2 2")
         ret = s1.cmdCLI("do show ipv6 route")
 
-        if '2002::1/120' in ret and '2001::2' in ret and 'static' in ret and '[2/0]' in ret:
+        if '2002::/120' in ret and '2001::2' in ret and 'static' in ret and '[2/0]' in ret:
             info('### IPv6 route configuration passed ###\n')
         else:
             assert 0, ('IPv6 route configuration failed')
 
-        info('### Verify deletion of ipv6 route ###\n')
-        s1.cmdCLI("no ipv6 route 2002::1/120 2001::2 2")
+        info('\n### Verify deletion of ipv6 route ###\n')
+        s1.cmdCLI("no ipv6 route 2002::/120 2001::2 2")
         ret = s1.cmdCLI("do show ipv6 route")
 
         if 'No ipv6 routes configured' in ret:
@@ -136,8 +139,8 @@ class staticRouteConfigTest( HalonTest ):
         else:
             assert 0, ('Deletion of ipv6 route failed')
 
-        info('### Verify prefix format ###\n')
-        s1.cmdCLI("ipv6 route 2002::1 2001::2 2")
+        info('\n### Verify prefix format ###\n')
+        s1.cmdCLI("ipv6 route 2002:: 2001::2 2")
         ret = s1.cmdCLI("do show ipv6 route")
 
         if 'No ipv6 routes configured' in ret:
@@ -145,8 +148,8 @@ class staticRouteConfigTest( HalonTest ):
         else:
             assert 0, ('Prefix format verification failed')
 
-        info('### Verify ipv6 route configuration with nexthop interface ###\n')
-        s1.cmdCLI("ipv6 route 2002::1/120 2 2")
+        info('\n### Verify ipv6 route configuration with nexthop interface ###\n')
+        s1.cmdCLI("ipv6 route 2002::/120 2 2")
         ret = s1.cmdCLI("do show ipv6 route")
 
         for index, word in enumerate(ret.split(" ")):
@@ -158,8 +161,8 @@ class staticRouteConfigTest( HalonTest ):
         else:
             assert 0, ('IPv6 route configuration failed')
 
-        info('### Verify deletion of ipv6 route with nexthop interface ###\n')
-        s1.cmdCLI("no ipv6 route 2002::1/120 2 2")
+        info('\n### Verify deletion of ipv6 route with nexthop interface ###\n')
+        s1.cmdCLI("no ipv6 route 2002::/120 2 2")
         ret = s1.cmdCLI("do show ipv6 route")
 
         if 'No ipv6 routes configured' in ret:
@@ -167,8 +170,8 @@ class staticRouteConfigTest( HalonTest ):
         else:
             assert 0, ('Deletion of ipv6 routes failed')
 
-        info('### Verify setting of default distance ###\n')
-        s1.cmdCLI("ipv6 route 1001:2001::1/64 1001:3001::3")
+        info('\n### Verify setting of default distance ###\n')
+        s1.cmdCLI("ipv6 route 1001:2001::/64 1001:3001::3")
         ret = s1.cmdCLI("do show ipv6 route")
 
         for index, word in enumerate(ret.split(" ")):
@@ -180,58 +183,43 @@ class staticRouteConfigTest( HalonTest ):
         else:
             assert 0, ('Default distance verification failed')
 
+        s1.cmdCLI("no ipv6 route 1001:2001::1/64 1001:3001::3")
+
     def test_show_running_config(self):
-        info("\n=====================================================================\n")
-        info("*** Tests To Verify 'show running-config' for IPv4 and IPv6 Static Routes")
-        info("\n=====================================================================\n")
+        info("\n########## Test  to verify 'show running-config' ##########\n")
         s1 = self.net.switches[ 0 ]
         intf_check = 0
         clilist = []
 
         s1.cmdCLI("configure terminal")
-        info('\n***Adding Ipv4 Routes\n')
-        info('*** CMD: ip route 10.10.10.10/8 20.20.20.20 ***\n')
-        s1.cmdCLI("ip route 10.10.10.10/8 20.20.20.20")
-        clilist.append('ip route 10.10.10.10/8 20.20.20.20')
-        info('*** CMD: ip route 30.30.30.30/8 40.40.40.40 15 ***\n')
-        s1.cmdCLI("ip route 30.30.30.30/8 40.40.40.40 15")
-        clilist.append('ip route 30.30.30.30/8 40.40.40.40 15')
-        s1.cmdCLI("interface 25")
-        s1.cmdCLI("vrf attach vrf_default")
-        s1.cmdCLI("ip address 50.50.50.60")
+        s1.cmdCLI("interface 3")
+        s1.cmdCLI("ip address 10.0.0.5/8")
+        s1.cmdCLI("ipv6 address 2003::2/120")
         s1.cmdCLI("exit")
-        info('*** CMD: ip route 50.50.50.50/8 25***\n')
-        s1.cmdCLI("ip route 50.50.50.50/8 25")
-        clilist.append('ip route 50.50.50.50/8 25')
-        s1.cmdCLI("interface 26")
-        s1.cmdCLI("vrf attach vrf_default")
-        s1.cmdCLI("ip address 60.60.60.70")
+        s1.cmdCLI("interface 4")
+        s1.cmdCLI("ip address 10.0.0.7/8")
+        s1.cmdCLI("ipv6 address 2004::2/120")
         s1.cmdCLI("exit")
-        info('*** CMD: ip route 60.60.60.60/8 26 26***\n')
-        s1.cmdCLI("ip route 60.60.60.60/8 26 26")
-        clilist.append('ip route 60.60.60.60/8 26 26')
 
-        info('\n***Adding Ipv6 Routes\n')
-        info('*** CMD: ipv6 route 2001::1/120  2001::2***\n')
-        s1.cmdCLI("ipv6 route 2001::1/120 2001::2")
-        clilist.append('ipv6 route 2001::1/120 2001::2')
-        info('*** CMD: ipv6 route 2002::1/120  2002::2 12 ***\n')
-        s1.cmdCLI("ipv6 route 2002::1/120 2002::2 12")
-        clilist.append('ipv6 route 2002::1/120 2002::2 12')
-        s1.cmdCLI("interface 13")
-        s1.cmdCLI("vrf attach vrf_default")
-        s1.cmdCLI("ipv6 address 2003::2")
-        s1.cmdCLI("exit")
-        info('*** CMD: ipv6 route 2003::1/120 13  ***\n')
-        s1.cmdCLI("ipv6 route 2003::1/120 13")
-        clilist.append('ipv6 route 2003::1/120 13')
-        s1.cmdCLI("interface 14")
-        s1.cmdCLI("vrf attach vrf_default")
-        s1.cmdCLI("ip address 2004::2")
-        s1.cmdCLI("exit")
-        info('*** CMD: ipv6 route 2004::1/120 14 14  ***\n')
-        s1.cmdCLI("ipv6 route 2004::1/120 14 14")
-        clilist.append('ipv6 route 2004::1/120 14 14')
+        info('### Adding Ipv4 Routes ###\n')
+        s1.cmdCLI("ip route 10.0.0.1/8 10.0.0.2")
+        clilist.append('ip route 10.0.0.1/8 10.0.0.2')
+        s1.cmdCLI("ip route 10.0.0.3/8 10.0.0.4 4")
+        clilist.append('ip route 10.0.0.3/8 10.0.0.4 4')
+        s1.cmdCLI("ip route 10.0.0.6/8 3")
+        clilist.append('ip route 10.0.0.6/8 3')
+        s1.cmdCLI("ip route 10.0.0.8/8 4 4")
+        clilist.append('ip route 10.0.0.8/8 4 4')
+
+        info('### Adding Ipv6 Routes ###\n')
+        s1.cmdCLI("ipv6 route 2001::/120 2001::2")
+        clilist.append('ipv6 route 2001::/120 2001::2')
+        s1.cmdCLI("ipv6 route 2002::/120 2002::2 3")
+        clilist.append('ipv6 route 2002::/120 2002::2 3')
+        s1.cmdCLI("ipv6 route 2003::/120 3")
+        clilist.append('ipv6 route 2003::/120 3')
+        s1.cmdCLI("ipv6 route 2004::/120 4 4")
+        clilist.append('ipv6 route 2004::/120 4 4')
 
         out = s1.cmdCLI("do show running-config")
         lines = out.split('\n')
@@ -240,11 +228,11 @@ class staticRouteConfigTest( HalonTest ):
             if line in clilist:
                 found = found + 1
 
+        info('\n### Verify show running-config for added static routes ###\n')
         if found == 8:
-            print "\n****** show running-config succss ******\n"
-            return True
+            info('### show running-config verification success ###\n\n\n')
         else:
-            assert 0, "\nERROR: show running-config command failure"
+            assert 0, ('show running-config command failure')
 
 class Test_vtysh_static_routes_ct:
 

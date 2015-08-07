@@ -58,7 +58,7 @@ struct lookup_entry {
  * Translation table from ovsdb to guagga
  */
 const struct lookup_entry match_table[]={
-  {MATCH_PREFIX, "ip address prefix list", "prefix_list"},
+  {MATCH_PREFIX, "ip address prefix-list", "prefix_list"},
   {0, NULL, NULL},
 };
 

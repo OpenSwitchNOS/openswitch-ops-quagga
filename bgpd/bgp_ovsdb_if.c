@@ -15,7 +15,7 @@
  * You should have received a copy of the GNU General Public License
  * along with GNU Zebra; see the file COPYING.  If not, write to the Free
  * Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
- * 02111-1307, USA.  
+ * 02111-1307, USA.
  *
  * File: bgp_ovsdb_if.c
  *
@@ -44,10 +44,12 @@
 #include "openvswitch/vlog.h"
 #include "vswitch-idl.h"
 #include "coverage.h"
-
 #include "openhalon-idl.h"
+#include "prefix.h"
 
 #include "bgpd/bgp_ovsdb_if.h"
+#include "bgpd/bgp_table.h"
+#include "bgpd/bgp_route.h"
 
 /* Local structure to hold the master thread
  * and counters for read/write callbacks
@@ -65,14 +67,14 @@ static bgp_ovsdb_t glob_bgp_ovs;
 COVERAGE_DEFINE(bgp_ovsdb_cnt);
 VLOG_DEFINE_THIS_MODULE(bgp_ovsdb_if);
 
-static struct ovsdb_idl *idl;
+struct ovsdb_idl *idl;
 static unsigned int idl_seqno;
 static char *appctl_path = NULL;
 static struct unixctl_server *appctl;
 static int system_configured = false;
 
-boolean exiting = false;
 
+boolean exiting = false;
 static int bgp_ovspoll_enqueue (bgp_ovsdb_t *bovs_g);
 static int bovs_read_cb (struct thread *thread);
 
@@ -83,8 +85,90 @@ static void
 bgp_unixctl_dump(struct unixctl_conn *conn, int argc OVS_UNUSED,
                           const char *argv[] OVS_UNUSED, void *aux OVS_UNUSED)
 {
-    unixctl_command_reply_error(conn, "Nothing to dump :)");
-    //unixctl_command_reply(conn, buf);
+    //unixctl_command_reply_error(conn, "Nothing to dump :)");
+#if 0
+    #define BUF_LEN 4000
+    #define REM_BUF_LEN (BUF_LEN - 1 - strlen(buf))
+    struct shash_node *sh_node;
+    char *buf = xcalloc(1, BUF_LEN);
+
+    static struct shash bgp_all = SHASH_INITIALIZER(&bgp_all);
+
+    SHASH_FOR_EACH(sh_node, &bgp_all) {
+        struct bgp *bgp = sh_node->data;
+        strncat(buf,"asn\t",REM_BUF_LEN);
+        strncat(buf,bgp->as,REM_BUF_LEN);
+        strncat(buf, "\n", REM_BUF_LEN);
+    }
+    unixctl_command_reply(conn, buf);
+    free(buf);
+#endif
+}
+
+static void
+bgp_ovsdb_tables_init (struct ovsdb_idl *idl)
+{
+    /* BGP router table */
+    ovsdb_idl_add_table(idl, &ovsrec_table_bgp_router);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_asn);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_router_id);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_networks);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_vrf);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_redistribute);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_gr_stale_timer);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_always_compare_med);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_other_config);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_status);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_external_ids);
+
+    /* BGP neighbor table */
+    ovsdb_idl_add_table(idl, &ovsrec_table_bgp_neighbor);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_active);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_weight);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_bgp_peer_group);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_bgp_router);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_strict_capability_match);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_tcp_port_number);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_inbound_soft_reconfiguration);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_statistics);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_remote_as);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_override_capability);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_passive);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_maximum_prefix_limit);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_name);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_status);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_description);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_local_as);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_advertisement_interval);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_local_interface);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_external_ids);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_password);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_other_config);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_capability);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_timers);
+
+    /* RIB table */
+    ovsdb_idl_add_table(idl, &ovsrec_table_route);
+    ovsdb_idl_add_column(idl, &ovsrec_route_col_prefix);
+    ovsdb_idl_add_column(idl, &ovsrec_route_col_from);
+    ovsdb_idl_add_column(idl, &ovsrec_route_col_nexthops);
+    ovsdb_idl_add_column(idl, &ovsrec_route_col_address_family);
+    ovsdb_idl_add_column(idl, &ovsrec_route_col_sub_address_family);
+    ovsdb_idl_add_column(idl, &ovsrec_route_col_protocol_specific);
+    ovsdb_idl_add_column(idl, &ovsrec_route_col_selected);
+    ovsdb_idl_add_column(idl, &ovsrec_route_col_protocol_private);
+    ovsdb_idl_add_column(idl, &ovsrec_route_col_distance);
+    ovsdb_idl_add_column(idl, &ovsrec_route_col_metric);
+    ovsdb_idl_add_column(idl, &ovsrec_route_col_vrf);
+
+    /* nexthop table */
+    ovsdb_idl_add_table(idl, &ovsrec_table_nexthop);
+    ovsdb_idl_add_column(idl, &ovsrec_nexthop_col_ip_address);
+    ovsdb_idl_add_column(idl, &ovsrec_nexthop_col_selected);
+    ovsdb_idl_add_column(idl, &ovsrec_nexthop_col_weight);
+    ovsdb_idl_add_column(idl, &ovsrec_nexthop_col_status);
+    ovsdb_idl_add_column(idl, &ovsrec_nexthop_col_other_config);
+    ovsdb_idl_add_column(idl, &ovsrec_nexthop_col_external_ids);
 }
 
 /* Create a connection to the OVSDB at db_path and create a dB cache
@@ -96,13 +180,16 @@ ovsdb_init (const char *db_path)
     idl = ovsdb_idl_create(db_path, &ovsrec_idl_class, false, true);
     idl_seqno = ovsdb_idl_get_seqno(idl);
     ovsdb_idl_set_lock(idl, "halon_bgp");
-    ovsdb_idl_verify_write_only(idl);
+    //ovsdb_idl_verify_write_only(idl);
 
     /* Cache OpenVSwitch table */
     ovsdb_idl_add_table(idl, &ovsrec_table_open_vswitch);
 
     ovsdb_idl_add_column(idl, &ovsrec_open_vswitch_col_cur_cfg);
     ovsdb_idl_add_column(idl, &ovsrec_open_vswitch_col_hostname);
+
+    /* BGP tables */
+    bgp_ovsdb_tables_init(idl);
 
     /* Register ovs-appctl commands for this daemon. */
     unixctl_command_register("bgpd/dump", "", 0, 0, bgp_unixctl_dump, NULL);
@@ -301,9 +388,209 @@ bgp_apply_global_changes (void)
     }
 }
 
-/* Check idl seqno. to make sure there are updates to the idl
- * and update the local structures accordingly.
- */
+/* Subscribe for changes in the BGP_Router table */
+static void
+bgp_apply_bgp_router_changes(struct ovsdb_idl *idl)
+{
+    const struct ovsrec_bgp_router *bgp_first;
+    struct bgp *bgp_cfg;
+
+    bgp_first = ovsrec_bgp_router_first(idl);
+    /*
+     * Check if any table changes present.
+     * If no change just return from here
+     */
+    if (bgp_first && !OVSREC_IDL_ANY_TABLE_ROWS_INSERTED(bgp_first, idl_seqno)
+        && !OVSREC_IDL_ANY_TABLE_ROWS_DELETED(bgp_first, idl_seqno)
+        && !OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED(bgp_first, idl_seqno)) {
+        VLOG_INFO("No BGP_Router changes");
+        return;
+    }
+
+    if (bgp_first == NULL) {
+        /* Check if it is a first row deletion */
+        VLOG_INFO("BGP config empty!\n");
+        bgp_cfg = bgp_lookup_by_name(NULL);
+        if (bgp_cfg) {
+            bgp_delete(bgp_cfg);
+        }
+    }
+    else {
+        /* Check if any row deletion */
+        if (OVSREC_IDL_ANY_TABLE_ROWS_DELETED(bgp_first, idl_seqno)) {
+            delete_bgp_router_config(idl);
+	}
+        /* Check if any row insertion */
+        if (OVSREC_IDL_ANY_TABLE_ROWS_INSERTED(bgp_first, idl_seqno)) {
+	    insert_bgp_router_config(idl, bgp_first);
+	}
+	else {
+            /* Check if any row modification */
+	    if (OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED(bgp_first, idl_seqno)) {
+                modify_bgp_router_config(idl, bgp_first);
+            }
+        }
+    }
+}
+
+void
+delete_bgp_router_config(struct ovsdb_idl *idl)
+{
+    const struct ovsrec_bgp_router *bgp_del_row;
+    struct bgp *bgp_cfg;
+
+    while(bgp_cfg = bgp_lookup_by_name(NULL)) {
+        bool match_found = 0;
+        OVSREC_BGP_ROUTER_FOR_EACH(bgp_del_row, idl) {
+            if (bgp_cfg->as == bgp_del_row->asn) {
+                match_found = 1;
+                break;
+            }
+        }
+        if (!match_found) {
+            VLOG_DBG("bgp_cfg->as : %d will be deleted from BGPD\n",
+	             (int)(bgp_cfg->as));
+            bgp_delete(bgp_cfg);
+        }
+    }
+}
+
+void
+insert_bgp_router_config(struct ovsdb_idl *idl, const struct ovsrec_bgp_router *bgp_first)
+{
+    const struct ovsrec_bgp_router *bgp_insert_row = bgp_first;
+    struct bgp *bgp_cfg;
+    int ret_status;
+
+    OVSREC_BGP_ROUTER_FOR_EACH(bgp_insert_row, idl) {
+        VLOG_INFO("New row insertion to BGP config\n");
+        if (OVSREC_IDL_IS_ROW_INSERTED(bgp_insert_row, idl_seqno)) {
+            ret_status = bgp_get(&bgp_cfg, (as_t *)&bgp_insert_row->asn, NULL);
+            if (!ret_status) {
+                VLOG_INFO("bgp_insert_row->asn : %d, bgp_cfg->as : %d",
+                           bgp_insert_row->asn,(int)(bgp_cfg->as));
+            }
+        }
+    }
+}
+
+void
+modify_bgp_router_config(struct ovsdb_idl *idl, const struct ovsrec_bgp_router *bgp_first)
+{
+    const struct ovsrec_bgp_router *bgp_mod_row = bgp_first;
+    const struct ovsdb_idl_column *column;
+    struct bgp *bgp_cfg;
+    struct in_addr addr;
+    as_t as;
+    int ret_status;
+    int i = 0;
+
+    OVSREC_BGP_ROUTER_FOR_EACH(bgp_mod_row, idl) {
+        if (OVSREC_IDL_IS_ROW_MODIFIED(bgp_mod_row, idl_seqno)) {
+            bgp_cfg = bgp_lookup((as_t)bgp_mod_row->asn, NULL);
+            /* Check if router_id is modified */
+            if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_bgp_router_col_router_id, idl_seqno)) {
+                addr.s_addr = inet_addr(bgp_mod_row->router_id);
+                ret_status = bgp_router_id_set(bgp_cfg, &addr.s_addr);
+                if (!ret_status) {
+                    VLOG_INFO("BGP router_id set to %s",
+                               inet_ntoa(bgp_cfg->router_id));
+                }
+            }
+            if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_bgp_router_col_networks, idl_seqno)) {
+                struct bgp_static *bgp_static;
+                struct prefix p;
+                struct vty *vty;
+                struct bgp_node *rn;
+                afi_t afi;
+                safi_t safi;
+                for (i = 0; i < bgp_mod_row->n_networks; i++) {
+                    VLOG_INFO("bgp_mod_row->networks[%d]: %s",
+                   i, bgp_mod_row->networks[i]);
+                    int ret = str2prefix(bgp_mod_row->networks[i], &p);
+                    if (! ret) {
+                        VLOG_ERR("Malformed prefix");
+                    }
+                    afi = family2afi(p.family);
+                    safi = SAFI_UNICAST;
+                    rn = bgp_node_lookup(bgp_cfg->route[afi][safi], &p);
+                    if (!rn) {
+                        VLOG_INFO("Can't find specified static "
+                                  "route configuration..\n");
+                        VLOG_INFO("Adding new static route\n");
+                        ret_status = bgp_static_set(vty, bgp_cfg,
+                                                    bgp_mod_row->networks[i],
+                                                    afi, safi,
+                                                    NULL, 0);
+                        if (!ret_status) {
+                            VLOG_INFO("New static route added to bgp routing table");
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/*
+** Process potential changes in the BGP_Neighbor table
+*/
+static void
+bgp_apply_bgp_neighbor_changes (struct ovsdb_idl *idl)
+{
+    struct ovsrec_bgp_neighbor *ovs_bgpn;
+    struct bgp *bgp_instance;
+    bool modified = false;
+    bool deleted = false;
+
+    ovs_bgpn = ovsrec_bgp_neighbor_first(idl);
+
+    /* try & find if any row got deleted or modified */
+    if (!ovs_bgpn) {
+	deleted = true;
+    } else {
+	if (OVSREC_IDL_ANY_TABLE_ROWS_DELETED(ovs_bgpn, idl_seqno)) {
+	    deleted = true;
+	}
+	if (OVSREC_IDL_ANY_TABLE_ROWS_INSERTED(ovs_bgpn, idl_seqno) ||
+	    OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED(ovs_bgpn, idl_seqno)) {
+		modified = true;
+	}
+    }
+
+    /* take care of deletions if any */
+    if (deleted) {
+	VLOG_INFO("bgp neighbor deletion occured\n");
+    }
+
+    /* take care of modifications if any */
+    if (modified) {
+	VLOG_INFO("bgp neighbor modification occured\n");
+	OVSREC_BGP_NEIGHBOR_FOR_EACH(ovs_bgpn, idl) {
+	    if (OVSREC_IDL_IS_ROW_INSERTED(ovs_bgpn, idl_seqno) ||
+		OVSREC_IDL_IS_ROW_MODIFIED(ovs_bgpn, idl_seqno))
+	    {
+		if (!ovs_bgpn->bgp_router) {
+		    VLOG_ERR("%%cannot find bgp router in idl\n");
+		} else {
+		    VLOG_INFO("looking up bgp %d\n", ovs_bgpn->bgp_router->asn);
+		    bgp_instance = bgp_lookup(ovs_bgpn->bgp_router->asn, NULL);
+		    if (bgp_instance) {
+			VLOG_INFO("bgp router instance %d found\n",
+			    ovs_bgpn->bgp_router->asn);
+			daemon_neighbor_remote_as_cmd_execute
+			    (bgp_instance, ovs_bgpn->name,
+				ovs_bgpn->remote_as, AFI_IP, SAFI_UNICAST);
+		    } else {
+			VLOG_ERR("%%cannot find daemon bgp router instance %d %%\n",
+			    ovs_bgpn->bgp_router->asn);
+		    }
+		}
+	    }
+	}
+    }
+}
+
 static void
 bgp_reconfigure(struct ovsdb_idl *idl)
 {
@@ -317,6 +604,8 @@ bgp_reconfigure(struct ovsdb_idl *idl)
 
     /* Apply the changes */
     bgp_apply_global_changes();
+    bgp_apply_bgp_router_changes(idl);
+    bgp_apply_bgp_neighbor_changes(idl);
 
     /* update the seq. number */
     idl_seqno = new_idl_seqno;
@@ -325,7 +614,7 @@ bgp_reconfigure(struct ovsdb_idl *idl)
 /* Wrapper function that checks for idl updates and reconfigures the daemon
  */
 static void
-bgp_ovs_run (void)
+bgp_ovs_run ()
 {
     ovsdb_idl_run(idl);
     unixctl_server_run(appctl);
@@ -341,10 +630,8 @@ bgp_ovs_run (void)
     }
 
     bgp_chk_for_system_configured();
-
     if (system_configured) {
         bgp_reconfigure(idl);
-
         daemonize_complete();
         vlog_enable_async();
         VLOG_INFO_ONCE("%s (Halon bgpd) %s", program_name, VERSION);

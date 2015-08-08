@@ -55,10 +55,12 @@ Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 #include "bgpd/bgp_zebra.h"
 #include "bgpd/bgp_vty.h"
 #include "bgpd/bgp_mpath.h"
-
+#include "bgpd/bgp_ovsdb_route.h"
+#include "openvswitch/vlog.h"
 /* Extern from bgp_dump.c */
 extern const char *bgp_origin_str[];
 extern const char *bgp_origin_long_str[];
+VLOG_DEFINE_THIS_MODULE(bgp_route);
 
 static struct bgp_node *
 bgp_afi_node_get (struct bgp_table *table, afi_t afi, safi_t safi, struct prefix *p,
@@ -1584,10 +1586,14 @@ bgp_process_main (struct work_queue *wq, void *data)
       if (! CHECK_FLAG (old_select->flags, BGP_INFO_ATTR_CHANGED))
         {
           if (CHECK_FLAG (old_select->flags, BGP_INFO_IGP_CHANGED) ||
-	      CHECK_FLAG (old_select->flags, BGP_INFO_MULTIPATH_CHG))
+              CHECK_FLAG (old_select->flags, BGP_INFO_MULTIPATH_CHG)) {
+#ifndef ENABLE_OVSDB
             bgp_zebra_announce (p, old_select, bgp, safi);
-          
-	  UNSET_FLAG (old_select->flags, BGP_INFO_MULTIPATH_CHG);
+#else
+            bgp_ovsdb_announce_rib_entry (p, old_select, bgp, safi, 1);
+#endif
+          }
+          UNSET_FLAG (old_select->flags, BGP_INFO_MULTIPATH_CHG);
           UNSET_FLAG (rn->flags, BGP_NODE_PROCESS_SCHEDULED);
           return WQ_SUCCESS;
         }
@@ -1602,7 +1608,6 @@ bgp_process_main (struct work_queue *wq, void *data)
       UNSET_FLAG (new_select->flags, BGP_INFO_MULTIPATH_CHG);
     }
 
-
   /* Check each BGP peer. */
   for (ALL_LIST_ELEMENTS (bgp->peer, node, nnode, peer))
     {
@@ -1615,22 +1620,36 @@ bgp_process_main (struct work_queue *wq, void *data)
     {
       if (new_select 
 	  && new_select->type == ZEBRA_ROUTE_BGP 
-	  && new_select->sub_type == BGP_ROUTE_NORMAL)
-	bgp_zebra_announce (p, new_select, bgp, safi);
+          && new_select->sub_type == BGP_ROUTE_NORMAL) {
+#ifndef ENABLE_OVSDB
+      bgp_zebra_announce (p, new_select, bgp, safi);
+#else
+      bgp_ovsdb_announce_rib_entry (p, new_select, bgp, safi, 1);
+#endif
+      }
       else
 	{
 	  /* Withdraw the route from the kernel. */
 	  if (old_select 
 	      && old_select->type == ZEBRA_ROUTE_BGP
-	      && old_select->sub_type == BGP_ROUTE_NORMAL)
-	    bgp_zebra_withdraw (p, old_select, safi);
+	      && old_select->sub_type == BGP_ROUTE_NORMAL) {
+#ifndef ENABLE_OVSDB
+          bgp_zebra_withdraw (p, old_select, safi);
+#else
+          bgp_ovsdb_withdraw_rib_entry (p, old_select, bgp, safi, 1);
+#endif
+      }
 	}
     }
     
   /* Reap old select bgp_info, it it has been removed */
-  if (old_select && CHECK_FLAG (old_select->flags, BGP_INFO_REMOVED))
+  if (old_select && CHECK_FLAG (old_select->flags, BGP_INFO_REMOVED)) {
     bgp_info_reap (rn, old_select);
-  
+#ifdef ENABLE_OVSDB
+    bgp_ovsdb_delete_rib_entry(p, old_select, bgp, safi, 1);
+#endif
+  }
+
   UNSET_FLAG (rn->flags, BGP_NODE_PROCESS_SCHEDULED);
   return WQ_SUCCESS;
 }
@@ -2358,6 +2377,10 @@ bgp_update_main (struct peer *peer, struct prefix *p, struct attr *attr,
   
   /* Register new BGP information. */
   bgp_info_add (rn, new);
+#ifdef ENABLE_OVSDB
+  /* Add new route entry in OVSDB route table */
+  bgp_ovsdb_add_rib_entry(p, new, bgp, safi, 1);
+#endif
   
   /* route_node_get lock */
   bgp_unlock_node (rn);
@@ -3554,6 +3577,10 @@ bgp_static_update_main (struct bgp *bgp, struct prefix *p,
   
   /* Register new BGP information. */
   bgp_info_add (rn, new);
+#ifdef ENABLE_OVSDB
+  /* Add new route entry in OVSDB route table */
+  bgp_ovsdb_add_rib_entry(p, new, bgp, safi, 1);
+#endif
   
   /* route_node_get lock */
   bgp_unlock_node (rn);
@@ -3693,7 +3720,7 @@ bgp_static_withdraw_vpnv4 (struct bgp *bgp, struct prefix *p, afi_t afi,
 
 /* Configure static BGP network.  When user don't run zebra, static
    route should be installed as valid.  */
-static int
+int
 bgp_static_set (struct vty *vty, struct bgp *bgp, const char *ip_str, 
                 afi_t afi, safi_t safi, const char *rmap, int backdoor)
 {
@@ -6120,7 +6147,7 @@ route_vty_out_detail (struct vty *vty, struct bgp *bgp, struct prefix *p,
 }
 
 #define BGP_SHOW_SCODE_HEADER "Status codes: s suppressed, d damped, "\
-			      "h history, * valid, > best, = multipath,%s"\
+                           "h history, * valid, > best, = multipath,%s"\
 		"              i internal, r RIB-failure, S Stale, R Removed%s"
 #define BGP_SHOW_OCODE_HEADER "Origin codes: i - IGP, e - EGP, ? - incomplete%s%s"
 #define BGP_SHOW_HEADER "   Network          Next Hop            Metric LocPrf Weight Path%s"

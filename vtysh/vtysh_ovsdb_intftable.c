@@ -194,4 +194,3 @@ vtysh_ovsdb_init_intftableclients()
 
   vtysh_ovsdbtable_addclient(e_interface_table, e_vtysh_interface_table_config, &client);
 }
-

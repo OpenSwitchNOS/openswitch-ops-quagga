@@ -488,55 +488,47 @@ modify_bgp_router_config(struct ovsdb_idl *idl, const struct ovsrec_bgp_router *
     OVSREC_BGP_ROUTER_FOR_EACH(bgp_mod_row, idl) {
         if (OVSREC_IDL_IS_ROW_MODIFIED(bgp_mod_row, idl_seqno)) {
             bgp_cfg = bgp_lookup((as_t)bgp_mod_row->asn, NULL);
-	    /* Check if router_id is modified */
-	    OVSREC_IDL_GET_COLUMN(column, bgp_mod_row, "router_id");
-            if(column) {
-                if (OVSREC_IDL_IS_COLUMN_MODIFIED(column, idl_seqno)) {
-                    addr.s_addr = inet_addr(bgp_mod_row->router_id);
-                    ret_status = bgp_router_id_set(bgp_cfg, &addr.s_addr);
-                    if (!ret_status) {
-                        VLOG_INFO("BGP router_id set to %s",
-                                   inet_ntoa(bgp_cfg->router_id));
-                    }
-		}
-	    }
-            /* Check if network is modified */
-            OVSREC_IDL_GET_COLUMN(column, bgp_mod_row, "networks");
-            if(column) {
+            /* Check if router_id is modified */
+            if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_bgp_router_col_router_id, idl_seqno)) {
+                addr.s_addr = inet_addr(bgp_mod_row->router_id);
+                ret_status = bgp_router_id_set(bgp_cfg, &addr.s_addr);
+                if (!ret_status) {
+                    VLOG_INFO("BGP router_id set to %s",
+                               inet_ntoa(bgp_cfg->router_id));
+                }
+            }
+            if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_bgp_router_col_networks, idl_seqno)) {
                 struct bgp_static *bgp_static;
                 struct prefix p;
                 struct vty *vty;
                 struct bgp_node *rn;
                 afi_t afi;
                 safi_t safi;
-
-                if (OVSREC_IDL_IS_COLUMN_MODIFIED(column, idl_seqno)) {
-                    for (i = 0; i < bgp_mod_row->n_networks; i++) {
-                        VLOG_INFO("bgp_mod_row->networks[%d]: %s",
-			           i, bgp_mod_row->networks[i]);
-                        int ret = str2prefix(bgp_mod_row->networks[i], &p);
-                        if (! ret) {
-                            VLOG_ERR("Malformed prefix");
-                        }
-                        afi = family2afi(p.family);
-                        safi = SAFI_UNICAST;
-                        rn = bgp_node_lookup(bgp_cfg->route[afi][safi], &p);
-                        if (!rn) {
-                            VLOG_INFO("Can't find specified static "
-                                      "route configuration..\n");
-                            VLOG_INFO("Adding new static route\n");
-                            ret_status = bgp_static_set(vty, bgp_cfg,
-                                                        bgp_mod_row->networks[i],
-                                                        afi, safi,
-                                                        NULL, 0);
-                            if (!ret_status) {
-                                VLOG_INFO("New static route added to bgp routing table");
-                            }
+                for (i = 0; i < bgp_mod_row->n_networks; i++) {
+                    VLOG_INFO("bgp_mod_row->networks[%d]: %s",
+                   i, bgp_mod_row->networks[i]);
+                    int ret = str2prefix(bgp_mod_row->networks[i], &p);
+                    if (! ret) {
+                        VLOG_ERR("Malformed prefix");
+                    }
+                    afi = family2afi(p.family);
+                    safi = SAFI_UNICAST;
+                    rn = bgp_node_lookup(bgp_cfg->route[afi][safi], &p);
+                    if (!rn) {
+                        VLOG_INFO("Can't find specified static "
+                                  "route configuration..\n");
+                        VLOG_INFO("Adding new static route\n");
+                        ret_status = bgp_static_set(vty, bgp_cfg,
+                                                    bgp_mod_row->networks[i],
+                                                    afi, safi,
+                                                    NULL, 0);
+                        if (!ret_status) {
+                            VLOG_INFO("New static route added to bgp routing table");
                         }
                     }
                 }
-	    }
-	}
+            }
+        }
     }
 }
 

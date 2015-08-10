@@ -2030,7 +2030,20 @@ daemon_neighbor_timers_cmd_execute (struct bgp *bgp, const char *peer_str,
     return peer_timers_set (peer, keepalive, holdtime);
 }
 
+int
+daemon_neighbor_shutdown_cmd_execute (struct bgp *bgp, char *peer_str,
+    bool shut)
+{
+    if (shut) {
+        VLOG_DBG("neighbor %s is shutdown down\n", peer_str);
+        return peer_flag_set_vty (bgp, peer_str, PEER_FLAG_SHUTDOWN);
+    } else {
+        VLOG_DBG("neighbor %s is coming up\n", peer_str);
+        return peer_flag_unset_vty (bgp, peer_str, PEER_FLAG_SHUTDOWN);
+    }
+}
 
+#if 0
 /* neighbor shutdown. */
 DEFUN (neighbor_shutdown,
        neighbor_shutdown_cmd,
@@ -2041,6 +2054,7 @@ DEFUN (neighbor_shutdown,
 {
   return peer_flag_set_vty (vty, argv[0], PEER_FLAG_SHUTDOWN);
 }
+#endif
 
 DEFUN (no_neighbor_shutdown,
        no_neighbor_shutdown_cmd,
@@ -9606,11 +9620,11 @@ bgp_vty_init (void)
   /* "neighbor passive" commands. */
   install_element (BGP_NODE, &neighbor_passive_cmd);
   install_element (BGP_NODE, &no_neighbor_passive_cmd);
-
+#ifndef HALON
   /* "neighbor shutdown" commands. */
   install_element (BGP_NODE, &neighbor_shutdown_cmd);
   install_element (BGP_NODE, &no_neighbor_shutdown_cmd);
-
+#endif
   /* Deprecated "neighbor capability route-refresh" commands.*/
   install_element (BGP_NODE, &neighbor_capability_route_refresh_cmd);
   install_element (BGP_NODE, &no_neighbor_capability_route_refresh_cmd);

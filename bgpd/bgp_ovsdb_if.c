@@ -132,6 +132,7 @@ bgp_ovsdb_tables_init (struct ovsdb_idl *idl)
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_inbound_soft_reconfiguration);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_statistics);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_remote_as);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_shutdown);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_override_capability);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_passive);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_maximum_prefix_limit);
@@ -605,6 +606,13 @@ bgp_apply_bgp_neighbor_changes (struct ovsdb_idl *idl)
                                                             keepalive, holdtime);
                        }
 #endif
+                      if (ovs_bgpn->n_shutdown && ovs_bgpn->shutdown[0]) {
+                          daemon_neighbor_shutdown_cmd_execute
+                                       (bgp_instance, ovs_bgpn->name, true);
+                      } else {
+                         daemon_neighbor_shutdown_cmd_execute
+                                       (bgp_instance, ovs_bgpn->name, false);
+                      }
 		    } else {
 			VLOG_ERR("%%cannot find daemon bgp router instance %d %%\n",
 			    ovs_bgpn->bgp_router->asn);

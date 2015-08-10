@@ -1980,7 +1980,7 @@ bgp_peer_and_group_lookup (struct bgp *bgp, const char *peer_str)
  *
  */
 int
-daemon_neighbor_decription_cmd_execute (struct bgp *bgp, char *peer_str, char *description)
+daemon_neighbor_description_cmd_execute (struct bgp *bgp, char *peer_str, char *description)
 {
     struct peer *peer;
 
@@ -1995,6 +1995,39 @@ daemon_neighbor_decription_cmd_execute (struct bgp *bgp, char *peer_str, char *d
         peer_description_unset (peer);
         return 0;
     }
+}
+
+int
+daemon_neighbor_password_cmd_execute (struct bgp *bgp, char *peer_str, char *password)
+{
+    struct peer *peer;
+
+    peer= bgp_peer_and_group_lookup (bgp, peer_str);
+    if (! peer) return 1;
+
+    if (password) {
+        VLOG_DBG("neighbor %s set password %s \n", peer_str, password);
+        return peer_password_set (peer, password);
+    } else {
+        return peer_password_unset (peer);
+    }
+}
+
+/*
+ *
+ */
+int
+daemon_neighbor_timers_cmd_execute (struct bgp *bgp, const char *peer_str,
+                                    const u_int32_t keepalive, const u_int32_t holdtime)
+{
+    struct peer *peer;
+
+
+    peer= bgp_peer_and_group_lookup (bgp, peer_str);
+
+    if (! peer) return 1;
+
+    return peer_timers_set (peer, keepalive, holdtime);
 }
 
 

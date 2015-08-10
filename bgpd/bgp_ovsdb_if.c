@@ -582,12 +582,29 @@ bgp_apply_bgp_neighbor_changes (struct ovsdb_idl *idl)
 			    (bgp_instance, ovs_bgpn->name,
 				ovs_bgpn->remote_as, AFI_IP, SAFI_UNICAST);
                        if (ovs_bgpn->description) {
-                           daemon_neighbor_decription_cmd_execute(bgp_instance,
+                           daemon_neighbor_description_cmd_execute(bgp_instance,
                                 ovs_bgpn->name, ovs_bgpn->description);
                        } else {
-                           daemon_neighbor_decription_cmd_execute(bgp_instance,
+                           daemon_neighbor_description_cmd_execute(bgp_instance,
                                 ovs_bgpn->name, NULL);
                        }
+                       if (ovs_bgpn->password) {
+                           daemon_neighbor_password_cmd_execute(bgp_instance,
+                                ovs_bgpn->name, ovs_bgpn->password);
+                       } else {
+                           daemon_neighbor_password_cmd_execute(bgp_instance,
+                                ovs_bgpn->name, NULL);
+                       }
+#if 0
+                       if (ovs_bgpn->timers) {
+                           u_int32_t keepalive = 0;
+                           u_int32_t holdtime = 0;
+                           keepalive = smap_get(&ovs_bgpn->timers, "Keepalive");
+                           holdtime = smap_get(&ovs_bgpn->timers, "Holdtime");
+                          daemon_neighbor_timers_cmd_execute(bgp_instance,
+                                                            keepalive, holdtime);
+                       }
+#endif
 		    } else {
 			VLOG_ERR("%%cannot find daemon bgp router instance %d %%\n",
 			    ovs_bgpn->bgp_router->asn);

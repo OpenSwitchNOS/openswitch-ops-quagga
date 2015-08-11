@@ -1639,6 +1639,13 @@ bgp_process_main (struct work_queue *wq, void *data)
           bgp_ovsdb_withdraw_rib_entry (p, old_select, bgp, safi, 1);
 #endif
       }
+#ifdef ENABLE_OVSDB
+      if (new_select
+          && new_select->type == ZEBRA_ROUTE_BGP
+          && new_select->sub_type == BGP_ROUTE_STATIC) {
+          bgp_ovsdb_update_flags (p, new_select, bgp, safi, 1);
+      }
+#endif
 	}
     }
     

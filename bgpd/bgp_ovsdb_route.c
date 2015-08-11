@@ -201,8 +201,15 @@ bgp_ovsdb_set_rib_nexthop(struct ovsdb_idl_txn *txn,
     char nexthop_buf[INET6_ADDRSTRLEN];
     const struct ovsrec_nexthop *pnexthop = NULL;
     bool selected;
+    char pr[PREFIX_MAXLEN];
 
+    prefix2str(p, pr, sizeof(pr));
     nexthop = &info->attr->nexthop;
+    if (nexthop->s_addr == 0) {
+        VLOG_INFO("%s: Nexthop address is 0 for route %s\n",
+                  __FUNCTION__, pr);
+        return -1;
+    }
     nexthop_list = xmalloc(sizeof *rib->nexthops * nexthop_num);
     // Set first nexthop
     inet_ntop(p->family, nexthop, nexthop_buf, sizeof(nexthop_buf));
@@ -425,7 +432,7 @@ announce route %s",
                  __FUNCTION__, pr);
         return -1;
     }
-    // Set RIB flag
+    // Clear private flag
     proto_priv = 0;
     ovsrec_route_set_protocol_private(rib_row, &proto_priv, 1);
     bgp_ovsdb_set_rib_protocol_specific_data(rib_row, info, bgp);
@@ -558,11 +565,17 @@ bgp_ovsdb_add_rib_entry(struct prefix *p,
     }
     ovsrec_route_set_metric(rib, (const int64_t *)&info->attr->med, 1);
     // Nexthops
-    nexthop_num = 1 + bgp_info_mpath_count (info);
-    VLOG_DBG("Setting nexthop num %d, metric %d, bgp_info_flags 0x%x\n",
-             nexthop_num, info->attr->med, info->flags);
-    // Nexthop list
-    bgp_ovsdb_set_rib_nexthop(txn, rib, p, info, nexthop_num);
+    struct in_addr *nexthop = &info->attr->nexthop;
+    if (nexthop->s_addr == 0) {
+        VLOG_INFO("%s: Nexthop address is 0 for route %s\n",
+                  __FUNCTION__, pr);
+    } else {
+        nexthop_num = 1 + bgp_info_mpath_count (info);
+        VLOG_DBG("Setting nexthop num %d, metric %d, bgp_info_flags 0x%x\n",
+                 nexthop_num, info->attr->med, info->flags);
+        // Nexthop list
+        bgp_ovsdb_set_rib_nexthop(txn, rib, p, info, nexthop_num);
+    }
 
     if (CHECK_FLAG(info->flags, BGP_INFO_SELECTED)) {
         prot_priv = 0;
@@ -630,6 +643,56 @@ bgp_ovsdb_rib_txn_commit(void)
         VLOG_ERR("%s: Failed to commit Route transactions, status %d\n",
                  __FUNCTION__, status);
         return -1;
+    }
+    return 0;
+}
+
+int
+bgp_ovsdb_update_flags(struct prefix *p,
+                       struct bgp_info *info,
+                       struct bgp *bgp,
+                       safi_t safi,
+                       bool create_txn)
+{
+    const struct ovsrec_route *rib_row = NULL;
+    char pr[PREFIX_MAXLEN];
+    struct ovsdb_idl_txn *txn = NULL;
+    enum ovsdb_idl_txn_status status;
+
+    if (create_txn) {
+        txn = ovsdb_idl_txn_create(idl);
+        if (!txn) {
+            VLOG_ERR("%s: Failed to create new transaction for Route table\n",
+                     __FUNCTION__);
+            return -1;
+        }
+    } else {
+        txn = rib_txn;
+    }
+
+    prefix2str(p, pr, sizeof(pr));
+    VLOG_DBG("%s: Updating flags for route %s, flags %d\n",
+             __FUNCTION__, pr, info->flags);
+    rib_row = bgp_ovsdb_lookup_rib_entry(p, info, bgp, safi);
+    if (!rib_row) {
+        VLOG_ERR("%s: Failed to find route %s in Route table\n",
+                 __FUNCTION__, pr);
+        return -1;
+    }
+    VLOG_DBG("%s: Found route %s from peer %s\n",
+             __FUNCTION__, pr, info->peer->host);
+    bgp_ovsdb_set_rib_protocol_specific_data(rib_row, info, bgp);
+    if (create_txn) {
+        status = ovsdb_idl_txn_commit(txn);
+        ovsdb_idl_txn_destroy(txn);
+        if ((status != TXN_SUCCESS) && (status != TXN_INCOMPLETE)) {
+            VLOG_ERR("%s: Failed to announce route %s, status %d\n",
+                     __FUNCTION__, pr, status);
+            return -1;
+        } else {
+            VLOG_DBG("Route %s update protocol specific data txn sent, rc = %d\n",
+                     pr, status);
+        }
     }
     return 0;
 }

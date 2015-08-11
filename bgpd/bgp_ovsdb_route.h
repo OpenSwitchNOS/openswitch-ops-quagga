@@ -51,6 +51,9 @@ bgp_ovsdb_announce_rib_entry(struct prefix *p, struct bgp_info *info,
 extern int
 bgp_ovsdb_delete_rib_entry(struct prefix *p, struct bgp_info *info,
                            struct bgp *bgp, safi_t safi, bool create_txn);
+extern int
+bgp_ovsdb_update_flags(struct prefix *p, struct bgp_info *info,
+                       struct bgp *bgp, safi_t safi, bool create_txn);
 extern void
 bgp_ovsdb_rib_txn_create(void);
 

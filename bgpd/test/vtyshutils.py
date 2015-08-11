@@ -47,6 +47,8 @@ class SwitchVtyshUtils(object):
         for cfg in cfg_array:
             switch.cmdCLI(cfg)
 
+        switch.cmdCLI('end')
+
     # This method takes in an array of the config that we're verifying the value
     # for. For example, if we are trying to verify the remote-as of neighbor:
     #    neighbor <router-id> remote-as <value>

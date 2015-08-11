@@ -44,11 +44,11 @@ from bgpconfig import *
 #
 # S1 [interface 1]<--->[interface 1] S2
 #
-BGP1_ASN            = "1"
+BGP1_ASN            = "6001"
 BGP1_ROUTER_ID      = "9.0.0.1"
 BGP1_NETWORK        = "11.0.0.0"
 
-BGP2_ASN            = "2"
+BGP2_ASN            = "6002"
 BGP2_ROUTER_ID      = "9.0.0.2"
 BGP2_NETWORK        = "12.0.0.0"
 
@@ -146,61 +146,6 @@ class bgpTest (HalonTest):
 
             SwitchVtyshUtils.vtysh_cfg_cmd(switch, cfg_array)
 
-    def unconfigure_network_bgp (self):
-        info("Unconfiguring network for BGP1...\n")
-
-        switch = self.net.switches[0]
-
-        cfg_array = []
-        cfg_array.append("router bgp %s" % BGP1_ASN)
-        cfg_array.append("no router bgp %s" % BGP1_ASN)
-
-        SwitchVtyshUtils.vtysh_cfg_cmd(switch, cfg_array)
-
-    def verify_bgp_route_removed (self):
-        info("Verifying route from BGP1 on BGP2 removed...\n")
-
-        switch = self.net.switches[1]
-        network = BGP1_NETWORK
-        next_hop = BGP1_ROUTER_ID
-
-        # Wait some time to let BGP converge
-        sleep(BGP_CONVERGENCE_DELAY_S)
-        found = SwitchVtyshUtils.verify_bgp_route(switch, network,
-                                                  next_hop)
-
-        assert found == False, "Route (%s) was not successfully removed" % \
-                               network
-
-    def verify_bgp_routes (self):
-        info("\nVerifying bgp routes..\n")
-
-        # Wait some time to let BGP converge
-        sleep(BGP_CONVERGENCE_DELAY_S)
-
-        self.verify_bgp_route(self.net.switches[0], BGP2_NETWORK,
-                              BGP2_ROUTER_ID)
-        self.verify_bgp_route(self.net.switches[1], BGP1_NETWORK,
-                              BGP1_ROUTER_ID)
-
-    def verify_configs (self):
-        info("\nVerifying all configurations..\n")
-
-        for i in range(0, len(BGP_CONFIGS)):
-            bgp_cfg = BGP_CONFIGS[i]
-            switch = self.net.switches[i]
-
-            for cfg in bgp_cfg:
-                res = SwitchVtyshUtils.verify_cfg_exist(switch, [cfg])
-                assert res, "Config \"%s\" was not correctly configured!" % cfg
-
-    def verify_bgp_route (self, switch, network, next_hop):
-        found = SwitchVtyshUtils.verify_bgp_route(switch, network,
-                                                  next_hop)
-
-        assert found, "Could not find route (%s -> %s) on %s" % \
-                      (network, next_hop, switch.name)
-
 class Test_bgp:
     def setup (self):
         pass
@@ -223,12 +168,9 @@ class Test_bgp:
     def __del__ (self):
         del self.test_var
 
-    # the actual test function
-    def test_bgp_full (self):
+    def test_run (self):
         self.test_var.configure_switch_ips()
         self.test_var.verify_bgp_running()
         self.test_var.configure_bgp()
-        # self.test_var.verify_configs()
-        self.test_var.verify_bgp_routes()
-        self.test_var.unconfigure_network_bgp()
-        self.test_var.verify_bgp_route_removed()
+
+        CLI(self.test_var.net)

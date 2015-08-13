@@ -1,11 +1,14 @@
-from halonvsi.halon import info
+from halonvsi.halon import *
 
 VTYSH_CR = '\r\n'
 
 class SwitchVtyshUtils(object):
     @staticmethod
     def vtysh_cmd(switch, cmd):
-        return switch.cmd("vtysh -c \"%s\"" % cmd)
+        if isinstance(switch, HalonSwitch):
+            return switch.cmdCLI(cmd)
+        else:
+            return switch.cmd("vtysh -c \"%s\"" % cmd)
 
     @staticmethod
     def vtysh_get_running_cfg(switch):
@@ -20,6 +23,16 @@ class SwitchVtyshUtils(object):
     #   ["router bgp 1", "bgp router-id 1.1.1.1"]
     @staticmethod
     def vtysh_cfg_cmd(switch, cfg_array, show_running_cfg=False):
+        if isinstance(switch, HalonSwitch):
+            SwitchVtyshUtils.vtysh_cfg_cmd_halon(switch, cfg_array)
+        else:
+            SwitchVtyshUtils.vtysh_cfg_cmd_quagga(switch, cfg_array)
+
+        if show_running_cfg:
+            SwitchVtyshUtils.vtysh_print_running_cfg(switch)
+
+    @staticmethod
+    def vtysh_cfg_cmd_quagga(switch, cfg_array):
         exec_cmd = ' -c "configure term"'
 
         for cfg in cfg_array:
@@ -27,8 +40,14 @@ class SwitchVtyshUtils(object):
 
         switch.cmd("vtysh %s" % exec_cmd)
 
-        if show_running_cfg:
-            SwitchVtyshUtils.vtysh_print_running_cfg(switch)
+    @staticmethod
+    def vtysh_cfg_cmd_halon(switch, cfg_array):
+        switch.cmdCLI('configure term')
+
+        for cfg in cfg_array:
+            switch.cmdCLI(cfg)
+
+        switch.cmdCLI('end')
 
     # This method takes in an array of the config that we're verifying the value
     # for. For example, if we are trying to verify the remote-as of neighbor:

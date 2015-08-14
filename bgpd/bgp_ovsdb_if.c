@@ -565,29 +565,32 @@ bgp_apply_bgp_neighbor_changes (struct ovsdb_idl *idl)
 
     /* take care of modifications if any */
     if (modified) {
-	VLOG_INFO("bgp neighbor modification occured\n");
-	OVSREC_BGP_NEIGHBOR_FOR_EACH(ovs_bgpn, idl) {
-	    if (OVSREC_IDL_IS_ROW_INSERTED(ovs_bgpn, idl_seqno) ||
-		OVSREC_IDL_IS_ROW_MODIFIED(ovs_bgpn, idl_seqno))
-	    {
-		if (!ovs_bgpn->bgp_router) {
-		    VLOG_ERR("%%cannot find bgp router in idl\n");
-		} else {
-		    VLOG_INFO("looking up bgp %d\n", ovs_bgpn->bgp_router->asn);
-		    bgp_instance = bgp_lookup(ovs_bgpn->bgp_router->asn, NULL);
-		    if (bgp_instance) {
-			VLOG_INFO("bgp router instance %d found\n",
-			    ovs_bgpn->bgp_router->asn);
-			daemon_neighbor_remote_as_cmd_execute
-			    (bgp_instance, ovs_bgpn->name,
-				ovs_bgpn->remote_as, AFI_IP, SAFI_UNICAST);
-		    } else {
-			VLOG_ERR("%%cannot find daemon bgp router instance %d %%\n",
-			    ovs_bgpn->bgp_router->asn);
-		    }
-		}
-	    }
-	}
+        VLOG_INFO("bgp neighbor modification occured\n");
+        OVSREC_BGP_NEIGHBOR_FOR_EACH(ovs_bgpn, idl) {
+            if (OVSREC_IDL_IS_ROW_INSERTED(ovs_bgpn, idl_seqno) ||
+                OVSREC_IDL_IS_ROW_MODIFIED(ovs_bgpn, idl_seqno))
+            {
+                if (!ovs_bgpn->bgp_router) {
+                    VLOG_ERR("%%cannot find bgp router in idl\n");
+                } else {
+                    VLOG_INFO("looking up bgp %d\n", ovs_bgpn->bgp_router->asn);
+                    bgp_instance = bgp_lookup(ovs_bgpn->bgp_router->asn, NULL);
+                    if (bgp_instance) {
+                        // Create neighbor with remote-as
+                        if (ovs_bgpn->n_remote_as && !ovs_bgpn->is_peer_group) {
+                            VLOG_INFO("bgp router instance %d found\n",
+                                      ovs_bgpn->bgp_router->asn);
+                            daemon_neighbor_remote_as_cmd_execute(bgp_instance,
+                                    ovs_bgpn->name, *ovs_bgpn->remote_as,
+                                    AFI_IP, SAFI_UNICAST);
+                        }
+                    } else {
+                        VLOG_ERR("%%cannot find daemon bgp router instance %d %%\n",
+                                 ovs_bgpn->bgp_router->asn);
+                    }
+                }
+            }
+        }
     }
 }
 

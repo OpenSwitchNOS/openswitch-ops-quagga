@@ -50,6 +50,7 @@
 #include "bgpd/bgp_ovsdb_if.h"
 #include "bgpd/bgp_table.h"
 #include "bgpd/bgp_route.h"
+#include "policy_ovsdb.h"
 
 /* Local structure to hold the master thread
  * and counters for read/write callbacks
@@ -633,6 +634,12 @@ bgp_reconfigure(struct ovsdb_idl *idl)
         VLOG_DBG("No config change for bgp in ovs\n");
         return;
     }
+
+    /*
+     * Apply route map changes
+     */
+    policy_ovsdb_prefix_list_get (idl);
+    policy_ovsdb_rt_map(idl);
 
     /* Apply the changes */
     bgp_apply_global_changes();

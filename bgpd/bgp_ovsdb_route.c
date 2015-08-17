@@ -73,6 +73,7 @@ typedef struct route_psd_bgp_s {
     const char *peer_id;
     bool internal;
     bool ibgp;
+    const char *uptime;
 } route_psd_bgp_t;
 
 static const char *
@@ -121,6 +122,7 @@ bgp_ovsdb_set_rib_protocol_specific_data(const struct ovsrec_route *rib,
     struct smap smap;
     struct attr *attr;
     struct peer *peer;
+    time_t tbuf;
 
     attr = info->attr;
     peer = info->peer;
@@ -164,6 +166,14 @@ bgp_ovsdb_set_rib_protocol_specific_data(const struct ovsrec_route *rib,
                  OVSDB_ROUTE_PROTOCOL_SPECIFIC_BGP_IBGP,
                  "false");
     }
+#ifdef HAVE_CLOCK_MONOTONIC
+    tbuf = time(NULL) - (bgp_clock() - info->uptime);
+#else
+    tbuf = info->uptime;
+#endif
+    smap_add(&smap,
+             OVSDB_ROUTE_PROTOCOL_SPECIFIC_BGP_UPTIME,
+             ctime(&tbuf));
     ovsrec_route_set_protocol_specific(rib, &smap);
     smap_destroy(&smap);
     return 0;

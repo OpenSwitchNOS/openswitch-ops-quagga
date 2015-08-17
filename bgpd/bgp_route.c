@@ -3670,6 +3670,9 @@ bgp_static_withdraw (struct bgp *bgp, struct prefix *p, afi_t afi,
     {
       bgp_aggregate_decrement (bgp, p, ri, afi, safi);
       bgp_info_delete (rn, ri);
+#ifdef ENABLE_OVSDB
+      bgp_ovsdb_delete_rib_entry(p, ri, bgp, safi, 1);
+#endif
       bgp_process (bgp, rn, afi, safi);
     }
 

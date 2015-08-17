@@ -3821,7 +3821,7 @@ bgp_static_set (struct vty *vty, struct bgp *bgp, const char *ip_str,
 }
 
 /* Configure static BGP network. */
-static int
+int
 bgp_static_unset (struct vty *vty, struct bgp *bgp, const char *ip_str,
 		  afi_t afi, safi_t safi)
 {

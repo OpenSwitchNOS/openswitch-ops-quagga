@@ -308,6 +308,7 @@ class bgpTest (HalonTest):
         if result == 0.0:
             assert False, "PING did not fail when it was supposed to."
 
+@pytest.mark.skipif(True, reason="Does not cleanup dockers fully")
 class Test_bgp:
     def setup (self):
         pass

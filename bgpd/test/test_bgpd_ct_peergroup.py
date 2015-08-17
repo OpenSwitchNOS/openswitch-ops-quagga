@@ -191,6 +191,7 @@ class bgpTest (HalonTest):
         assert found, "Could not find route (%s -> %s) on %s" % \
                       (network, next_hop, switch.name)
 
+@pytest.mark.skipif(True, reason="Does not cleanup dockers fully")
 class Test_bgp:
     def setup (self):
         pass

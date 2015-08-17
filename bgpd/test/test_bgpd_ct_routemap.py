@@ -301,6 +301,7 @@ class bgpTest (HalonTest):
 
             i += 1
 
+@pytest.mark.skipif(True, reason="Does not cleanup dockers fully")
 class Test_bgp:
     def setup (self):
         pass

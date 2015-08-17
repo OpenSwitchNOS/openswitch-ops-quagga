@@ -582,7 +582,7 @@ bgp_apply_bgp_neighbor_changes (struct ovsdb_idl *idl)
 			    ovs_bgpn->bgp_router->asn);
 			daemon_neighbor_remote_as_cmd_execute
 			    (bgp_instance, ovs_bgpn->name,
-				ovs_bgpn->remote_as, AFI_IP, SAFI_UNICAST);
+				*ovs_bgpn->remote_as, AFI_IP, SAFI_UNICAST);
                        if (ovs_bgpn->description) {
                            daemon_neighbor_description_cmd_execute(bgp_instance,
                                 ovs_bgpn->name, ovs_bgpn->description);

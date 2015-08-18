@@ -110,5 +110,20 @@ class SwitchVtyshUtils(object):
                 if rte.find(next_hop) >= 0:
                     found = True
                     break;
+        return found
+
+    @staticmethod
+    def verify_show_ip_bgp_route (switch, network, next_hop):
+        info("Verifying - show ip bgp route - Network: %s, Next-Hop: %s\n" %
+             (network, next_hop))
+        routes = SwitchVtyshUtils.vtysh_cmd(switch, "sh ip bgp %s" % network).split(VTYSH_CR)
+
+        found = False
+        for rte in routes:
+            # Try to match our advertised route first
+            if rte.find(network) >= 0:
+                if rte.find(next_hop) >= 0:
+                    found = True
+                    break;
 
         return found

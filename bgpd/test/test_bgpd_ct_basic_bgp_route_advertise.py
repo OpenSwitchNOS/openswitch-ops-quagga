@@ -166,8 +166,16 @@ class bgpTest (HalonTest):
 
         # Wait some time to let BGP converge
         sleep(BGP_CONVERGENCE_DELAY_S)
+        info("Verifying show ip bgp\n")
         found = SwitchVtyshUtils.verify_bgp_route(switch, network,
                                                   next_hop)
+
+        assert found == False, "Route (%s) was not successfully removed" % \
+                               network
+        # Verify show ip bgp <route> cmd
+        info("Verifying show ip bgp %s\n" % network)
+        found = SwitchVtyshUtils.verify_show_ip_bgp_route(switch, network,
+                                                          next_hop)
 
         assert found == False, "Route (%s) was not successfully removed" % \
                                network
@@ -201,6 +209,20 @@ class bgpTest (HalonTest):
         assert found, "Could not find route (%s -> %s) on %s" % \
                       (network, next_hop, switch.name)
 
+    def verify_show_ip_bgp_route (self):
+        info("Verifying show ip bgp route : negative case\n")
+        switch = self.net.switches[1]
+        found = SwitchVtyshUtils.verify_show_ip_bgp_route(switch, "1.1.1.0",
+                                                          "1.1.1.1")
+        assert found == False, "found route (%s -> %s) on %s" % \
+            (network, next_hop, switch.name)
+
+        info("Verifying show ip bgp route : positive case\n")
+        found = SwitchVtyshUtils.verify_show_ip_bgp_route(switch, BGP1_NETWORK,
+                                                          BGP1_ROUTER_ID)
+        assert found, "Could not find route (%s -> %s) on %s" % \
+                      (network, next_hop, switch.name)
+
 @pytest.mark.skipif(True, reason="Does not cleanup dockers fully")
 class Test_bgp:
     def setup (self):
@@ -231,5 +253,6 @@ class Test_bgp:
         self.test_var.configure_bgp()
         # self.test_var.verify_configs()
         self.test_var.verify_bgp_routes()
+        self.test_var.verify_show_ip_bgp_route()
         self.test_var.unconfigure_network_bgp()
         self.test_var.verify_bgp_route_removed()

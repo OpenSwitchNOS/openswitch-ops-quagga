@@ -496,12 +496,13 @@ bgp_ovsdb_delete_rib_entry(struct prefix *p,
                  __FUNCTION__, pr);
         return -1;
     }
-    if (CHECK_FLAG(info->flags, BGP_INFO_SELECTED)) {
-        VLOG_ERR("%s:BGP info flag is set to selected, cannot \
-remove route %s",
-                 __FUNCTION__, pr);
-        return -1;
-    }
+// Disable check to allow route to be deleted regardless of flag.
+//     if (CHECK_FLAG(info->flags, BGP_INFO_SELECTED)) {
+//         VLOG_ERR("%s:BGP info flag is set to selected, cannot \
+// remove route %s",
+//                  __FUNCTION__, pr);
+//         return -1;
+//     }
     // Delete route from RIB
     ovsrec_route_delete(rib_row);
     if (create_txn) {

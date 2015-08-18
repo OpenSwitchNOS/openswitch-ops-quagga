@@ -70,6 +70,7 @@ BGP1_CONFIG = ["router bgp %s" % BGP1_ASN,
                "network %s/%s" % (BGP1_NETWORK, BGP_NETWORK_PL),
                "neighbor %s peer-group" % BGP_PEER_GROUP,
                "neighbor %s remote-as %s" % (BGP_PEER_GROUP, BGP1_NEIGHBOR_ASN),
+               "neighbor %s remote-as 111" % BGP1_NEIGHBOR,
                "neighbor %s peer-group %s" % (BGP1_NEIGHBOR, BGP_PEER_GROUP)]
 
 BGP2_CONFIG = ["router bgp %s" % BGP2_ASN,

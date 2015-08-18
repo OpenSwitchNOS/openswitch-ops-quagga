@@ -51,6 +51,7 @@
 #include "bgpd/bgp_table.h"
 #include "bgpd/bgp_route.h"
 #include "policy_ovsdb.h"
+#include "linklist.h"
 
 /* Local structure to hold the master thread
  * and counters for read/write callbacks
@@ -128,6 +129,7 @@ bgp_ovsdb_tables_init (struct ovsdb_idl *idl)
     ovsdb_idl_add_table(idl, &ovsrec_table_bgp_neighbor);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_active);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_weight);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_is_peer_group);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_bgp_peer_group);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_bgp_router);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_strict_capability_match);
@@ -408,7 +410,7 @@ delete_bgp_router_config(struct ovsdb_idl *idl)
         }
         if (!match_found) {
             VLOG_DBG("bgp_cfg->as : %d will be deleted from BGPD\n",
-	             (int)(bgp_cfg->as));
+                     (int)(bgp_cfg->as));
             bgp_delete(bgp_cfg);
         }
     }
@@ -733,6 +735,98 @@ bgp_apply_bgp_router_changes(struct ovsdb_idl *idl)
     }
 }
 
+static void
+check_and_delete_bgp_neighbors(struct bgp *bgp, struct ovsdb_idl *idl)
+{
+    // Iterate through all the peers of the BGP and check against
+    // ovsdb to identify which neighbor has been deleted. If it doesn't exist
+    // in ovsdb then it is considered deleted.
+    struct peer *peer;
+    struct listnode *node, *nnode;
+    struct ovsrec_bgp_neighbor *bgpn;
+    for (ALL_LIST_ELEMENTS (bgp->peer, node, nnode, peer))
+    {
+        bool name_match = false;
+
+        // If the peer's name matches the name in the ovsdb then it means
+        // it wasn't removed. If a neighbor's name is not matched then it was
+        // removed.
+        OVSREC_BGP_NEIGHBOR_FOR_EACH(bgpn, idl)
+        {
+            if (!strcmp(bgpn->name, peer->host))
+            {
+                name_match = true;
+                break;
+            }
+        }
+
+        if (!name_match)
+        {
+            VLOG_DBG("peer %s deleted", peer->host);
+            peer_delete(peer);
+        }
+    }
+}
+
+static void
+check_and_delete_bgp_neighbor_peer_groups(struct bgp *bgp,
+                                          struct ovsdb_idl *idl)
+{
+    // Iterate through all the peergroups of the BGP and check against
+    // ovsdb to identify which neighbor peergroup has been deleted.
+    // If it doesn't exist in ovsdb then it is considered deleted.
+    struct peer_group *peer_group;
+    struct listnode *node, *nnode;
+    struct ovsrec_bgp_neighbor *bgpn;
+    for (ALL_LIST_ELEMENTS (bgp->group, node, nnode, peer_group))
+    {
+        bool name_match = false;
+
+        // If the peergroup's name matches the name in the ovsdb then it means
+        // it wasn't removed. If a neighbor peergroup's name is not matched
+        // then it was removed.
+        OVSREC_BGP_NEIGHBOR_FOR_EACH(bgpn, idl)
+        {
+            if (!strcmp(bgpn->name, peer_group->name))
+            {
+                name_match = true;
+                break;
+            }
+        }
+
+        if (!name_match)
+        {
+            VLOG_DBG("peer group %s deleted", peer_group->name);
+            peer_group_delete(peer_group);
+        }
+    }
+}
+
+static void
+delete_bgp_neighbors_and_peer_groups(struct ovsrec_bgp_neighbor *ovs_bgpn,
+                                     struct ovsdb_idl *idl)
+{
+    struct bgp *bgp;
+    if (ovs_bgpn && ovs_bgpn->bgp_router)
+    {
+        bgp = bgp_lookup(ovs_bgpn->bgp_router->asn, NULL);
+    }
+    else
+    {
+        // BGP neighbor was already deleted, so we get the first BGP conf
+        bgp = bgp_lookup_by_name(NULL);
+    }
+
+    if (!bgp)
+    {
+        VLOG_ERR("No BGP configuration exists.");
+        return;
+    }
+
+    check_and_delete_bgp_neighbors(bgp, idl);
+    check_and_delete_bgp_neighbor_peer_groups(bgp, idl);
+}
+
 /*
 ** Process potential changes in the BGP_Neighbor table
 */
@@ -748,54 +842,84 @@ bgp_apply_bgp_neighbor_changes (struct ovsdb_idl *idl)
 
     /* try & find if any row got deleted or modified */
     if (!ovs_bgpn) {
-	deleted = true;
+        deleted = true;
     } else {
-	if (OVSREC_IDL_ANY_TABLE_ROWS_DELETED(ovs_bgpn, idl_seqno)) {
-	    deleted = true;
-	}
-	if (OVSREC_IDL_ANY_TABLE_ROWS_INSERTED(ovs_bgpn, idl_seqno) ||
-	    OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED(ovs_bgpn, idl_seqno)) {
-		modified = true;
-	}
+        if (OVSREC_IDL_ANY_TABLE_ROWS_DELETED(ovs_bgpn, idl_seqno)) {
+            deleted = true;
+        }
+        if (OVSREC_IDL_ANY_TABLE_ROWS_INSERTED(ovs_bgpn, idl_seqno) ||
+            OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED(ovs_bgpn, idl_seqno)) {
+            modified = true;
+        }
     }
 
     /* take care of deletions if any */
     if (deleted) {
-	VLOG_INFO("bgp neighbor deletion occured\n");
+        VLOG_DBG("bgp neighbor/peer-group deletion occured\n");
+        delete_bgp_neighbors_and_peer_groups(ovs_bgpn, idl);
     }
 
     /* take care of modifications if any */
     if (modified) {
-	VLOG_INFO("bgp neighbor modification occured\n");
-	OVSREC_BGP_NEIGHBOR_FOR_EACH(ovs_bgpn, idl) {
-	    if (OVSREC_IDL_IS_ROW_INSERTED(ovs_bgpn, idl_seqno) ||
-		OVSREC_IDL_IS_ROW_MODIFIED(ovs_bgpn, idl_seqno))
-	    {
-		if (!ovs_bgpn->bgp_router) {
-		    VLOG_ERR("%%cannot find bgp router in idl\n");
-		} else {
-		    VLOG_INFO("looking up bgp %d\n", ovs_bgpn->bgp_router->asn);
-		    bgp_instance = bgp_lookup(ovs_bgpn->bgp_router->asn, NULL);
-		    if (bgp_instance) {
-			VLOG_INFO("bgp router instance %d found\n",
-			    ovs_bgpn->bgp_router->asn);
-			daemon_neighbor_remote_as_cmd_execute
-			    (bgp_instance, ovs_bgpn->name,
-				*ovs_bgpn->remote_as, AFI_IP, SAFI_UNICAST);
-                       if (ovs_bgpn->description) {
-                           daemon_neighbor_description_cmd_execute(bgp_instance,
-                                ovs_bgpn->name, ovs_bgpn->description);
-                       } else {
-                           daemon_neighbor_description_cmd_execute(bgp_instance,
-                                ovs_bgpn->name, NULL);
-                       }
-                       if (ovs_bgpn->password) {
-                           daemon_neighbor_password_cmd_execute(bgp_instance,
-                                ovs_bgpn->name, ovs_bgpn->password);
-                       } else {
-                           daemon_neighbor_password_cmd_execute(bgp_instance,
-                                ovs_bgpn->name, NULL);
-                       }
+        VLOG_DBG("bgp neighbor modification occured\n");
+        OVSREC_BGP_NEIGHBOR_FOR_EACH(ovs_bgpn, idl) {
+            if (OVSREC_IDL_IS_ROW_INSERTED(ovs_bgpn, idl_seqno) ||
+                OVSREC_IDL_IS_ROW_MODIFIED(ovs_bgpn, idl_seqno)) {
+                if (!ovs_bgpn->bgp_router) {
+                    VLOG_ERR("%%cannot find bgp router in idl\n");
+                } else {
+                    VLOG_DBG("looking up bgp %d\n", ovs_bgpn->bgp_router->asn);
+                    bgp_instance = bgp_lookup(ovs_bgpn->bgp_router->asn, NULL);
+                    if (bgp_instance) {
+                        VLOG_DBG("bgp router instance %d found\n",
+                                 ovs_bgpn->bgp_router->asn);
+
+                        if (OVSREC_IDL_IS_COLUMN_MODIFIED(
+                                ovsrec_bgp_neighbor_col_remote_as, idl_seqno)) {
+                            if (ovs_bgpn->n_remote_as)
+                            {
+                                daemon_neighbor_remote_as_cmd_execute(
+                                        bgp_instance, ovs_bgpn->name,
+                                        *ovs_bgpn->remote_as, AFI_IP,
+                                        SAFI_UNICAST);
+                            }
+                        }
+
+                        if (OVSREC_IDL_IS_COLUMN_MODIFIED(
+                                ovsrec_bgp_neighbor_col_is_peer_group,
+                                idl_seqno)) {
+                            if (ovs_bgpn->is_peer_group) {
+                                daemon_neighbor_peer_group_cmd_execute(
+                                        bgp_instance, ovs_bgpn->name);
+                            }
+                        }
+
+                        if (OVSREC_IDL_IS_COLUMN_MODIFIED(
+                                ovsrec_bgp_neighbor_col_description,
+                                idl_seqno)) {
+                            if (ovs_bgpn->description) {
+                                daemon_neighbor_description_cmd_execute(
+                                        bgp_instance, ovs_bgpn->name,
+                                        ovs_bgpn->description);
+                            } else {
+                                daemon_neighbor_description_cmd_execute(
+                                        bgp_instance, ovs_bgpn->name, NULL);
+                            }
+                        }
+
+                        if (OVSREC_IDL_IS_COLUMN_MODIFIED(
+                                ovsrec_bgp_neighbor_col_password, idl_seqno)) {
+                            if (ovs_bgpn->password) {
+                                daemon_neighbor_password_cmd_execute(
+                                        bgp_instance, ovs_bgpn->name,
+                                        ovs_bgpn->password);
+                            } else {
+                                daemon_neighbor_password_cmd_execute(
+                                        bgp_instance, ovs_bgpn->name, NULL);
+                            }
+                        }
+
+// HALON TODO: Is this disabled temporarily?
 #if 0
                        if (ovs_bgpn->timers) {
                            u_int32_t keepalive = 0;
@@ -806,20 +930,60 @@ bgp_apply_bgp_neighbor_changes (struct ovsdb_idl *idl)
                                                             keepalive, holdtime);
                        }
 #endif
-                      if (ovs_bgpn->n_shutdown && ovs_bgpn->shutdown[0]) {
-                          daemon_neighbor_shutdown_cmd_execute
-                                       (bgp_instance, ovs_bgpn->name, true);
-                      } else {
-                         daemon_neighbor_shutdown_cmd_execute
-                                       (bgp_instance, ovs_bgpn->name, false);
-                      }
-		    } else {
-			VLOG_ERR("%%cannot find daemon bgp router instance %d %%\n",
-			    ovs_bgpn->bgp_router->asn);
-		    }
-		}
-	    }
-	}
+
+                        if (OVSREC_IDL_IS_COLUMN_MODIFIED(
+                                ovsrec_bgp_neighbor_col_shutdown,
+                                idl_seqno)) {
+                            if (ovs_bgpn->n_shutdown && ovs_bgpn->shutdown[0]) {
+                                daemon_neighbor_shutdown_cmd_execute(
+                                        bgp_instance, ovs_bgpn->name, true);
+                            } else {
+                                daemon_neighbor_shutdown_cmd_execute(
+                                        bgp_instance, ovs_bgpn->name, false);
+                            }
+                        }
+
+                        if (OVSREC_IDL_IS_COLUMN_MODIFIED(
+                                ovsrec_bgp_neighbor_col_inbound_soft_reconfiguration,
+                                idl_seqno)) {
+                            bool enable =
+                                ovs_bgpn->inbound_soft_reconfiguration &&
+                                ovs_bgpn->inbound_soft_reconfiguration[0];
+
+                            daemon_neighbor_inbound_soft_reconfiguration_cmd_execute(
+                                    bgp_instance, ovs_bgpn->name,
+                                    AFI_IP, SAFI_UNICAST,
+                                    enable);
+                        }
+
+                        if (OVSREC_IDL_IS_COLUMN_MODIFIED(
+                                ovsrec_bgp_neighbor_col_bgp_peer_group,
+                                idl_seqno)) {
+                            const struct ovsrec_bgp_neighbor *peer_group =
+                                    ovs_bgpn->bgp_peer_group;
+
+                            if (peer_group)
+                            {
+                                daemon_neighbor_set_peer_group_cmd_execute(
+                                        bgp_instance, ovs_bgpn->name,
+                                        peer_group->name,
+                                        AFI_IP, SAFI_UNICAST);
+                            }
+                            else
+                            {
+                                daemon_no_neighbor_set_peer_group_cmd_execute(
+                                        bgp_instance, ovs_bgpn->name,
+                                        AFI_IP, SAFI_UNICAST);
+                            }
+                        }
+                    } else {
+                        VLOG_ERR("%%cannot find daemon bgp "
+                                 "router instance %d %%\n",
+                                 ovs_bgpn->bgp_router->asn);
+                    }
+                }
+            }
+        }
     }
 }
 

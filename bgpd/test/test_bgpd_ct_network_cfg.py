@@ -83,8 +83,7 @@ class bgpTest (HalonTest):
         info("\n")
 
     def configure_bgp (self):
-        config = "bgp router-id"
-        info("Verifying \"%s\"..\n" % config)
+        info("Configuring bgp...\n")
 
         switch = self.net.switches[0]
 
@@ -96,6 +95,7 @@ class bgpTest (HalonTest):
         SwitchVtyshUtils.vtysh_cfg_cmd(switch, cfg_array)
 
     def verify_bgp_router_id (self):
+	config = "bgp router-id"
         res = SwitchVtyshUtils.verify_cfg_value(switch, [config], BGP_ROUTER_ID)
         assert res, "Config \"%s\" was not correctly configured!" % config
 
@@ -105,6 +105,7 @@ class bgpTest (HalonTest):
     def verify_bgp_route (self):
         info("Verifying BGP route..\n")
 
+	sleep(BGP_CONVERGENCE_DELAY_S)
         switch = self.net.switches[0]
         network = BGP_NETWORK
         next_hop = "0.0.0.0"
@@ -115,6 +116,32 @@ class bgpTest (HalonTest):
         assert found, "Could not find route (%s -> %s) on %s" % \
                       (network, next_hop, switch.name)
 
+    def verify_no_bgp_route (self):
+        info("Verifying no BGP route..\n")
+
+        sleep(BGP_CONVERGENCE_DELAY_S)
+        switch = self.net.switches[0]
+        network = BGP_NETWORK
+        next_hop = "0.0.0.0"
+
+        found = SwitchVtyshUtils.verify_bgp_route(switch, network,
+                                                  next_hop)
+
+        assert found == False, "Route was not removed (%s -> %s) on %s" % \
+                      (network, next_hop, switch.name)
+
+    def unconfigure_bgp (self):
+        info("Unconfiguring bgp network\n")
+
+        switch = self.net.switches[0]
+
+        cfg_array = []
+        cfg_array.append("router bgp %s" % BGP_ASN)
+        cfg_array.append("no network %s/%s" % (BGP_NETWORK, BGP_PL))
+
+        SwitchVtyshUtils.vtysh_cfg_cmd(switch, cfg_array)
+
+@pytest.mark.skipif(True, reason="Does not cleanup dockers fully")
 class Test_bgp:
     def setup (self):
         pass
@@ -142,3 +169,5 @@ class Test_bgp:
         self.test_var.configure_bgp()
         #self.test_var.verify_bgp_router_id()
         self.test_var.verify_bgp_route()
+	self.test_var.unconfigure_bgp()
+	self.test_var.verify_no_bgp_route()

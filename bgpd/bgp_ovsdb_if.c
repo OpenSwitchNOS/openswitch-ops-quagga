@@ -569,7 +569,6 @@ modify_bgp_network_config(struct bgp *bgp_cfg, const struct ovsrec_bgp_router *b
             VLOG_INFO("AFter ADDITION :: num_of_bgp_nodes = %d",
                        num_of_bgp_nodes);
 
-            return 0;
         }
     }
     else {
@@ -580,10 +579,9 @@ modify_bgp_network_config(struct bgp *bgp_cfg, const struct ovsrec_bgp_router *b
             VLOG_INFO("Static route DELETED !!");
             VLOG_INFO("After DELETION :: num_of_bgp_nodes = %d",
                                  num_of_bgp_nodes);
-            return 0;
         }
     }
-    return -1;
+    return ret_status;
 }
 
 int
@@ -617,10 +615,11 @@ bgp_static_route_addition(struct bgp *bgp_cfg,
                                       NULL, 0);
             if (!ret_status)
                 bgp_static_route_dump(bgp_cfg,rn);
-            return ret_status;
+            else
+                VLOG_ERR("Static route addition failed!!");
         }
     }
-    return -1;
+    return ret_status;
 }
 
 int
@@ -660,7 +659,8 @@ bgp_static_route_deletion(struct bgp *bgp_cfg,
                                               afi, safi);
                 if (!ret_status)
                     bgp_static_route_dump(bgp_cfg,rn);
-                return ret_status;
+                else
+                    VLOG_ERR("Last static route deletion failed!!");
             }
             else {
                 bool match_found = 0;
@@ -676,12 +676,13 @@ bgp_static_route_deletion(struct bgp *bgp_cfg,
                                                   afi, safi);
                     if (!ret_status)
                         bgp_static_route_dump(bgp_cfg,rn);
-                    return ret_status;
+                    else
+                        VLOG_ERR("Static route deletion failed!!");
                 }
             }
         }
     }
-    return -1;
+    return ret_status;
 }
 
 int

@@ -50,7 +50,6 @@
 #include "bgpd/bgp_ovsdb_if.h"
 #include "bgpd/bgp_table.h"
 #include "bgpd/bgp_route.h"
-#include "policy_ovsdb.h"
 #include "linklist.h"
 
 /* Local structure to hold the master thread
@@ -70,7 +69,7 @@ COVERAGE_DEFINE(bgp_ovsdb_cnt);
 VLOG_DEFINE_THIS_MODULE(bgp_ovsdb_if);
 
 struct ovsdb_idl *idl;
-static unsigned int idl_seqno;
+unsigned int idl_seqno;
 static char *appctl_path = NULL;
 static struct unixctl_server *appctl;
 static int system_configured = false;
@@ -106,6 +105,34 @@ bgp_unixctl_dump(struct unixctl_conn *conn, int argc OVS_UNUSED,
     free(buf);
 #endif
 }
+
+
+static void
+bgp_policy_ovsdb_init(struct ovsdb_idl *idl)
+{
+    ovsdb_idl_add_table(idl, &ovsrec_table_prefix_list);
+    ovsdb_idl_add_column(idl, &ovsrec_prefix_list_col_name);
+    ovsdb_idl_add_column(idl, &ovsrec_prefix_list_col_description);
+
+    ovsdb_idl_add_table(idl, &ovsrec_table_prefix_list_entries);
+    ovsdb_idl_add_column(idl, &ovsrec_prefix_list_entries_col_action);
+    ovsdb_idl_add_column(idl, &ovsrec_prefix_list_entries_col_prefix);
+    ovsdb_idl_add_column(idl, &ovsrec_prefix_list_entries_col_prefix_list);
+    ovsdb_idl_add_column(idl, &ovsrec_prefix_list_entries_col_sequence);
+
+
+    ovsdb_idl_add_table(idl, &ovsrec_table_route_map);
+    ovsdb_idl_add_column(idl, &ovsrec_route_map_col_name);
+
+    ovsdb_idl_add_table(idl, &ovsrec_table_route_map_entries);
+    ovsdb_idl_add_column(idl, &ovsrec_route_map_entries_col_action);
+    ovsdb_idl_add_column(idl, &ovsrec_route_map_entries_col_description);
+    ovsdb_idl_add_column(idl, &ovsrec_route_map_entries_col_match);
+    ovsdb_idl_add_column(idl, &ovsrec_route_map_entries_col_preference);
+    ovsdb_idl_add_column(idl, &ovsrec_route_map_entries_col_route_map);
+    ovsdb_idl_add_column(idl, &ovsrec_route_map_entries_col_set);
+}
+
 
 static void
 bgp_ovsdb_tables_init (struct ovsdb_idl *idl)
@@ -152,6 +179,9 @@ bgp_ovsdb_tables_init (struct ovsdb_idl *idl)
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_other_config);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_capability);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_timers);
+
+    /* BGP policy */
+    bgp_policy_ovsdb_init(idl);
 
     /* RIB table */
     ovsdb_idl_add_table(idl, &ovsrec_table_route);

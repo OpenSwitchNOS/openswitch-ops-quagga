@@ -33,6 +33,43 @@ struct bgp_info;
 struct prefix;
 struct bgp;
 
+enum
+{
+  SET_COMMUNITY,
+  SET_METRIC,
+  SET_MAX,
+} set;
+
+enum
+{
+  MATCH_PREFIX,
+  MATCH_MAX,
+} match;
+
+enum
+{
+  RT_MAP_NAME,
+  RT_MAP_ACTION,
+  RT_MAP_PREFERENCE,
+  RT_MAP_DESCRIPTION,
+  RT_MAP_MAX,
+} rt_map;
+
+
+enum
+{
+  PREFIX_LIST_NAME,
+  PREFIX_LIST_ACTION,
+  PREFIX_LIST_PREFIX,
+  PREFIX_LIST_MAX,
+} prefix_list;
+
+
+
+
+extern int policy_ovsdb_prefix_list_get (struct ovsdb_idl *idl);
+extern int policy_ovsdb_rt_map(struct ovsdb_idl *idl);
+
 extern const struct ovsrec_vrf*
 bgp_ovsdb_get_vrf(struct bgp *bgp);
 

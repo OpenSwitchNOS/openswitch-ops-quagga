@@ -174,7 +174,7 @@ prefix_list_entry_new (void)
   return new;
 }
 
-#ifdef HALON
+#ifdef ENABLE_OVSDB
 void
 #else
 static void
@@ -276,7 +276,7 @@ prefix_list_insert (afi_t afi, const char *name)
   return plist;
 }
 
-#ifdef HALON
+#ifdef ENABLE_OVSDB
 struct prefix_list *
 #else
 static struct prefix_list *
@@ -342,7 +342,7 @@ prefix_list_delete (struct prefix_list *plist)
     (*master->delete_hook) (NULL);
 }
 
-#ifdef HALON
+#ifdef ENABLE_OVSDB
 struct prefix_list_entry *
 #else
 static struct prefix_list_entry *
@@ -474,7 +474,7 @@ prefix_list_entry_delete (struct prefix_list *plist,
     }
 }
 
-#ifdef HALON
+#ifdef ENABLE_OVSDB
 void
 #else
 static void
@@ -639,7 +639,7 @@ prefix_list_print (struct prefix_list *plist)
 }
 
 /* Retrun 1 when plist already include pentry policy. */
-#ifdef HALON
+#ifdef ENABLE_OVSDB
 struct prefix_list_entry *
 #else
 static struct prefix_list_entry *

@@ -179,6 +179,7 @@ bgp_ovsdb_tables_init (struct ovsdb_idl *idl)
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_other_config);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_capability);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_timers);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_route_maps);
 
     /* BGP policy */
     bgp_policy_ovsdb_init(idl);
@@ -400,6 +401,73 @@ bgp_set_hostname (char *hostname)
         XFREE (MTYPE_HOST, host.name);
 
     host.name = XSTRDUP(MTYPE_HOST, hostname);
+}
+
+static void
+modify_bgp_neighbor_route_map(struct ovsrec_bgp_neighbor *ovs_bgpn,
+                              struct bgp *bgp_instance,
+                              const char *direction,
+                              afi_t afi, safi_t safi)
+{
+    // If an entry for "direction" is not found in the record, NULL name
+    // will trigger an unset
+    char *name = NULL;
+
+    int i;
+    char *direct;
+
+    for (i = 0; i < ovs_bgpn->n_route_maps; i++)
+    {
+        direct = ovs_bgpn->key_route_maps[i];
+
+        if (!strcmp(direct, direction))
+        {
+            struct ovsrec_route_map *rm = ovs_bgpn->value_route_maps[i];
+            name = rm->name;
+            break;
+        }
+    }
+
+    daemon_neighbor_route_map_cmd_execute(bgp_instance, ovs_bgpn->name,
+                                          afi, safi, name, direction);
+}
+
+afi_t
+network2afi(const char *network)
+{
+    struct prefix p;
+    afi_t afi;
+
+    if (!str2prefix(network, &p)) {
+        return 0;
+    }
+
+    afi = family2afi(p.family);
+    return afi;
+}
+
+static void
+apply_bgp_neighbor_route_map_changes(struct ovsrec_bgp_neighbor *ovs_bgpn,
+                                     struct bgp *bgp_instance)
+{
+    afi_t afi = network2afi(ovs_bgpn->name);
+    safi_t safi = SAFI_UNICAST;
+
+    if (afi)
+    {
+        char *direct;
+        direct = OVSREC_BGP_NEIGHBOR_ROUTE_MAPS_IN;
+        modify_bgp_neighbor_route_map(ovs_bgpn, bgp_instance, direct,
+                                      afi, safi);
+
+        direct = OVSREC_BGP_NEIGHBOR_ROUTE_MAPS_OUT;
+        modify_bgp_neighbor_route_map(ovs_bgpn, bgp_instance, direct,
+                                      afi, safi);
+    }
+    else
+    {
+        VLOG_ERR("Invalid AFI");
+    }
 }
 
 static void
@@ -736,13 +804,13 @@ bgp_apply_bgp_router_changes(struct ovsdb_idl *idl)
     if (bgp_first && !OVSREC_IDL_ANY_TABLE_ROWS_INSERTED(bgp_first, idl_seqno)
         && !OVSREC_IDL_ANY_TABLE_ROWS_DELETED(bgp_first, idl_seqno)
         && !OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED(bgp_first, idl_seqno)) {
-        VLOG_INFO("No BGP_Router changes");
+        VLOG_DBG("No BGP_Router changes");
         return;
     }
 
     if (bgp_first == NULL) {
         /* Check if it is a first row deletion */
-        VLOG_INFO("BGP config empty!\n");
+        VLOG_DBG("BGP config empty!\n");
         bgp_cfg = bgp_lookup_by_name(NULL);
         if (bgp_cfg) {
             bgp_delete(bgp_cfg);
@@ -752,14 +820,14 @@ bgp_apply_bgp_router_changes(struct ovsdb_idl *idl)
         /* Check if any row deletion */
         if (OVSREC_IDL_ANY_TABLE_ROWS_DELETED(bgp_first, idl_seqno)) {
             delete_bgp_router_config(idl);
-	}
+        }
         /* Check if any row insertion */
         if (OVSREC_IDL_ANY_TABLE_ROWS_INSERTED(bgp_first, idl_seqno)) {
-	    insert_bgp_router_config(idl, bgp_first);
-	}
-	else {
+            insert_bgp_router_config(idl, bgp_first);
+        }
+        else {
             /* Check if any row modification */
-	    if (OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED(bgp_first, idl_seqno)) {
+            if (OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED(bgp_first, idl_seqno)) {
                 modify_bgp_router_config(idl, bgp_first);
             }
         }
@@ -1006,6 +1074,12 @@ bgp_apply_bgp_neighbor_changes (struct ovsdb_idl *idl)
                                         bgp_instance, ovs_bgpn->name,
                                         AFI_IP, SAFI_UNICAST);
                             }
+                        }
+
+                        if (OVSREC_IDL_IS_COLUMN_MODIFIED(
+                               ovsrec_bgp_neighbor_col_route_maps, idl_seqno)) {
+                            apply_bgp_neighbor_route_map_changes(ovs_bgpn,
+                                                                 bgp_instance);
                         }
                     } else {
                         VLOG_ERR("%%cannot find daemon bgp "

@@ -37,8 +37,8 @@ class BgpConfig(object):
     def addNetwork(self, network):
         self.networks.append(network)
 
-    def addRouteMap(self, neighbor, prefix_list, dir, action=''):
-        self.routeMaps.append([neighbor, prefix_list, dir, action])
+    def addRouteMap(self, neighbor, prefix_list, dir, action='', metric=''):
+        self.routeMaps.append([neighbor, prefix_list, dir, action, metric])
 
 # Prefix-list configurations
 class PrefixList(object):

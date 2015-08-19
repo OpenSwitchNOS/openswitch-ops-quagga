@@ -195,7 +195,7 @@ extern void route_map_add_hook (void (*func) (const char *));
 extern void route_map_delete_hook (void (*func) (const char *));
 extern void route_map_event_hook (void (*func) (route_map_event_t, const char *));
 
-#ifdef HALON
+#ifdef ENABLE_OVSDB
 struct route_map_index *
 route_map_index_get (struct route_map *map, enum route_map_type type,
                      int pref);

@@ -175,21 +175,37 @@ class bgpTest (HalonTest):
                 assert res, "Config \"%s\" was not correctly configured!" % cfg
 
     def verify_bgp_route (self, switch, network, next_hop):
-        info("\nVerifying route - Network: %s, Next-Hop: %s\n" %
-             (network, next_hop))
-
-        routes = SwitchVtyshUtils.vtysh_cmd(switch, "sh ip bgp").split(VTYSH_CR)
-
-        found = False
-        for rte in routes:
-            # Try to match our advertised route first
-            if rte.find(network) >= 0:
-                if rte.find(next_hop) >= 0:
-                    found = True
-                    break;
+        found = SwitchVtyshUtils.verify_bgp_route(switch, network, next_hop)
 
         assert found, "Could not find route (%s -> %s) on %s" % \
                       (network, next_hop, switch.name)
+
+    def unconfigure_peer_group (self):
+        switch = self.net.switches[0]
+
+        info("Unconfiguring peer-group on %s\n" % switch.name)
+
+        cfg_array = []
+        cfg_array.append("router bgp %s" % BGP1_ASN)
+        cfg_array.append("no neighbor %s peer-group %s" % (BGP1_NEIGHBOR,
+                                                           BGP_PEER_GROUP))
+
+        SwitchVtyshUtils.vtysh_cfg_cmd(switch, cfg_array)
+
+    def verify_bgp_route_removed (self):
+        info("Verifying route removed after peer removed from peer-group..\n")
+
+        switch = self.net.switches[0]
+
+        # Wait some time to let BGP converge
+        sleep(BGP_CONVERGENCE_DELAY_S)
+
+        # Verify that the neighbor's route info should be removed.
+        found = SwitchVtyshUtils.verify_bgp_route(switch, BGP2_NETWORK,
+                                                  BGP1_NEIGHBOR)
+
+        assert found == False, "Route still exists! (%s -> %s) on %s" % \
+                               (network, next_hop, switch.name)
 
 @pytest.mark.skipif(True, reason="Does not cleanup dockers fully")
 class Test_bgp:
@@ -221,3 +237,5 @@ class Test_bgp:
         self.test_var.configure_bgp()
         #self.test_var.verify_configs()
         self.test_var.verify_bgp_routes()
+        self.test_var.unconfigure_peer_group()
+        self.test_var.verify_bgp_route_removed()

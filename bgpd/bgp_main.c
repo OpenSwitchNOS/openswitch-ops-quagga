@@ -56,6 +56,7 @@ Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 
 #ifdef ENABLE_OVSDB
 extern boolean exiting;
+#define HALON_BGP_DBG   1
 #endif
 
 /* bgpd options, we use GNU getopt library. */
@@ -354,7 +355,7 @@ main (int argc, char **argv)
   zlog_set_level(NULL, ZLOG_DEST_SYSLOG, LOG_DEBUG);
   zlog_set_level (NULL, ZLOG_DEST_STDOUT, LOG_DEBUG);
 
-#ifdef ENABLE_OVSDB
+#ifdef HALON_BGP_DBG
   conf_bgp_debug_fsm = -1UL;
   conf_bgp_debug_events = -1UL;
   conf_bgp_debug_packet = -1UL;

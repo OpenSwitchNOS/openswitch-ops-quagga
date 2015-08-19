@@ -80,7 +80,7 @@ extern int prefix_bgp_orf_set (char *, afi_t, struct orf_prefix *, int, int);
 extern void prefix_bgp_orf_remove_all (char *);
 extern int prefix_bgp_show_prefix_list (struct vty *, afi_t, char *);
 
-#ifdef HALON
+#ifdef ENABLE_OVSDB
 void prefix_list_entry_add (struct prefix_list *plist,
                        struct prefix_list_entry *pentry);
 void prefix_list_entry_free (struct prefix_list_entry *pentry);

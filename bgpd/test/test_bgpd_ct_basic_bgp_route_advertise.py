@@ -215,13 +215,13 @@ class bgpTest (HalonTest):
         found = SwitchVtyshUtils.verify_show_ip_bgp_route(switch, "1.1.1.0",
                                                           "1.1.1.1")
         assert found == False, "found route (%s -> %s) on %s" % \
-            (network, next_hop, switch.name)
+            ("1.1.1.0", "1.1.1.1", switch.name)
 
         info("Verifying show ip bgp route : positive case\n")
         found = SwitchVtyshUtils.verify_show_ip_bgp_route(switch, BGP1_NETWORK,
                                                           BGP1_ROUTER_ID)
         assert found, "Could not find route (%s -> %s) on %s" % \
-                      (network, next_hop, switch.name)
+                      (BGP1_NETWORK, BGP1_ROUTER_ID, switch.name)
 
 @pytest.mark.skipif(True, reason="Does not cleanup dockers fully")
 class Test_bgp:

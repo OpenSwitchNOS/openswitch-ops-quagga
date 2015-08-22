@@ -43,6 +43,54 @@ from bgpconfig import *
 # Topology:
 #   S1 [interface 1]<--->[interface 2] S2
 #
+# Configuration of BGP1:
+# ----------------------------------------------------------------------------
+# !
+# router bgp 1
+#  bgp router-id 8.0.0.1
+#  network 9.0.0.0/8
+#  network 10.0.0.0/8
+#  neighbor 8.0.0.2 remote-as 2
+# !
+#
+# Configuration of BGP2:
+# ----------------------------------------------------------------------------
+# !
+# router bgp 2
+#  bgp router-id 8.0.0.2
+#  network 11.0.0.0/8
+#  neighbor 8.0.0.1 remote-as 1
+#  neighbor 8.0.0.1 route-map BGP_IN in
+# !
+# ip prefix-list BGP_IN seq 10 permit 9.0.0.0/8
+# !
+# route-map BGP_IN permit 10
+#  description Testing Route Map Description
+#  match ip address prefix-list BGP_IN
+# !
+#
+# Expected routes of BGP1:
+# ----------------------------------------------------------------------------
+# BGP table version is 0, local router ID is 8.0.0.1
+# Status codes: s suppressed, d damped, h history, * valid, > best, i - internal,
+#               r RIB-failure, S Stale, R Removed
+# Origin codes: i - IGP, e - EGP, ? - incomplete
+#
+#    Network          Next Hop            Metric LocPrf Weight Path
+# *> 9.0.0.0          0.0.0.0                  0         32768 i
+# *> 10.0.0.0         0.0.0.0                  0         32768 i
+# *> 11.0.0.0         8.0.0.2                  0             0 2 i
+#
+# Expected routes of BGP2:
+# ----------------------------------------------------------------------------
+# BGP table version is 0, local router ID is 8.0.0.2
+# Status codes: s suppressed, d damped, h history, * valid, > best, i - internal,
+#               r RIB-failure, S Stale, R Removed
+# Origin codes: i - IGP, e - EGP, ? - incomplete
+#
+#    Network          Next Hop            Metric LocPrf Weight Path
+# *> 9.0.0.0          8.0.0.1                  0             0 1 i
+# *> 11.0.0.0         0.0.0.0                  0         32768 i
 
 NUM_OF_SWITCHES = 2
 NUM_HOSTS_PER_SWITCH = 0
@@ -142,7 +190,7 @@ class bgpTest (HalonTest):
 
             # Add the networks this bgp will be advertising
             for network in bgp_cfg.networks:
-                cfg_array.append("network %s" % network)
+                cfg_array.append("network %s/%s" % (network, DEFAULT_PL))
 
             # Add the neighbors of this switch
             for neighbor in bgp_cfg.neighbors:
@@ -225,6 +273,8 @@ class bgpTest (HalonTest):
         i = 0
         for bgp_cfg in self.bgpConfigArr:
             switch = self.net.switches[i]
+
+            info(SwitchVtyshUtils.vtysh_cmd(switch, "sh ip bgp"))
 
             # info(SwitchVtyshUtils.vtysh_cmd(switch, "sh ip bgp"))
 

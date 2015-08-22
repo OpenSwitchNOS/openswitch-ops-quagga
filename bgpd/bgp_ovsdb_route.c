@@ -193,9 +193,12 @@ bgp_ovsdb_lookup_nexthop(char *ip)
         assert(0);
 
     OVSREC_NEXTHOP_FOR_EACH(row, idl) {
-        if (strcmp(ip, row->ip_address) == 0) {
-            /* Match */
-            return row;
+        if (row->ip_address)
+        {
+            if (strcmp(ip, row->ip_address) == 0) {
+                /* Match */
+                return row;
+            }
         }
     }
     return NULL;

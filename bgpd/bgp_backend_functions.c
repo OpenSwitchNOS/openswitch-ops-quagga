@@ -2141,6 +2141,41 @@ daemon_neighbor_shutdown_cmd_execute (struct bgp *bgp, char *peer_str,
     }
 }
 
+int
+daemon_neighbor_route_map_cmd_execute(struct bgp *bgp, char *peer_str,
+                                      afi_t afi, safi_t safi,
+                                      const char *name_str,
+                                      const char *direct_str) {
+    struct peer *peer;
+    int direct = RMAP_IN;
+
+    peer = bgp_peer_and_group_lookup(bgp, peer_str);
+    if (!peer || !(direct_str && direct_str[0])) {
+        VLOG_ERR("Peer %s not found or NULL direction string.", peer_str);
+        return CMD_WARNING;
+    }
+
+    /* Check filter direction. */
+    if (strncmp(direct_str, "in", 2) == 0)
+        direct = RMAP_IN;
+    else if (strncmp(direct_str, "o", 1) == 0)
+        direct = RMAP_OUT;
+    else if (strncmp(direct_str, "im", 2) == 0)
+        direct = RMAP_IMPORT;
+    else if (strncmp(direct_str, "e", 1) == 0)
+        direct = RMAP_EXPORT;
+
+    if (name_str && direct_str) {
+        VLOG_DBG("neighbor %s route-map %s %s\n",
+                 peer_str, name_str, direct_str);
+
+        return peer_route_map_set(peer, afi, safi, direct, name_str);
+    } else {
+        // name was NULL, which means this is a "no" command
+        return peer_route_map_unset(peer, afi, safi, direct);
+    }
+}
+
 #if 0
 /* neighbor shutdown. */
 DEFUN (neighbor_shutdown,

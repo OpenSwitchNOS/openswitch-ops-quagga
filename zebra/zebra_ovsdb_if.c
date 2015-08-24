@@ -15,7 +15,7 @@
  * You should have received a copy of the GNU General Public License
  * along with GNU Zebra; see the file COPYING.  If not, write to the Free
  * Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
- * 02111-1307, USA.  
+ * 02111-1307, USA.
  *
  * File: zebra_ovsdb_if.c
  *
@@ -317,6 +317,7 @@ zebra_apply_global_changes (void)
     ovs = ovsrec_open_vswitch_first(idl);
     if (OVSREC_IDL_ANY_TABLE_ROWS_DELETED(ovs, idl_seqno)) {
         VLOG_WARN("First Row deleted from Open_vSwitch tbl\n");
+        VLOG_INFO("First Row deleted from Open_vSwitch tbl\n");
         return;
     }
     if (!OVSREC_IDL_ANY_TABLE_ROWS_INSERTED(ovs, idl_seqno) &&

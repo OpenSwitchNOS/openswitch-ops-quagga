@@ -1,4 +1,4 @@
 [gerrit]
-host=review.openhalon.io
+host=review.openswitch.net
 port=29418
-project=openhalon/quagga.git
+project=openswitch/ops-quagga

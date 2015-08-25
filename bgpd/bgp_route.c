@@ -1590,7 +1590,7 @@ bgp_process_main (struct work_queue *wq, void *data)
 #ifndef ENABLE_OVSDB
             bgp_zebra_announce (p, old_select, bgp, safi);
 #else
-            bgp_ovsdb_announce_rib_entry (p, old_select, bgp, safi, 1);
+            bgp_ovsdb_announce_rib_entry (p, old_select, bgp, safi);
 #endif
           }
           UNSET_FLAG (old_select->flags, BGP_INFO_MULTIPATH_CHG);
@@ -1624,7 +1624,7 @@ bgp_process_main (struct work_queue *wq, void *data)
 #ifndef ENABLE_OVSDB
       bgp_zebra_announce (p, new_select, bgp, safi);
 #else
-      bgp_ovsdb_announce_rib_entry (p, new_select, bgp, safi, 1);
+      bgp_ovsdb_announce_rib_entry (p, new_select, bgp, safi);
 #endif
       }
       else
@@ -1636,14 +1636,14 @@ bgp_process_main (struct work_queue *wq, void *data)
 #ifndef ENABLE_OVSDB
           bgp_zebra_withdraw (p, old_select, safi);
 #else
-          bgp_ovsdb_withdraw_rib_entry (p, old_select, bgp, safi, 1);
+          bgp_ovsdb_withdraw_rib_entry (p, old_select, bgp, safi);
 #endif
       }
 #ifdef ENABLE_OVSDB
       if (new_select
           && new_select->type == ZEBRA_ROUTE_BGP
           && new_select->sub_type == BGP_ROUTE_STATIC) {
-          bgp_ovsdb_update_flags (p, new_select, bgp, safi, 1);
+          bgp_ovsdb_update_flags (p, new_select, bgp, safi);
       }
 #endif
 	}
@@ -1653,7 +1653,7 @@ bgp_process_main (struct work_queue *wq, void *data)
   if (old_select && CHECK_FLAG (old_select->flags, BGP_INFO_REMOVED)) {
     bgp_info_reap (rn, old_select);
 #ifdef ENABLE_OVSDB
-    bgp_ovsdb_delete_rib_entry(p, old_select, bgp, safi, 1);
+    bgp_ovsdb_delete_rib_entry(p, old_select, bgp, safi);
 #endif
   }
 
@@ -1843,7 +1843,7 @@ bgp_rib_remove (struct bgp_node *rn, struct bgp_info *ri, struct peer *peer,
   {
     bgp_info_delete (rn, ri); /* keep historical info */
 #ifdef ENABLE_OVSDB
-    bgp_ovsdb_delete_rib_entry(&rn->p, ri, peer->bgp, safi, 1);
+    bgp_ovsdb_delete_rib_entry(&rn->p, ri, peer->bgp, safi);
 #endif
   }
 
@@ -2391,7 +2391,7 @@ bgp_update_main (struct peer *peer, struct prefix *p, struct attr *attr,
   bgp_info_add (rn, new);
 #ifdef ENABLE_OVSDB
   /* Add new route entry in OVSDB route table */
-  bgp_ovsdb_add_rib_entry(p, new, bgp, safi, 1);
+  bgp_ovsdb_add_rib_entry(p, new, bgp, safi);
 #endif
 
   /* route_node_get lock */
@@ -3591,7 +3591,7 @@ bgp_static_update_main (struct bgp *bgp, struct prefix *p,
   bgp_info_add (rn, new);
 #ifdef ENABLE_OVSDB
   /* Add new route entry in OVSDB route table */
-  bgp_ovsdb_add_rib_entry(p, new, bgp, safi, 1);
+  bgp_ovsdb_add_rib_entry(p, new, bgp, safi);
 #endif
 
   /* route_node_get lock */
@@ -3676,7 +3676,7 @@ bgp_static_withdraw (struct bgp *bgp, struct prefix *p, afi_t afi,
       bgp_aggregate_decrement (bgp, p, ri, afi, safi);
       bgp_info_delete (rn, ri);
 #ifdef ENABLE_OVSDB
-      bgp_ovsdb_delete_rib_entry(p, ri, bgp, safi, 1);
+      bgp_ovsdb_delete_rib_entry(p, ri, bgp, safi);
 #endif
       bgp_process (bgp, rn, afi, safi);
     }

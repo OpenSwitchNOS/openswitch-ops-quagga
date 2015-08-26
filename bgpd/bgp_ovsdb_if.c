@@ -542,7 +542,8 @@ modify_bgp_router_config(struct ovsdb_idl *idl, const struct ovsrec_bgp_router *
     int ret_status;
 
     OVSREC_BGP_ROUTER_FOR_EACH(bgp_mod_row, idl) {
-        if (OVSREC_IDL_IS_ROW_MODIFIED(bgp_mod_row, idl_seqno)) {
+        if (OVSREC_IDL_IS_ROW_INSERTED(bgp_mod_row, idl_seqno) ||
+             OVSREC_IDL_IS_ROW_MODIFIED(bgp_mod_row, idl_seqno)) {
             bgp_cfg = bgp_lookup((as_t)bgp_mod_row->asn, NULL);
 	    /* Check if router_id is modified */
             if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_bgp_router_col_router_id, idl_seqno)) {
@@ -821,15 +822,14 @@ bgp_apply_bgp_router_changes(struct ovsdb_idl *idl)
         if (OVSREC_IDL_ANY_TABLE_ROWS_DELETED(bgp_first, idl_seqno)) {
             delete_bgp_router_config(idl);
         }
-        /* Check if any row insertion */
-        if (OVSREC_IDL_ANY_TABLE_ROWS_INSERTED(bgp_first, idl_seqno)) {
-            insert_bgp_router_config(idl, bgp_first);
-        }
-        else {
-            /* Check if any row modification */
-            if (OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED(bgp_first, idl_seqno)) {
-                modify_bgp_router_config(idl, bgp_first);
+        if (OVSREC_IDL_ANY_TABLE_ROWS_INSERTED(bgp_first, idl_seqno) ||
+            OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED(bgp_first, idl_seqno)) {
+            /* Check if any row insertion */
+            if (OVSREC_IDL_ANY_TABLE_ROWS_INSERTED(bgp_first, idl_seqno)) {
+                insert_bgp_router_config(idl, bgp_first);
             }
+            /* Check if any row modification */
+            modify_bgp_router_config(idl, bgp_first);
         }
     }
 }

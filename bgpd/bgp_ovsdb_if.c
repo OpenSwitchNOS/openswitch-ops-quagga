@@ -180,6 +180,7 @@ bgp_ovsdb_tables_init (struct ovsdb_idl *idl)
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_capability);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_timers);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_route_maps);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_allow_as_in);
 
     /* BGP policy */
     bgp_policy_ovsdb_init(idl);
@@ -926,6 +927,19 @@ delete_bgp_neighbors_and_peer_groups(struct ovsrec_bgp_neighbor *ovs_bgpn,
     check_and_delete_bgp_neighbor_peer_groups(bgp, idl);
 }
 
+static int
+fetch_key_value(char **key, const int64_t *value, size_t n_elem, char *your_key)
+{
+    int i;
+
+    for (i = 0; i < n_elem; i++) {
+        if (strcmp(key[i], your_key) == 0) {
+
+            return value[i];
+        }
+    }
+    return 0;
+}
 /*
 ** Process potential changes in the BGP_Neighbor table
 */
@@ -936,7 +950,8 @@ bgp_apply_bgp_neighbor_changes (struct ovsdb_idl *idl)
     struct bgp *bgp_instance;
     bool modified = false;
     bool deleted = false;
-
+    u_int32_t keepalive;
+    u_int32_t holdtimer;
     ovs_bgpn = ovsrec_bgp_neighbor_first(idl);
 
     /* try & find if any row got deleted or modified */
@@ -1018,17 +1033,19 @@ bgp_apply_bgp_neighbor_changes (struct ovsdb_idl *idl)
                             }
                         }
 
-// HALON TODO: Is this disabled temporarily?
-#if 0
-                       if (ovs_bgpn->timers) {
-                           u_int32_t keepalive = 0;
-                           u_int32_t holdtime = 0;
-                           keepalive = smap_get(&ovs_bgpn->timers, "Keepalive");
-                           holdtime = smap_get(&ovs_bgpn->timers, "Holdtime");
-                          daemon_neighbor_timers_cmd_execute(bgp_instance,
-                                                            keepalive, holdtime);
-                       }
-#endif
+                        if (OVSREC_IDL_IS_COLUMN_MODIFIED(
+                                ovsrec_bgp_neighbor_col_timers, idl_seqno)) {
+                                keepalive = fetch_key_value(ovs_bgpn->key_timers, ovs_bgpn->value_timers , ovs_bgpn->n_timers, OVSDB_BGP_TIMER_KEEPALIVE);
+                                holdtimer = fetch_key_value(ovs_bgpn->key_timers, ovs_bgpn->value_timers , ovs_bgpn->n_timers, OVSDB_BGP_TIMER_HOLDTIME);
+                                daemon_neighbor_timers_cmd_execute(bgp_instance,
+                                        ovs_bgpn->name, keepalive, holdtimer);
+                        }
+
+                        if (OVSREC_IDL_IS_COLUMN_MODIFIED(
+                                ovsrec_bgp_neighbor_col_allow_as_in, idl_seqno)) {
+                                daemon_neighbor_allow_as_in_cmd_execute(bgp_instance,
+                                ovs_bgpn->name, AFI_IP, SAFI_UNICAST, ovs_bgpn->allow_as_in);
+                        }
 
                         if (OVSREC_IDL_IS_COLUMN_MODIFIED(
                                 ovsrec_bgp_neighbor_col_shutdown,

@@ -757,6 +757,7 @@ bgp_static_route_deletion(struct bgp *bgp_cfg,
 int
 modify_bgp_maxpaths_config(struct bgp *bgp_cfg, const struct ovsrec_bgp_router *bgp_mod_row)
 {
+    bgp_flag_set(bgp_cfg, BGP_FLAG_ASPATH_MULTIPATH_RELAX);
     return bgp_maximum_paths_set(bgp_cfg, AFI_IP, SAFI_UNICAST,
                                  BGP_PEER_EBGP,
 				 (u_int16_t)bgp_mod_row->maximum_paths[0]);

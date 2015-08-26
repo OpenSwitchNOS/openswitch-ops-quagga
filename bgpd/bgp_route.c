@@ -1427,9 +1427,8 @@ bgp_best_selection (struct bgp *bgp, struct bgp_node *rn,
 	bgp_mp_list_add (&mp_list, ri);
     }
 
-
   if (!bgp_flag_check (bgp, BGP_FLAG_DETERMINISTIC_MED))
-    bgp_info_mpath_update (rn, new_select, old_select, &mp_list, mpath_cfg);
+      bgp_info_mpath_update (rn, new_select, old_select, &mp_list, mpath_cfg);
 
   bgp_info_mpath_aggregate_update (new_select, old_select);
   bgp_mp_list_clear (&mp_list);
@@ -1587,11 +1586,7 @@ bgp_process_main (struct work_queue *wq, void *data)
         {
           if (CHECK_FLAG (old_select->flags, BGP_INFO_IGP_CHANGED) ||
               CHECK_FLAG (old_select->flags, BGP_INFO_MULTIPATH_CHG)) {
-#ifndef ENABLE_OVSDB
-            bgp_zebra_announce (p, old_select, bgp, safi);
-#else
-            bgp_ovsdb_announce_rib_entry (p, old_select, bgp, safi);
-#endif
+              bgp_zebra_announce (p, old_select, bgp, safi);
           }
           UNSET_FLAG (old_select->flags, BGP_INFO_MULTIPATH_CHG);
           UNSET_FLAG (rn->flags, BGP_NODE_PROCESS_SCHEDULED);
@@ -1621,11 +1616,7 @@ bgp_process_main (struct work_queue *wq, void *data)
       if (new_select
 	  && new_select->type == ZEBRA_ROUTE_BGP
           && new_select->sub_type == BGP_ROUTE_NORMAL) {
-#ifndef ENABLE_OVSDB
-      bgp_zebra_announce (p, new_select, bgp, safi);
-#else
-      bgp_ovsdb_announce_rib_entry (p, new_select, bgp, safi);
-#endif
+          bgp_zebra_announce (p, new_select, bgp, safi);
       }
       else
 	{
@@ -2391,7 +2382,7 @@ bgp_update_main (struct peer *peer, struct prefix *p, struct attr *attr,
   bgp_info_add (rn, new);
 #ifdef ENABLE_OVSDB
   /* Add new route entry in OVSDB route table */
-  bgp_ovsdb_add_rib_entry(p, new, bgp, safi);
+  //TODO bgp_ovsdb_add_rib_entry(p, new, bgp, safi);
 #endif
 
   /* route_node_get lock */

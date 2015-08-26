@@ -533,11 +533,13 @@ bgp_info_mpath_update (struct bgp_node *rn, struct bgp_info *new_best,
               mpath_changed = 1;
               mpath_count++;
               if (debug)
-                zlog_debug ("%s add mpath nexthop %s peer %s", pfx_buf,
+                zlog_debug ("%s add mpath nexthop %s peer %s mpath_count %d\n",
+                            pfx_buf,
                             inet_ntop (AF_INET, &new_mpath->attr->nexthop,
                                        nh_buf[0], sizeof (nh_buf[0])),
                             sockunion2str (new_mpath->peer->su_remote,
-                                           nh_buf[1], sizeof (nh_buf[1])));
+                                           nh_buf[1], sizeof (nh_buf[1])),
+                            mpath_count);
             }
           mp_node = mp_next_node;
         }

@@ -26,6 +26,9 @@
 #ifndef ZEBRA_OVSDB_IF_H
 #define ZEBRA_OVSDB_IF_H 1
 
+#define ZEBRA_RT_UNINSTALL  0
+#define ZEBRA_RT_INSTALL    1
+
 /* Setup zebra to connect with ovsdb and daemonize. This daemonize is used
  * over the daemonize in the main function to keep the behavior consistent
  * with the other daemons in the HALON system
@@ -39,6 +42,10 @@ void zebra_ovsdb_exit(void);
 
 /* Initialize and integrate the ovs poll loop with the daemon */
 void zebra_ovsdb_init_poll_loop (struct zebra_t *zebrad);
+
+int zebra_update_selected_route_to_db(struct route_node *rn,
+                                      struct rib *route,
+                                      int action);
 
 struct ipv4v6_addr {
    union {

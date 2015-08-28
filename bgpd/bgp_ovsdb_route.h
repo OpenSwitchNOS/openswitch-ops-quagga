@@ -55,7 +55,6 @@ enum
   RT_MAP_MAX,
 } rt_map;
 
-
 enum
 {
   PREFIX_LIST_NAME,
@@ -63,9 +62,6 @@ enum
   PREFIX_LIST_PREFIX,
   PREFIX_LIST_MAX,
 } prefix_list;
-
-
-
 
 extern int policy_ovsdb_prefix_list_get (struct ovsdb_idl *idl);
 extern int policy_ovsdb_rt_map(struct ovsdb_idl *idl);
@@ -96,4 +92,5 @@ bgp_ovsdb_rib_txn_create(void);
 
 extern int
 bgp_ovsdb_rib_txn_commit(void);
+
 #endif /* BGP_OVSDB_RIB_H */

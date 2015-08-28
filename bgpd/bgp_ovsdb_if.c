@@ -164,6 +164,7 @@ bgp_ovsdb_tables_init (struct ovsdb_idl *idl)
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_inbound_soft_reconfiguration);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_statistics);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_remote_as);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_remove_private_as);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_shutdown);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_override_capability);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_passive);
@@ -1016,6 +1017,17 @@ bgp_apply_bgp_neighbor_changes (struct ovsdb_idl *idl)
                             } else {
                                 daemon_neighbor_password_cmd_execute(
                                         bgp_instance, ovs_bgpn->name, NULL);
+                            }
+                        }
+
+                        if (OVSREC_IDL_IS_COLUMN_MODIFIED(
+                                ovsrec_bgp_neighbor_col_remove_private_as, idl_seqno)) {
+                            if (ovs_bgpn->n_remove_private_as && ovs_bgpn->remove_private_as[0]) {
+                                daemon_neighbor_remove_private_as_cmd_execute(bgp_instance,
+                                        ovs_bgpn->name, AFI_IP, SAFI_UNICAST, true);
+                            } else {
+                                daemon_neighbor_remove_private_as_cmd_execute(bgp_instance,
+                                        ovs_bgpn->name, AFI_IP, SAFI_UNICAST, false);
                             }
                         }
 

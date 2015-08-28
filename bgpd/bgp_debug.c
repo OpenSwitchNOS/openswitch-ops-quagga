@@ -70,6 +70,13 @@ const struct message bgp_status_msg[] =
 };
 const int bgp_status_msg_max = BGP_STATUS_MAX;
 
+char *
+bgp_peer_status_to_string (int status)
+{
+    return
+	LOOKUP(bgp_status_msg, status);
+}
+
 /* BGP message type string. */
 const char *bgp_type_str[] =
 {

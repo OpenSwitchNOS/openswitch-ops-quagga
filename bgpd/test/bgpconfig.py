@@ -6,7 +6,7 @@ from halonvsi.quagga import *
 # Flags for defining what types of switches will be used for BGP testing.
 # The "peer" is only applicable to tests that have more than one switch emulated
 enableHalonSwitch = True
-enablePeerHalonSwitch = False
+enablePeerHalonSwitch = True
 
 BGP_CONVERGENCE_DELAY_S = 10
 

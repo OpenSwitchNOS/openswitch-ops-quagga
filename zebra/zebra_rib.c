@@ -1,6 +1,8 @@
 /* Routing Information Base.
  * Copyright (C) 1997, 98, 99, 2001 Kunihiro Ishiguro
  *
+ * Hewlett-Packard Company Confidential (C) Copyright 2015 Hewlett-Packard Development Company, L.P.
+ *
  * This file is part of GNU Zebra.
  *
  * GNU Zebra is free software; you can redistribute it and/or modify it
@@ -43,6 +45,10 @@
 #include "zebra/zebra_fpm.h"
 #include "coverage.h"
 #include "openvswitch/vlog.h"
+
+#ifdef ENABLE_OVSDB
+#include "zebra/zebra_ovsdb_if.h"
+#endif
 
 /* Default rtm_table for all clients */
 extern struct zebra_t zebrad;
@@ -1490,6 +1496,19 @@ rib_process (struct route_node *rn)
           if (! RIB_SYSTEM_ROUTE (select))
             rib_install_kernel (rn, select);
           redistribute_add (&rn->p, select);
+#ifdef ENABLE_OVSDB
+          if (CHECK_FLAG (select->flags, ZEBRA_FLAG_CHANGED)) {
+              /*
+               * nexthop_active_update will update the rib flags
+               * and set it to ZEBRA_FLAG_CHANGED if any NH was updated.
+               * If this happens, the route needs to be updated in the DB
+               */
+              zebra_update_selected_route_to_db(rn, select,
+                                                ZEBRA_RT_UNINSTALL);
+              zebra_update_selected_route_to_db(rn, select,
+                                                ZEBRA_RT_INSTALL);
+          }
+#endif
         }
       else if (! RIB_SYSTEM_ROUTE (select))
         {
@@ -1507,8 +1526,13 @@ rib_process (struct route_node *rn)
               installed = 1;
               break;
             }
-          if (! installed) 
+          if (! installed) {
             rib_install_kernel (rn, select);
+#ifdef ENABLE_OVSDB
+            zebra_update_selected_route_to_db(rn, select,
+                                              ZEBRA_RT_INSTALL);
+#endif
+          }
         }
       goto end;
     }
@@ -1527,8 +1551,13 @@ rib_process (struct route_node *rn)
         zfpm_trigger_update (rn, "removing existing route");
 
       redistribute_delete (&rn->p, fib);
-      if (! RIB_SYSTEM_ROUTE (fib))
-	rib_uninstall_kernel (rn, fib);
+      if (! RIB_SYSTEM_ROUTE (fib)) {
+          rib_uninstall_kernel (rn, fib);
+#ifdef ENABLE_OVSDB
+            zebra_update_selected_route_to_db(rn, fib,
+                                              ZEBRA_RT_UNINSTALL);
+#endif
+      }
       UNSET_FLAG (fib->flags, ZEBRA_FLAG_SELECTED);
 
       /* Set real nexthop. */
@@ -1551,8 +1580,13 @@ rib_process (struct route_node *rn)
       nexthop_active_update (rn, select, 1);
 
       VLOG_DBG("In process_rib Adding to kernel");
-      if (! RIB_SYSTEM_ROUTE (select))
+      if (! RIB_SYSTEM_ROUTE (select)) {
         rib_install_kernel (rn, select);
+#ifdef ENABLE_OVSDB
+            zebra_update_selected_route_to_db(rn, select,
+                                              ZEBRA_RT_INSTALL);
+#endif
+      }
       SET_FLAG (select->flags, ZEBRA_FLAG_SELECTED);
       redistribute_add (&rn->p, select);
     }
@@ -3505,3 +3539,79 @@ rib_tables_iter_next (rib_tables_iter_t *iter)
 
   return table;
 }
+
+#ifdef ENABLE_OVSDB
+#ifdef HAVE_IPV6
+/*
+** Function to add protocols ipv6 route to rib.
+*/
+int
+rib_add_ipv6_multipath (struct prefix_ipv6 *p, struct rib *rib, safi_t safi)
+{
+    struct route_table *table;
+    struct route_node *rn;
+    struct rib *same;
+    struct nexthop *nexthop;
+
+    /* Lookup table.  */
+    table = vrf_table (AFI_IP6, safi, 0);
+    if (! table)
+      return 0;
+
+    /* Make it sure prefixlen is applied to the prefix. */
+    apply_mask_ipv6 (p);
+
+    /* Set default distance by route type. */
+    if (rib->distance == 0) {
+        rib->distance = route_info[rib->type].distance;
+
+        /* iBGP distance is 200. */
+        if (rib->type == ZEBRA_ROUTE_BGP
+          && CHECK_FLAG (rib->flags, ZEBRA_FLAG_IBGP))
+          rib->distance = 200;
+    }
+
+    /* Lookup route node.*/
+    rn = route_node_get (table, (struct prefix *) p);
+
+    /* If same type of route are installed, treat it as a implicit
+       withdraw. */
+    RNODE_FOREACH_RIB (rn, same) {
+        if (CHECK_FLAG (same->status, RIB_ENTRY_REMOVED))
+            continue;
+
+        if (same->type == rib->type && same->table == rib->table
+            && same->type != ZEBRA_ROUTE_CONNECT)
+            break;
+    }
+
+    /* If this route is kernel route, set FIB flag to the route. */
+    if (rib->type == ZEBRA_ROUTE_KERNEL || rib->type == ZEBRA_ROUTE_CONNECT)
+        for (nexthop = rib->nexthop; nexthop; nexthop = nexthop->next)
+            SET_FLAG (nexthop->flags, NEXTHOP_FLAG_FIB);
+
+    /* Link new rib to node.*/
+    VLOG_DBG("%s:Adding the route node",__func__);
+    rib_addnode (rn, rib);
+    if (IS_ZEBRA_DEBUG_RIB) {
+        zlog_debug ("%s: called rib_addnode (%p, %p) on new RIB entry",
+                    __func__, rn, rib);
+        rib_dump (p, rib);
+    }
+
+    /* Free implicit route.*/
+    if (same) {
+        if (IS_ZEBRA_DEBUG_RIB) {
+            zlog_debug ("%s: calling rib_delnode (%p, %p) on existing RIB entry",
+                        __func__, rn, same);
+            rib_dump (p, same);
+        }
+        VLOG_DBG("%s:Deleting implicit route node",__func__);
+        rib_delnode (rn, same);
+    }
+
+    route_unlock_node (rn);
+    return 0;
+}
+#endif
+#endif

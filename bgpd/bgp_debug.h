@@ -23,6 +23,13 @@ Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 
 #include "bgp_attr.h"
 
+#ifndef true
+#define true	1
+#endif
+#ifndef false
+#define false	0
+#endif
+
 /* sort of packet direction */
 #define DUMP_ON        1
 #define DUMP_SEND      2
@@ -124,5 +131,7 @@ extern void bgp_notify_print (struct peer *, struct bgp_notify *, const char *);
 
 extern const struct message bgp_status_msg[];
 extern const int bgp_status_msg_max;
+
+extern char *bgp_peer_status_to_string (int status);
 
 #endif /* _QUAGGA_BGP_DEBUG_H */

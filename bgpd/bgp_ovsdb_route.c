@@ -82,6 +82,48 @@ typedef struct route_psd_bgp_s {
     const char *uptime;
 } route_psd_bgp_t;
 
+static int
+txn_command_result(enum ovsdb_idl_txn_status status, char *msg, char *pr)
+{
+    if ((status != TXN_SUCCESS) && (status != TXN_INCOMPLETE)) {
+        VLOG_ERR("%s: Route table txn failure: %s, status %d\n",
+                 __FUNCTION__, msg, status);
+        return -1;
+    }
+    VLOG_DBG("%s %s txn sent, rc = %d\n",
+             msg, pr, status);
+    return 0;
+}
+
+#define START_DB_TXN(txn, msg)                                          \
+    do {                                                                \
+        enum ovsdb_idl_txn_status status;                               \
+        txn = ovsdb_idl_txn_create(idl);                                \
+        if (txn == NULL) {                                              \
+            VLOG_ERR("%s: %s\n",                                        \
+                     __FUNCTION__, msg);                                \
+            ovsdb_idl_txn_destroy(txn);                                 \
+            return -1;                                                  \
+        }                                                               \
+    } while (0)
+
+#define END_DB_TXN(txn, msg, pr)                             \
+    do {                                                  \
+        enum ovsdb_idl_txn_status status;                 \
+        status = ovsdb_idl_txn_commit(txn);               \
+        ovsdb_idl_txn_destroy(txn);                       \
+        return txn_command_result(status, msg, pr);       \
+    } while (0)
+
+
+/* used when NO error is detected but still need to terminate */
+#define ABORT_DB_TXN(txn, msg)                                      \
+    do {                                                            \
+        ovsdb_idl_txn_destroy(txn);                                 \
+        VLOG_ERR("%s: Aborting txn: %s\n", __FUNCTION__, msg);      \
+        return CMD_SUCCESS;                                         \
+    } while (0)
+
 static const char *
 get_str_from_afi(u_char family)
 {
@@ -352,26 +394,15 @@ int
 bgp_ovsdb_withdraw_rib_entry(struct prefix *p,
                              struct bgp_info *info,
                              struct bgp *bgp,
-                             safi_t safi,
-                             bool create_txn)
+                             safi_t safi)
+
 {
     const struct ovsrec_route *rib_row = NULL;
     char pr[PREFIX_MAXLEN];
     struct ovsdb_idl_txn *txn = NULL;
-    enum ovsdb_idl_txn_status status;
     int flags;
     bool prot_priv;
 
-    if (create_txn) {
-        txn = ovsdb_idl_txn_create(idl);
-        if (!txn) {
-            VLOG_ERR("%s: Failed to create new transaction for Route table\n",
-                     __FUNCTION__);
-            return -1;
-        }
-    } else {
-        txn = rib_txn;
-    }
     prefix2str(p, pr, sizeof(pr));
     VLOG_DBG("%s: Withdrawing route %s, flags %d\n",
              __FUNCTION__, pr, info->flags);
@@ -386,24 +417,12 @@ bgp_ovsdb_withdraw_rib_entry(struct prefix *p,
                  __FUNCTION__, pr);
         return -1;
     }
+    START_DB_TXN(txn, "Failed to create route table txn");
     // Clear RIB flag
     prot_priv = 1;
     ovsrec_route_set_protocol_private(rib_row, &prot_priv, 1);
     bgp_ovsdb_set_rib_protocol_specific_data(rib_row, info, bgp);
-
-    if (create_txn) {
-        status = ovsdb_idl_txn_commit(txn);
-        ovsdb_idl_txn_destroy(txn);
-        if ((status != TXN_SUCCESS) && (status != TXN_INCOMPLETE)) {
-            VLOG_ERR("%s: Failed to withdraw route %s, status %d\n",
-                     __FUNCTION__, pr, status);
-            return -1;
-        } else {
-            VLOG_DBG("Route %s withdraw txn sent, rc = %d\n",
-                     pr, status);
-        }
-    }
-    return 0;
+    END_DB_TXN(txn, "withdraw route", pr);
 }
 
 /*
@@ -413,27 +432,14 @@ int
 bgp_ovsdb_announce_rib_entry(struct prefix *p,
                              struct bgp_info *info,
                              struct bgp *bgp,
-                             safi_t safi,
-                             bool create_txn)
+                             safi_t safi)
 {
     const struct ovsrec_route *rib_row = NULL;
     char pr[PREFIX_MAXLEN];
     struct ovsdb_idl_txn *txn = NULL;
-    enum ovsdb_idl_txn_status status;
     int flags;
     bool proto_priv;
 
-
-    if (create_txn) {
-        txn = ovsdb_idl_txn_create(idl);
-        if (!txn) {
-            VLOG_ERR("%s: Failed to create new transaction for Route table\n",
-                     __FUNCTION__);
-            return -1;
-        }
-    } else {
-        txn = rib_txn;
-    }
     prefix2str(p, pr, sizeof(pr));
     VLOG_INFO("%s: Announcing route %s, flags %d\n",
               __FUNCTION__, pr, info->flags);
@@ -451,24 +457,14 @@ announce route %s",
                  __FUNCTION__, pr);
         return -1;
     }
+
+    START_DB_TXN(txn, "Failed to create route table txn");
     // Clear private flag
     proto_priv = 0;
     ovsrec_route_set_protocol_private(rib_row, &proto_priv, 1);
     bgp_ovsdb_set_rib_protocol_specific_data(rib_row, info, bgp);
 
-    if (create_txn) {
-        status = ovsdb_idl_txn_commit(txn);
-        ovsdb_idl_txn_destroy(txn);
-        if ((status != TXN_SUCCESS) && (status != TXN_INCOMPLETE)) {
-            VLOG_ERR("%s: Failed to announce route %s, status %d\n",
-                     __FUNCTION__, pr, status);
-            return -1;
-        } else {
-            VLOG_DBG("Route %s announce txn sent, rc = %d\n",
-                     pr, status);
-        }
-    }
-    return 0;
+    END_DB_TXN(txn, "announce route", pr);
 }
 
 /*
@@ -478,24 +474,12 @@ int
 bgp_ovsdb_delete_rib_entry(struct prefix *p,
                            struct bgp_info *info,
                            struct bgp *bgp,
-                           safi_t safi,
-                           bool create_txn)
+                           safi_t safi)
 {
     const struct ovsrec_route *rib_row = NULL;
     char pr[PREFIX_MAXLEN];
     struct ovsdb_idl_txn *txn = NULL;
-    enum ovsdb_idl_txn_status status;
 
-    if (create_txn) {
-        txn = ovsdb_idl_txn_create(idl);
-        if (!txn) {
-            VLOG_ERR("%s: Failed to create new transaction for Route table\n",
-                     __FUNCTION__);
-            return -1;
-        }
-    } else {
-        txn = rib_txn;
-    }
     prefix2str(p, pr, sizeof(pr));
     VLOG_DBG("%s: Deleting route %s, flags %d\n",
              __FUNCTION__, pr, info->flags);
@@ -512,21 +496,10 @@ bgp_ovsdb_delete_rib_entry(struct prefix *p,
 //                  __FUNCTION__, pr);
 //         return -1;
 //     }
+    START_DB_TXN(txn, "Failed to create route table txn");
     // Delete route from RIB
     ovsrec_route_delete(rib_row);
-    if (create_txn) {
-        status = ovsdb_idl_txn_commit(txn);
-        ovsdb_idl_txn_destroy(txn);
-        if ((status != TXN_SUCCESS) && (status != TXN_INCOMPLETE)) {
-            VLOG_ERR("%s: Failed to remove route %s, status %d\n",
-                     __FUNCTION__, pr, status);
-            return -1;
-        } else {
-            VLOG_DBG("Route %s delete txn sent, rc = %d\n",
-                     pr, status);
-        }
-    }
-    return 0;
+    END_DB_TXN(txn, "delete route", pr);
 }
 
 /*
@@ -536,8 +509,7 @@ int
 bgp_ovsdb_add_rib_entry(struct prefix *p,
                         struct bgp_info *info,
                         struct bgp *bgp,
-                        safi_t safi,
-                        bool create_txn)
+                        safi_t safi)
 {
     const struct ovsrec_route *rib = NULL;
     struct ovsdb_idl_txn *txn = NULL;
@@ -546,35 +518,33 @@ bgp_ovsdb_add_rib_entry(struct prefix *p,
     int64_t flags = 0;
     int64_t distance = 0, nexthop_num;
     const struct ovsrec_vrf *vrf = NULL;
-    enum ovsdb_idl_txn_status status;
     bool prot_priv = 0;
 
-    if (create_txn) {
-        txn = ovsdb_idl_txn_create(idl);
-        if (!txn) {
-            VLOG_ERR("%s: Failed to create new transaction for Route table\n",
-                     __FUNCTION__);
-            return -1;
-        }
-    } else {
-        txn = rib_txn;
-    }
-    rib = ovsrec_route_insert(txn);
     prefix2str(p, pr, sizeof(pr));
-    ovsrec_route_set_prefix(rib, pr);
-    VLOG_INFO("%s: setting prefix %s\n", __FUNCTION__, pr);
-
     afi= get_str_from_afi(p->family);
     if (!afi) {
         VLOG_ERR ("Invalid address family for route %s\n", pr);
         return -1;
     }
-    ovsrec_route_set_address_family(rib, afi);
     safi_str = get_str_from_safi(safi);
     if (!safi_str) {
         VLOG_ERR ("Invalid sub-address family for route %s\n", pr);
         return -1;
     }
+    // Lookup VRF
+    vrf = bgp_ovsdb_get_vrf(bgp);
+    if (!vrf) {
+        VLOG_ERR("VRF entry not found for this route %s, BGP router ASN %d\n",
+                 pr, bgp->as);
+        return -1;
+    }
+
+    START_DB_TXN(txn, "Failed to create route table txn");
+    rib = ovsrec_route_insert(txn);
+
+    ovsrec_route_set_prefix(rib, pr);
+    VLOG_INFO("%s: setting prefix %s\n", __FUNCTION__, pr);
+    ovsrec_route_set_address_family(rib, afi);
     ovsrec_route_set_sub_address_family(rib, safi_str);
     ovsrec_route_set_from(rib, "BGP");
 
@@ -603,31 +573,11 @@ bgp_ovsdb_add_rib_entry(struct prefix *p,
         prot_priv = 1;
     }
     ovsrec_route_set_protocol_private(rib, &prot_priv, 1);
-
-    // Set up VRF
-    vrf = bgp_ovsdb_get_vrf(bgp);
-    if (!vrf) {
-        VLOG_ERR("VRF entry not found for this route %s, BGP router ASN %d\n",
-                 pr, bgp->as);
-        return -1;
-    }
+    // Set VRF
     ovsrec_route_set_vrf(rib, vrf);
     // Set protocol specific data
     bgp_ovsdb_set_rib_protocol_specific_data(rib, info, bgp);
-    if (create_txn) {
-        status = ovsdb_idl_txn_commit(txn);
-        // HALON_TODO: Need to handle txn error recovery.
-        ovsdb_idl_txn_destroy(txn);
-        if ((status != TXN_SUCCESS) && (status != TXN_INCOMPLETE)) {
-            VLOG_ERR("%s: Failed to add route %s, status %d\n",
-                     __FUNCTION__, pr, status);
-            return -1;
-        } else {
-            VLOG_DBG("Route %s add txn sent, rc = %d\n",
-                     pr, status);
-        }
-    }
-    return 0;
+    END_DB_TXN(txn, "add route", pr);
 }
 
 void
@@ -671,24 +621,12 @@ int
 bgp_ovsdb_update_flags(struct prefix *p,
                        struct bgp_info *info,
                        struct bgp *bgp,
-                       safi_t safi,
-                       bool create_txn)
+                       safi_t safi)
 {
     const struct ovsrec_route *rib_row = NULL;
     char pr[PREFIX_MAXLEN];
     struct ovsdb_idl_txn *txn = NULL;
-    enum ovsdb_idl_txn_status status;
 
-    if (create_txn) {
-        txn = ovsdb_idl_txn_create(idl);
-        if (!txn) {
-            VLOG_ERR("%s: Failed to create new transaction for Route table\n",
-                     __FUNCTION__);
-            return -1;
-        }
-    } else {
-        txn = rib_txn;
-    }
 
     prefix2str(p, pr, sizeof(pr));
     VLOG_DBG("%s: Updating flags for route %s, flags %d\n",
@@ -701,20 +639,9 @@ bgp_ovsdb_update_flags(struct prefix *p,
     }
     VLOG_DBG("%s: Found route %s from peer %s\n",
              __FUNCTION__, pr, info->peer->host);
+    START_DB_TXN(txn, "Failed to create route table txn");
     bgp_ovsdb_set_rib_protocol_specific_data(rib_row, info, bgp);
-    if (create_txn) {
-        status = ovsdb_idl_txn_commit(txn);
-        ovsdb_idl_txn_destroy(txn);
-        if ((status != TXN_SUCCESS) && (status != TXN_INCOMPLETE)) {
-            VLOG_ERR("%s: Failed to announce route %s, status %d\n",
-                     __FUNCTION__, pr, status);
-            return -1;
-        } else {
-            VLOG_DBG("Route %s update protocol specific data txn sent, rc = %d\n",
-                     pr, status);
-        }
-    }
-    return 0;
+    END_DB_TXN(txn, "update route", pr);
 }
 
 

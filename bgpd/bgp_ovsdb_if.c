@@ -555,16 +555,11 @@ modify_bgp_router_config(struct ovsdb_idl *idl, const struct ovsrec_bgp_router *
                 if (!ret_status) {
                     VLOG_INFO("BGP router_id set to %s", inet_ntoa(bgp_cfg->router_id));
                 }
-                break;
             }
 
             /* Check if network is modified */
             if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_bgp_router_col_networks, idl_seqno)) {
-                ret_status = modify_bgp_network_config(bgp_cfg,bgp_mod_row);
-                if (!ret_status) {
-                    VLOG_INFO("Static route added/deleted to bgp routing table");
-                }
-                break;
+                modify_bgp_network_config(bgp_cfg,bgp_mod_row);
             }
 
 	    /* Check if maximum_paths is modified */
@@ -574,7 +569,6 @@ modify_bgp_router_config(struct ovsdb_idl *idl, const struct ovsrec_bgp_router *
                     VLOG_INFO("Maximum paths for BGP is set to %d",
                                bgp_cfg->maxpaths[AFI_IP][SAFI_UNICAST].maxpaths_ebgp);
                     }
-                break;
                 }
 
             /* Check if bgp timers are modified */
@@ -587,7 +581,6 @@ modify_bgp_router_config(struct ovsdb_idl *idl, const struct ovsrec_bgp_router *
                                bgp_cfg->default_keepalive,
                                bgp_cfg->default_holdtime);
                 }
-                break;
             }
 	}
     }
@@ -624,36 +617,22 @@ bgp_static_route_dump(struct bgp *bgp_cfg, struct bgp_node *rn)
 }
 
 int
-modify_bgp_network_config(struct bgp *bgp_cfg, const struct ovsrec_bgp_router *bgp_mod_row)
+modify_bgp_network_config(struct bgp *bgp_cfg,
+                          const struct ovsrec_bgp_router *bgp_mod_row)
 {
-
-    static int num_of_bgp_nodes;
     int ret_status = 0;
-    VLOG_INFO("Before modification to networks: num_of_bgp_nodes = %d\n"
-              "bgp_mod_row->n_networks = %d",
-               num_of_bgp_nodes, bgp_mod_row->n_networks);
+    VLOG_DBG("bgp_mod_row->n_networks = %d", bgp_mod_row->n_networks);
 
-    if (num_of_bgp_nodes < bgp_mod_row->n_networks) {
-        VLOG_INFO("Network is being added...");
-        ret_status = bgp_static_route_addition(bgp_cfg, bgp_mod_row);
-        if (!ret_status) {
-            num_of_bgp_nodes++;
-            VLOG_INFO("Static route ADDED to route table");
-            VLOG_INFO("AFter ADDITION :: num_of_bgp_nodes = %d",
-                       num_of_bgp_nodes);
+    ret_status = bgp_static_route_addition(bgp_cfg, bgp_mod_row);
+    if (ret_status == CMD_SUCCESS) {
+        VLOG_DBG("Static route added.");
+    }
 
-        }
+    ret_status = bgp_static_route_deletion(bgp_cfg, bgp_mod_row);
+    if (ret_status == CMD_SUCCESS) {
+        VLOG_DBG("Static route deleted.");
     }
-    else {
-        VLOG_INFO("Network is being deleted...");
-        ret_status = bgp_static_route_deletion(bgp_cfg, bgp_mod_row);
-        if (!ret_status) {
-            num_of_bgp_nodes--;
-            VLOG_INFO("Static route DELETED !!");
-            VLOG_INFO("After DELETION :: num_of_bgp_nodes = %d",
-                                 num_of_bgp_nodes);
-        }
-    }
+
     return ret_status;
 }
 
@@ -666,11 +645,11 @@ bgp_static_route_addition(struct bgp *bgp_cfg,
     struct bgp_node *rn;
     afi_t afi;
     safi_t safi;
-    int ret_status = 0;
+    int ret_status = -1;
     int i = 0;
     for (i = 0; i < bgp_mod_row->n_networks; i++) {
-        VLOG_INFO("bgp_mod_row->networks[%d]: %s",
-	           i, bgp_mod_row->networks[i]);
+        VLOG_DBG("bgp_mod_row->networks[%d]: %s", i, bgp_mod_row->networks[i]);
+
         int ret = str2prefix(bgp_mod_row->networks[i], &p);
         if (! ret) {
             VLOG_ERR("Malformed prefix");
@@ -680,8 +659,7 @@ bgp_static_route_addition(struct bgp *bgp_cfg,
         safi = SAFI_UNICAST;
         rn = bgp_node_lookup(bgp_cfg->route[afi][safi], &p);
         if (!rn) {
-            VLOG_INFO("Can't find specified static "
-                      "route configuration..\n");
+            VLOG_DBG("Can't find specified static route configuration..\n");
             ret_status = bgp_static_set(vty, bgp_cfg,
                                       bgp_mod_row->networks[i],
                                       afi, safi,
@@ -690,6 +668,8 @@ bgp_static_route_addition(struct bgp *bgp_cfg,
                 bgp_static_route_dump(bgp_cfg,rn);
             else
                 VLOG_ERR("Static route addition failed!!");
+        } else {
+            VLOG_DBG("Network %s already exists. Skip adding.");
         }
     }
     return ret_status;
@@ -704,7 +684,7 @@ bgp_static_route_deletion(struct bgp *bgp_cfg,
     struct bgp_node *rn;
     afi_t afi;
     safi_t safi;
-    int ret_status = 0;
+    int ret_status = -1;
     int i = 0;
     if (bgp_cfg = bgp_lookup((as_t)bgp_mod_row->asn, NULL)) {
         bool match_found = 0;
@@ -719,7 +699,7 @@ bgp_static_route_deletion(struct bgp *bgp_cfg,
                 return -1;
             }
             else {
-                VLOG_INFO("Prefix to str : %s", prefix_str);
+                VLOG_DBG("Prefix to str : %s", prefix_str);
             }
             if (!strcmp(prefix_str,"0.0.0.0/0"))
                 continue;
@@ -727,7 +707,7 @@ bgp_static_route_deletion(struct bgp *bgp_cfg,
             safi = SAFI_UNICAST;
 
             if ((bgp_mod_row->n_networks == 0)) {
-                VLOG_INFO("Last static route being deleted...");
+                VLOG_DBG("Last static route being deleted...");
                 ret_status = bgp_static_unset(vty, bgp_cfg, prefix_str,
                                               afi, safi);
                 if (!ret_status)
@@ -744,13 +724,15 @@ bgp_static_route_deletion(struct bgp *bgp_cfg,
                     }
                 }
                 if (!match_found) {
-                    VLOG_INFO("Static route being deleted...");
+                    VLOG_DBG("Static route being deleted...");
                     ret_status = bgp_static_unset(vty, bgp_cfg, prefix_str,
                                                   afi, safi);
                     if (!ret_status)
                         bgp_static_route_dump(bgp_cfg,rn);
                     else
                         VLOG_ERR("Static route deletion failed!!");
+                } else {
+                    VLOG_DBG("Static route exists in OVSDB. Skip deleting.");
                 }
             }
         }
@@ -878,8 +860,8 @@ check_and_delete_bgp_neighbors (struct bgp *bgp, struct ovsdb_idl *idl)
             }
         }
         if (deleted_from_database) {
-            VLOG_ERR("bgp peer %s being deleted", peer->host);
-             peer_delete(peer);
+            VLOG_DBG("bgp peer %s being deleted", peer->host);
+            peer_delete(peer);
         }
     }
 }
@@ -906,8 +888,8 @@ check_and_delete_bgp_neighbor_peer_groups (struct bgp *bgp,
             }
         }
         if (deleted_from_database) {
-	    VLOG_ERR("peer group %s being deleted", peer_group->name);
-             peer_group_delete(peer_group);
+            VLOG_DBG("peer group %s being deleted", peer_group->name);
+            peer_group_delete(peer_group);
         }
     }
 }
@@ -1140,17 +1122,17 @@ bgp_apply_bgp_neighbor_changes (struct ovsdb_idl *idl)
 
     /* deletions are handled differently, do them first */
     if (deleted) {
-        VLOG_ERR("bgp neighbor/peer-group deletion occured\n");
+        VLOG_DBG("Checking for any bgp neighbor/peer-group deletions\n");
         delete_bgp_neighbors_and_peer_groups(idl);
     }
 
     /* nothing else changed ? */
     if (!modified && !inserted) {
-	VLOG_ERR("no other changes occured in BGP Neighbor table\n");
+	VLOG_DBG("no other changes occured in BGP Neighbor table\n");
 	return;
     }
 
-    VLOG_ERR("now processing bgp neighbor modifications\n");
+    VLOG_DBG("now processing bgp neighbor modifications\n");
 
     /* process all possible changes for each entry */
     OVSREC_BGP_NEIGHBOR_FOR_EACH(db_bgpn_p, idl) {

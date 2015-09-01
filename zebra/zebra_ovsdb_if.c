@@ -814,11 +814,11 @@ zebra_handle_static_route_change (const struct ovsrec_route *route)
 
     if (ipv6_addr_type) {
 #ifdef HAVE_IPV6
-       static_add_ipv6 (&p, type, &ipv6_gate, ifname, flag, distance, 0);
+       static_add_ipv6 (&p, type, &ipv6_gate, ifname, flag, distance, 0, route);
 #endif
     } else {
        static_add_ipv4_safi (safi, &p, ifname ? NULL : &gate, ifname,
-                             flag, distance, 0);
+                             flag, distance, 0, route);
     }
     return;
 }
@@ -1218,11 +1218,14 @@ zebra_ovs_update_selected_route (struct ovsrec_route *ovs_route,
 
         status = ovsdb_idl_txn_commit(txn);
         ovsdb_idl_txn_destroy(txn);
-        if (status != TXN_SUCCESS) {
+        if (!((status == TXN_SUCCESS) || (status == TXN_UNCHANGED)
+              || (status == TXN_INCOMPLETE))) {
+
             /*
              * HALON_TODO: In case f commit failure, retry.
              */
-            VLOG_ERR("Route update failed.");
+            VLOG_ERR("Route update failed. The transaction error is %s\n",
+                     ovsdb_idl_txn_status_to_string(status));
             return -1;
         }
     }
@@ -1242,112 +1245,123 @@ zebra_update_selected_route_to_db (struct route_node *rn, struct rib *route,
     char prefix_str[256];
     struct ovsrec_route *ovs_route = NULL;
     bool selected = (action == ZEBRA_RT_INSTALL) ? true:false;
-    struct prefix *p = &rn->p;
-    rib_table_info_t *info = rib_table_info(rn->table);
+    struct prefix *p = NULL;
+    rib_table_info_t *info = NULL;
+
     /*
      * Fetch the rib entry from the DB and update the selected field based
      * on action:
      * action == ZEBRA_RT_INSTALL => selected = 1
      * action == ZEBRA_RT_UNINSTALL => selected = 0
+     *
+     * If the 'route' has a valid 'ovsdb_route_row_ptr' pointer,
+     * then reference the 'ovsrec_route' structure directly from
+     * 'ovsdb_route_row_ptr' pointer. Otherwise iterate through the
+     * OVSDB route to find out the relevant 'ovsrec_route' structure.
      */
-    memset(prefix_str, 0, sizeof(prefix_str));
-    prefix2str(p, prefix_str, sizeof(prefix_str));
+    if (route && (route->ovsdb_route_row_ptr)) {
 
-    VLOG_DBG("Prefix %s Family %d\n",prefix_str, PREFIX_FAMILY(p));
+        ovs_route = (struct ovsrec_route *)(route->ovsdb_route_row_ptr);
 
-    /* TODO: Looping all routes to update one in DB doesnt look good performance
-    ** wise. May be we should have ovsrec route ptr in rib node, and vice-versa.
-    ** OR some seperate hash with this two pointers. */
-    switch (PREFIX_FAMILY (p)) {
-    case AF_INET:
-        OVSREC_ROUTE_FOR_EACH(ovs_route, idl) {
-            /*
-             * HALON_TODO: Need to add support to check vrf
-             */
-            VLOG_DBG("DB Entry: Prefix %s family %s from %s priv %p",
-                      ovs_route->prefix, ovs_route->address_family,
-                      ovs_route->from, ovs_route->protocol_private);
-            if (!strcmp(ovs_route->address_family,
-                        OVSREC_ROUTE_ADDRESS_FAMILY_IPV4)) {
-                if (!strcmp(ovs_route->prefix, prefix_str)) {
-                    if (route->type ==
-                               ovsdb_proto_to_zebra_proto(ovs_route->from)) {
-                        if (info->safi == ovsdb_safi_to_zebra_safi(
-                                            ovs_route->sub_address_family)) {
-                            /*
-                             * We should not be checking for protcol_privatei
-                             * here.
-                             * The fact that zebra has it, means that this is
-                             * no longer private! Just blindly update.
-                             * We will take care of only allowing non private
-                             * routes to zebra.
-                             */
-                            if (ovs_route->protocol_private == NULL ||
-                                ovs_route->protocol_private[0] == false) {
-                                /*
-                                 * Found the route entry in DB
-                                 */
-                                break;
+        VLOG_DBG("Cached OVSDB Route Entry: Prefix %s family %s "
+                 "from %s priv %p", ovs_route->prefix,
+                 ovs_route->address_family, ovs_route->from,
+                 ovs_route->protocol_private);
+    } else {
+
+        p = &rn->p;
+        info = rib_table_info(rn->table);
+        memset(prefix_str, 0, sizeof(prefix_str));
+        prefix2str(p, prefix_str, sizeof(prefix_str));
+
+        VLOG_DBG("Prefix %s Family %d\n",prefix_str, PREFIX_FAMILY(p));
+
+        switch (PREFIX_FAMILY (p)) {
+            case AF_INET:
+
+                VLOG_DBG("Walk the OVSDB route DB to find the relevant row for"
+                         " prefix %s\n", prefix_str);
+
+                OVSREC_ROUTE_FOR_EACH(ovs_route, idl) {
+                    /*
+                     * HALON_TODO: Need to add support to check vrf
+                     */
+                    VLOG_DBG("DB Entry: Prefix %s family %s from %s priv %p",
+                             ovs_route->prefix, ovs_route->address_family,
+                             ovs_route->from, ovs_route->protocol_private);
+
+                    if (!strcmp(ovs_route->address_family,
+                                    OVSREC_ROUTE_ADDRESS_FAMILY_IPV4)) {
+                        if (!strcmp(ovs_route->prefix, prefix_str)) {
+                            if (route->type ==
+                                    ovsdb_proto_to_zebra_proto(ovs_route->from)) {
+                                if (info->safi ==
+                                    ovsdb_safi_to_zebra_safi(
+                                                ovs_route->sub_address_family)) {
+                                    break;
+                                }
                             }
                         }
                     }
                 }
-            }
-        }
-        break;
+                break;
 #ifdef HAVE_IPV6
-    case AF_INET6:
-        OVSREC_ROUTE_FOR_EACH(ovs_route, idl) {
-            /*
-             * HALON_TODO: Need to add support to check vrf
-             */
-            VLOG_DBG("DB Entry: Prefix %s family %s from %s priv %p",
-                      ovs_route->prefix, ovs_route->address_family,
-                      ovs_route->from, ovs_route->protocol_private);
+            case AF_INET6:
 
-            if (!strcmp(ovs_route->address_family,
+                VLOG_DBG("Walk the OVSDB route DB to find the relevant row for"
+                         " prefix %s\n", prefix_str);
+
+                OVSREC_ROUTE_FOR_EACH(ovs_route, idl) {
+                    /*
+                     * HALON_TODO: Need to add support to check vrf
+                     */
+                    VLOG_DBG("DB Entry: Prefix %s family %s from %s priv %p",
+                             ovs_route->prefix, ovs_route->address_family,
+                             ovs_route->from, ovs_route->protocol_private);
+
+                    if (!strcmp(ovs_route->address_family,
                                         OVSREC_ROUTE_ADDRESS_FAMILY_IPV6)) {
-                if (!strcmp(ovs_route->prefix, prefix_str)) {
-                    if (route->type ==
-                               ovsdb_proto_to_zebra_proto(ovs_route->from)) {
-                        if (info->safi == ovsdb_safi_to_zebra_safi(
-                                            ovs_route->sub_address_family)) {
-                            /*
-                             * We should not be checking for protcol_private
-                             * here.
-                             * The fact that zebra has it, means that this is
-                             * no longer private! Just blindly update.
-                             * We will take care of only allowing non private
-                             * routes to zebra.
-                             */
-                            if (ovs_route->protocol_private == NULL ||
-                                ovs_route->protocol_private[0] == false) {
-                                /*
-                                 * Found the route entry in DB
-                                 */
-                                break;
+                        if (!strcmp(ovs_route->prefix, prefix_str)) {
+                            if (route->type ==
+                                    ovsdb_proto_to_zebra_proto(ovs_route->from)) {
+                                if (info->safi ==
+                                    ovsdb_safi_to_zebra_safi(
+                                                    ovs_route->sub_address_family)) {
+                                    break;
+                                }
                             }
                         }
                     }
                 }
-            }
-        }
-        break;
+                break;
 #endif
-    default:
-        /* Unsupported protocol family! */
-        VLOG_ERR("Unsupported protocol in route update");
-        return 0;
+            default:
+            /* Unsupported protocol family! */
+            VLOG_ERR("Unsupported protocol in route update");
+            return 0;
+        }
     }
+
     if (ovs_route) {
-        zebra_ovs_update_selected_route(ovs_route, &selected);
+
+        /*
+         * We should not be checking for protcol_private here The fact that zebra
+         * has it, means that this is no longer private! Just blindly update.
+         * We will take care of only allowing non private routes to zebra.
+         */
+        if (ovs_route->protocol_private == NULL ||
+            ovs_route->protocol_private[0] == false) {
+
+            VLOG_DBG("Updating the selected flag for the non-private routes");
+            zebra_ovs_update_selected_route(ovs_route, &selected);
+        }
     }
     return 0;
 }
 
 /*
-** Function to add ipv4/6 route from protocols, with one or multiple nexthops.
-*/
+ * Function to add ipv4/6 route from protocols, with one or multiple nexthops.
+ */
 int
 zebra_add_route(bool is_ipv6, struct prefix *p, int type, safi_t safi,
                 const struct ovsrec_route *route)
@@ -1369,6 +1383,7 @@ zebra_add_route(bool is_ipv6, struct prefix *p, int type, safi_t safi,
     rib->flags = flags;
     rib->uptime = time (NULL);
     rib->nexthop_num = 0; /* Start with zero */
+    rib->ovsdb_route_row_ptr = route;
 
     VLOG_DBG("Going through %d next-hops", route->n_nexthops);
     for (count = 0; count < route->n_nexthops; count++) {

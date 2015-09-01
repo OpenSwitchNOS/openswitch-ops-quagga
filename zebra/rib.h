@@ -79,6 +79,12 @@ struct rib
   u_char nexthop_num;
   u_char nexthop_active_num;
   u_char nexthop_fib_num;
+
+  /*
+   * Pointer to the row in the route database
+   * in OVS.
+   */
+  void *ovsdb_route_row_ptr;
 };
 
 /* meta-queue structure:
@@ -450,7 +456,7 @@ extern unsigned long rib_score_proto (u_char proto);
 extern int
 static_add_ipv4_safi (safi_t safi, struct prefix *p, struct in_addr *gate,
 		      const char *ifname, u_char flags, u_char distance,
-		      u_int32_t vrf_id);
+		      u_int32_t vrf_id, void* ovsdb_route_row_ptr);
 extern int
 static_delete_ipv4_safi (safi_t safi, struct prefix *p, struct in_addr *gate,
 			 const char *ifname, u_char distance, u_int32_t vrf_id);
@@ -474,7 +480,7 @@ extern struct route_table *rib_table_ipv6;
 extern int
 static_add_ipv6 (struct prefix *p, u_char type, struct in6_addr *gate,
 		 const char *ifname, u_char flags, u_char distance,
-		 u_int32_t vrf_id);
+		 u_int32_t vrf_id, void* ovsdb_route_row_ptr);
 
 extern int
 static_delete_ipv6 (struct prefix *p, u_char type, struct in6_addr *gate,

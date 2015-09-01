@@ -762,6 +762,7 @@ netlink_routing_table (struct sockaddr_nl *snl, struct nlmsghdr *h)
           rib->table = table;
           rib->nexthop_num = 0;
           rib->uptime = time (NULL);
+          rib->ovsdb_route_row_ptr = NULL;
 
           for (;;)
             {
@@ -964,6 +965,7 @@ netlink_route_change (struct sockaddr_nl *snl, struct nlmsghdr *h)
               rib->table = table;
               rib->nexthop_num = 0;
               rib->uptime = time (NULL);
+              rib->ovsdb_route_row_ptr = NULL;
 
               for (;;)
                 {

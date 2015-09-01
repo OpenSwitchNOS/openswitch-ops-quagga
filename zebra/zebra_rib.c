@@ -2010,6 +2010,7 @@ rib_add_ipv4 (int type, int flags, struct prefix_ipv4 *p,
   rib->table = vrf_id;
   rib->nexthop_num = 0;
   rib->uptime = time (NULL);
+  rib->ovsdb_route_row_ptr = NULL;
 
   /* Nexthop settings. */
   if (gate)
@@ -2425,7 +2426,8 @@ rib_delete_ipv4 (int type, int flags, struct prefix_ipv4 *p,
 
 /* Install static route into rib. */
 static void
-static_install_ipv4 (safi_t safi, struct prefix *p, struct static_ipv4 *si)
+static_install_ipv4 (safi_t safi, struct prefix *p, struct static_ipv4 *si,
+                     void *ovsrec_route_ptr)
 {
   struct rib *rib;
   struct route_node *rn;
@@ -2477,6 +2479,7 @@ static_install_ipv4 (safi_t safi, struct prefix *p, struct static_ipv4 *si)
       rib->metric = 0;
       rib->table = zebrad.rtm_table_default;
       rib->nexthop_num = 0;
+      rib->ovsdb_route_row_ptr = ovsrec_route_ptr;
 
       switch (si->type)
         {
@@ -2580,7 +2583,7 @@ static_uninstall_ipv4 (safi_t safi, struct prefix *p, struct static_ipv4 *si)
 int
 static_add_ipv4_safi (safi_t safi, struct prefix *p, struct in_addr *gate,
 		      const char *ifname, u_char flags, u_char distance,
-		      u_int32_t vrf_id)
+		      u_int32_t vrf_id, void *ovsrec_route_ptr)
 {
   u_char type = 0;
   struct route_node *rn;
@@ -2670,7 +2673,7 @@ static_add_ipv4_safi (safi_t safi, struct prefix *p, struct in_addr *gate,
   si->next = cp;
 
   /* Install into rib. */
-  static_install_ipv4 (safi, p, si);
+  static_install_ipv4 (safi, p, si, ovsrec_route_ptr);
 
   return 1;
 }
@@ -2802,6 +2805,7 @@ rib_add_ipv6 (int type, int flags, struct prefix_ipv6 *p,
   rib->table = vrf_id;
   rib->nexthop_num = 0;
   rib->uptime = time (NULL);
+  rib->ovsdb_route_row_ptr = NULL;
 
   /* Nexthop settings. */
   if (gate)
@@ -2977,7 +2981,7 @@ rib_delete_ipv6 (int type, int flags, struct prefix_ipv6 *p,
 
 /* Install static route into rib. */
 static void
-static_install_ipv6 (struct prefix *p, struct static_ipv6 *si)
+static_install_ipv6 (struct prefix *p, struct static_ipv6 *si, void *ovsrec_route_ptr)
 {
   struct rib *rib;
   struct route_table *table;
@@ -3031,6 +3035,7 @@ static_install_ipv6 (struct prefix *p, struct static_ipv6 *si)
       rib->metric = 0;
       rib->table = zebrad.rtm_table_default;
       rib->nexthop_num = 0;
+      rib->ovsdb_route_row_ptr = ovsrec_route_ptr;
 
       switch (si->type)
 	{
@@ -3138,7 +3143,7 @@ static_uninstall_ipv6 (struct prefix *p, struct static_ipv6 *si)
 int
 static_add_ipv6 (struct prefix *p, u_char type, struct in6_addr *gate,
 		 const char *ifname, u_char flags, u_char distance,
-		 u_int32_t vrf_id)
+		 u_int32_t vrf_id, void *ovsrec_route_ptr)
 {
   struct route_node *rn;
   struct static_ipv6 *si;
@@ -3219,7 +3224,7 @@ static_add_ipv6 (struct prefix *p, u_char type, struct in6_addr *gate,
   si->next = cp;
 
   /* Install into rib. */
-  static_install_ipv6 (p, si);
+  static_install_ipv6 (p, si, ovsrec_route_ptr);
 
   return 1;
 }

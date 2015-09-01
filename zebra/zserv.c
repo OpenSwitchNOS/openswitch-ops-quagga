@@ -835,6 +835,7 @@ zread_ipv4_add (struct zserv *client, u_short length)
   message = stream_getc (s); 
   safi = stream_getw (s);
   rib->uptime = time (NULL);
+  rib->ovsdb_route_row_ptr = NULL;
 
   /* IPv4 prefix. */
   memset (&p, 0, sizeof (struct prefix_ipv4));
@@ -890,6 +891,10 @@ zread_ipv4_add (struct zserv *client, u_short length)
     
   /* Table */
   rib->table=zebrad.rtm_table_default;
+
+  /* OVSDB route pointer */
+  rib->ovsdb_route_row_ptr = NULL;
+
   rib_add_ipv4_multipath (&p, rib, safi);
   return 0;
 }

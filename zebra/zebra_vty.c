@@ -86,7 +86,7 @@ zebra_static_ipv4_safi (struct vty *vty, safi_t safi, int add_cmd,
           return CMD_WARNING;
         }
       if (add_cmd)
-        static_add_ipv4_safi (safi, &p, NULL, NULL, ZEBRA_FLAG_BLACKHOLE, distance, 0);
+        static_add_ipv4_safi (safi, &p, NULL, NULL, ZEBRA_FLAG_BLACKHOLE, distance, 0, NULL);
       else
         static_delete_ipv4_safi (safi, &p, NULL, NULL, distance, 0);
       return CMD_SUCCESS;
@@ -112,7 +112,7 @@ zebra_static_ipv4_safi (struct vty *vty, safi_t safi, int add_cmd,
   if (gate_str == NULL)
   {
     if (add_cmd)
-      static_add_ipv4_safi (safi, &p, NULL, NULL, flag, distance, 0);
+      static_add_ipv4_safi (safi, &p, NULL, NULL, flag, distance, 0, NULL);
     else
       static_delete_ipv4_safi (safi, &p, NULL, NULL, distance, 0);
 
@@ -128,7 +128,7 @@ zebra_static_ipv4_safi (struct vty *vty, safi_t safi, int add_cmd,
     ifname = gate_str;
 
   if (add_cmd)
-    static_add_ipv4_safi (safi, &p, ifname ? NULL : &gate, ifname, flag, distance, 0);
+    static_add_ipv4_safi (safi, &p, ifname ? NULL : &gate, ifname, flag, distance, 0, NULL);
   else
     static_delete_ipv4_safi (safi, &p, ifname ? NULL : &gate, ifname, distance, 0);
 
@@ -1568,7 +1568,7 @@ static_ipv6_func (struct vty *vty, int add_cmd, const char *dest_str,
     }
 
   if (add_cmd)
-    static_add_ipv6 (&p, type, gate, ifname, flag, distance, table);
+    static_add_ipv6 (&p, type, gate, ifname, flag, distance, table, NULL);
   else
     static_delete_ipv6 (&p, type, gate, ifname, distance, table);
 

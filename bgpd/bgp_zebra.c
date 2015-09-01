@@ -663,6 +663,7 @@ bgp_nexthop_set (union sockunion *local, union sockunion *remote,
 void
 bgp_zebra_announce (struct prefix *p, struct bgp_info *info, struct bgp *bgp, safi_t safi)
 {
+#ifndef ENABLE_OVSDB
   int flags;
   u_char distance;
   struct peer *peer;
@@ -825,6 +826,10 @@ bgp_zebra_announce (struct prefix *p, struct bgp_info *info, struct bgp *bgp, sa
                        (struct prefix_ipv6 *) p, &api);
     }
 #endif /* HAVE_IPV6 */
+
+#else
+     bgp_ovsdb_add_rib_entry(p, info, bgp, safi);
+#endif
 }
 
 void

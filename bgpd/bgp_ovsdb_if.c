@@ -168,6 +168,7 @@ bgp_ovsdb_tables_init (struct ovsdb_idl *idl)
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_inbound_soft_reconfiguration);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_statistics);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_remote_as);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_remove_private_as);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_shutdown);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_override_capability);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_passive);
@@ -547,7 +548,8 @@ modify_bgp_router_config(struct ovsdb_idl *idl, const struct ovsrec_bgp_router *
     int ret_status;
 
     OVSREC_BGP_ROUTER_FOR_EACH(bgp_mod_row, idl) {
-        if (OVSREC_IDL_IS_ROW_MODIFIED(bgp_mod_row, idl_seqno)) {
+        if (OVSREC_IDL_IS_ROW_INSERTED(bgp_mod_row, idl_seqno) ||
+             OVSREC_IDL_IS_ROW_MODIFIED(bgp_mod_row, idl_seqno)) {
             bgp_cfg = bgp_lookup((as_t)bgp_mod_row->asn, NULL);
 	    /* Check if router_id is modified */
             if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_bgp_router_col_router_id, idl_seqno)) {
@@ -761,6 +763,7 @@ bgp_static_route_deletion(struct bgp *bgp_cfg,
 int
 modify_bgp_maxpaths_config(struct bgp *bgp_cfg, const struct ovsrec_bgp_router *bgp_mod_row)
 {
+    bgp_flag_set(bgp_cfg, BGP_FLAG_ASPATH_MULTIPATH_RELAX);
     return bgp_maximum_paths_set(bgp_cfg, AFI_IP, SAFI_UNICAST,
                                  BGP_PEER_EBGP,
 				 (u_int16_t)bgp_mod_row->maximum_paths[0]);
@@ -826,15 +829,14 @@ bgp_apply_bgp_router_changes(struct ovsdb_idl *idl)
         if (OVSREC_IDL_ANY_TABLE_ROWS_DELETED(bgp_first, idl_seqno)) {
             delete_bgp_router_config(idl);
         }
-        /* Check if any row insertion */
-        if (OVSREC_IDL_ANY_TABLE_ROWS_INSERTED(bgp_first, idl_seqno)) {
-            insert_bgp_router_config(idl, bgp_first);
-        }
-        else {
-            /* Check if any row modification */
-            if (OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED(bgp_first, idl_seqno)) {
-                modify_bgp_router_config(idl, bgp_first);
+        if (OVSREC_IDL_ANY_TABLE_ROWS_INSERTED(bgp_first, idl_seqno) ||
+            OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED(bgp_first, idl_seqno)) {
+            /* Check if any row insertion */
+            if (OVSREC_IDL_ANY_TABLE_ROWS_INSERTED(bgp_first, idl_seqno)) {
+                insert_bgp_router_config(idl, bgp_first);
             }
+            /* Check if any row modification */
+            modify_bgp_router_config(idl, bgp_first);
         }
     }
 }
@@ -1143,13 +1145,11 @@ bgp_apply_bgp_neighbor_changes (struct ovsdb_idl *idl)
         VLOG_ERR("bgp neighbor/peer-group deletion occured\n");
         delete_bgp_neighbors_and_peer_groups(idl);
     }
-
     /* nothing else changed ? */
     if (!modified && !inserted) {
 	VLOG_ERR("no other changes occured in BGP Neighbor table\n");
 	return;
     }
-
     VLOG_ERR("now processing bgp neighbor modifications\n");
 
     /* process all possible changes for each entry */
@@ -1278,6 +1278,25 @@ bgp_apply_bgp_neighbor_changes (struct ovsdb_idl *idl)
 		    db_bgpn_p->name, AFI_IP, SAFI_UNICAST,
 		    db_bgpn_p->allow_as_in);
 	}
+    /* remove_private_as */
+    if (COL_CHANGED(db_bgpn_p,
+                    ovsrec_bgp_neighbor_col_remove_private_as,
+                    idl_seqno)) {
+        if (db_bgpn_p->n_remove_private_as
+            && db_bgpn_p->remove_private_as[0]) {
+            daemon_neighbor_remove_private_as_cmd_execute(bgp_instance,
+                                                          db_bgpn_p->name,
+                                                          AFI_IP,
+                                                          SAFI_UNICAST,
+                                                          true);
+        } else {
+            daemon_neighbor_remove_private_as_cmd_execute(bgp_instance,
+                                                          db_bgpn_p->name,
+                                                          AFI_IP,
+                                                          SAFI_UNICAST,
+                                                          false);
+        }
+    }
     }
 }
 

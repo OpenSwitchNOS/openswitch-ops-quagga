@@ -1278,25 +1278,16 @@ bgp_apply_bgp_neighbor_changes (struct ovsdb_idl *idl)
 		    db_bgpn_p->name, AFI_IP, SAFI_UNICAST,
 		    db_bgpn_p->allow_as_in);
 	}
-    /* remove_private_as */
-    if (COL_CHANGED(db_bgpn_p,
-                    ovsrec_bgp_neighbor_col_remove_private_as,
-                    idl_seqno)) {
-        if (db_bgpn_p->n_remove_private_as
-            && db_bgpn_p->remove_private_as[0]) {
-            daemon_neighbor_remove_private_as_cmd_execute(bgp_instance,
-                                                          db_bgpn_p->name,
-                                                          AFI_IP,
-                                                          SAFI_UNICAST,
-                                                          true);
-        } else {
-            daemon_neighbor_remove_private_as_cmd_execute(bgp_instance,
-                                                          db_bgpn_p->name,
-                                                          AFI_IP,
-                                                          SAFI_UNICAST,
-                                                          false);
+
+        /* remove_private_as */
+        if (COL_CHANGED(db_bgpn_p, ovsrec_bgp_neighbor_col_remove_private_as,
+            idl_seqno)) {
+                bool doit =
+                    (db_bgpn_p->n_remove_private_as &&
+                     db_bgpn_p->remove_private_as[0]);
+                daemon_neighbor_remove_private_as_cmd_execute(bgp_instance,
+                    db_bgpn_p->name, AFI_IP, SAFI_UNICAST, doit);
         }
-    }
     }
 }
 

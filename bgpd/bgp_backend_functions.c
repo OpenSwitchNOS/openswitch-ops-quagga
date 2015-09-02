@@ -2267,6 +2267,21 @@ peer_af_flag_unset_vty (struct vty *vty, const char *peer_str, afi_t afi,
   return peer_af_flag_modify_vty (vty, peer_str, afi, safi, flag, 0);
 }
 
+int
+daemon_neighbor_remove_private_as_cmd_execute (struct bgp *bgp, char *peer_str,
+                                                afi_t afi, safi_t safi, bool private_as)
+{
+    if (private_as) {
+        VLOG_DBG("neighbor %s remove private AS \n", peer_str);
+        return peer_af_flag_set_vty (bgp, peer_str, afi, safi,
+                               PEER_FLAG_REMOVE_PRIVATE_AS);
+    } else {
+        VLOG_DBG("no neighbor %s remove private AS \n", peer_str);
+        return peer_af_flag_unset_vty (bgp, peer_str, afi, safi,
+                               PEER_FLAG_REMOVE_PRIVATE_AS);
+    }
+}
+
 /* neighbor capability orf prefix-list. */
 DEFUN (neighbor_capability_orf_prefix,
        neighbor_capability_orf_prefix_cmd,
@@ -2364,6 +2379,7 @@ DEFUN (no_neighbor_nexthop_self,
 }
 
 /* neighbor remove-private-AS. */
+#if 0
 DEFUN (neighbor_remove_private_as,
        neighbor_remove_private_as_cmd,
        NEIGHBOR_CMD2 "remove-private-AS",
@@ -2388,6 +2404,7 @@ DEFUN (no_neighbor_remove_private_as,
 				 bgp_node_safi (vty),
 				 PEER_FLAG_REMOVE_PRIVATE_AS);
 }
+#endif
 
 /* neighbor send-community. */
 DEFUN (neighbor_send_community,
@@ -9709,6 +9726,7 @@ bgp_vty_init (void)
   install_element (BGP_VPNV4_NODE, &no_neighbor_nexthop_self_cmd);
 
   /* "neighbor remove-private-AS" commands. */
+#if 0
   install_element (BGP_NODE, &neighbor_remove_private_as_cmd);
   install_element (BGP_NODE, &no_neighbor_remove_private_as_cmd);
   install_element (BGP_IPV4_NODE, &neighbor_remove_private_as_cmd);
@@ -9721,6 +9739,7 @@ bgp_vty_init (void)
   install_element (BGP_IPV6M_NODE, &no_neighbor_remove_private_as_cmd);
   install_element (BGP_VPNV4_NODE, &neighbor_remove_private_as_cmd);
   install_element (BGP_VPNV4_NODE, &no_neighbor_remove_private_as_cmd);
+#endif
 
   /* "neighbor send-community" commands.*/
   install_element (BGP_NODE, &neighbor_send_community_cmd);

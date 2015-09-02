@@ -37,7 +37,7 @@ from bgpconfig import *
 #
 # S1 [interface 1]
 #
-BGP1_ASN            = "1234"
+BGP1_ASN            = "12"
 BGP1_ROUTER_ID      = "9.0.0.1"
 BGP1_NETWORK        = "11.0.0.0"
 
@@ -50,7 +50,6 @@ BGP1_NEIGHBOR_ASN   = BGP2_ASN
 
 BGP_NETWORK_PL      = "8"
 BGP_NETWORK_MASK    = "255.0.0.0"
-BGP_ROUTER_IDS      = [BGP1_ROUTER_ID]
 PATHS               = "20"
 DESCRIPTION         = "abcd"
 PASSWORD            = "abcdef"
@@ -58,33 +57,28 @@ KEEPALIVE           = "3"
 HOLD                = "10"
 ALLOW_AS_IN_NUMBER  = "7"
 PEER_GROUP_NAME     = "openswitch"
-NAME                = "BGP1_IN"
-SEQUENCE            = "5"
-ACTION              = "permit"
-PREFIX              = "12.0.0.0/8"
-STRING              = "Testing Route Map Description"
 
-BGP1_CONFIG = ["router bgp  %s" % BGP1_ASN,
-               "bgp router-id  %s" % BGP1_ROUTER_ID,
-               "network  %s/%s" % (BGP1_NETWORK, BGP_NETWORK_PL),
+BGP1_CONFIG = ["router bgp %s" % BGP1_ASN,
+               "bgp router-id %s" % BGP1_ROUTER_ID,
+               "network %s/%s" % (BGP1_NETWORK, BGP_NETWORK_PL),
                "maximum-paths %s" % PATHS,
-               "timers bgp  %s %s" % (KEEPALIVE, HOLD),
+               "timers bgp %s %s" % (KEEPALIVE, HOLD),
                "neighbor %s remote-as %s" % (BGP1_NEIGHBOR, BGP1_NEIGHBOR_ASN),
                "neighbor %s description %s" % (BGP1_NEIGHBOR, DESCRIPTION),
                "neighbor %s password %s" % (BGP1_NEIGHBOR, PASSWORD),
                "neighbor %s timers %s %s" % (BGP1_NEIGHBOR, KEEPALIVE, HOLD),
                "neighbor %s allowas-in %s" % (BGP1_NEIGHBOR, ALLOW_AS_IN_NUMBER),
                "neighbor %s remove-private-AS" % BGP1_NEIGHBOR,
-               "neighbor  %s peer-group" % PEER_GROUP_NAME,
+               "neighbor %s peer-group" % PEER_GROUP_NAME,
                "neighbor %s peer-group %s" % (BGP1_NEIGHBOR, PEER_GROUP_NAME),
                "neighbor %s soft-reconfiguration inbound" % BGP1_NEIGHBOR]
 
-BGP_TEST_CONFIG = ["router bgp  3456",
+BGP_TEST_CONFIG = ["router bgp 3456",
                    "bgp router-id 1.1.1.1"]
 
 
 
-BGP_CONFIGS = [BGP1_CONFIG]
+
 
 NUM_OF_SWITCHES = 1
 NUM_HOSTS_PER_SWITCH = 0
@@ -121,11 +115,11 @@ class bgpTest (HalonTest):
                 switch.cmd("ovs-vsctl add-vrf-port vrf_default 1")
                 switch.cmdCLI("configure terminal")
                 switch.cmdCLI("interface 1")
-                switch.cmdCLI("ip address %s/%s" % (BGP_ROUTER_IDS[i], BGP_NETWORK_PL))
+                switch.cmdCLI("ip address %s/%s" % (BGP1_ROUTER_ID, BGP_NETWORK_PL))
                 switch.cmdCLI("exit")
                 switch.cmd("/usr/bin/ovs-vsctl set interface 1 user_config:admin=up")
             else:
-                switch.setIP(ip=BGP_ROUTER_IDS[i], intf="%s-eth1" % switch.name)
+                switch.setIP(ip=BGP1_ROUTER_ID, intf="%s-eth1" % switch.name)
             i += 1
 
     def verify_bgp_running (self):
@@ -142,19 +136,13 @@ class bgpTest (HalonTest):
 
     def configure_bgp (self):
         info("\nConfiguring bgp on all switches..\n")
-
-        i = 0
-        for switch in self.net.switches:
-            cfg_array = BGP_CONFIGS[i]
-            i += 1
-
-            SwitchVtyshUtils.vtysh_cfg_cmd(switch, cfg_array)
+        switch = self.net.switches[0]
+        SwitchVtyshUtils.vtysh_cfg_cmd(switch, BGP1_CONFIG)
 
     def verify_configs (self):
         info("\nVerifying all configurations..\n")
 
-        #for i in range(0, len(BGP_CONFIGS)):
-        bgp_cfg = BGP_CONFIGS[0]
+        bgp_cfg = BGP1_CONFIG
         switch = self.net.switches[0]
 
         for cfg in bgp_cfg:
@@ -162,21 +150,7 @@ class bgpTest (HalonTest):
             assert res, "Config \"%s\" was not correctly configured!" % cfg
 
 
-    def verify_show_running_config (self):
-        info("\nVerifying all configurations : Positive Case\n")
-        switch = self.net.switches[0]
-
-        res = SwitchVtyshUtils.verify_show_running_config(switch, BGP1_CONFIG)
-        assert res, "Config \"%s\" was not correctly configured!" % BGP1_CONFIG
-
-        info("\nVerifying all configurations : Negative Case\n")
-        res = SwitchVtyshUtils.verify_show_running_config(switch, BGP_TEST_CONFIG)
-        assert res==False, "Config \"%s\" was correctly configured!" % BGP_TEST_CONFIG
-
-
-
-
-@pytest.mark.skipif(False, reason="Does not cleanup dockers fully")
+@pytest.mark.skipif(True, reason="Does not cleanup dockers fully")
 class Test_bgp:
     def setup (self):
         pass
@@ -201,9 +175,6 @@ class Test_bgp:
 
     # the actual test function
     def test_bgp_full (self):
-        #self.test_var.configure_switch_ips()
         self.test_var.verify_bgp_running()
         self.test_var.configure_bgp()
-        #sleep(2000)
-        #self.test_var.verify_show_running_config()
         self.test_var.verify_configs()

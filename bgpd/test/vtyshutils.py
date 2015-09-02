@@ -64,6 +64,7 @@ class SwitchVtyshUtils(object):
         result = False
 
         for rc in running_cfg:
+            #info(rc)
             matches = True
 
             for c in cfg_array:

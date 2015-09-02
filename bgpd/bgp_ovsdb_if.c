@@ -1240,6 +1240,26 @@ bgp_apply_bgp_neighbor_changes (struct ovsdb_idl *idl)
 		    (bgp_instance, db_bgpn_p->name, shut);
 	}
 
+    /* remove_private_as */
+    if (COL_CHANGED(db_bgpn_p,
+                    ovsrec_bgp_neighbor_col_remove_private_as,
+                    idl_seqno)) {
+        if (db_bgpn_p->n_remove_private_as
+            && db_bgpn_p->remove_private_as[0]) {
+            daemon_neighbor_remove_private_as_cmd_execute(bgp_instance,
+                                                          db_bgpn_p->name,
+                                                          AFI_IP,
+                                                          SAFI_UNICAST,
+                                                          true);
+        } else {
+            daemon_neighbor_remove_private_as_cmd_execute(bgp_instance,
+                                                          db_bgpn_p->name,
+                                                          AFI_IP,
+                                                          SAFI_UNICAST,
+                                                          false);
+        }
+    }
+
 	/* inbound_soft_reconfiguration */
 	if (COL_CHANGED(db_bgpn_p,
 	    ovsrec_bgp_neighbor_col_inbound_soft_reconfiguration, idl_seqno)) {

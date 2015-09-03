@@ -54,6 +54,8 @@
 #include "bgpd/bgp_route.h"
 #include "linklist.h"
 
+#define CLEANUP_BGP
+
 /* Local structure to hold the master thread
  * and counters for read/write callbacks
  */
@@ -113,25 +115,27 @@ bgp_policy_ovsdb_init(struct ovsdb_idl *idl)
 {
     ovsdb_idl_add_table(idl, &ovsrec_table_prefix_list);
     ovsdb_idl_add_column(idl, &ovsrec_prefix_list_col_name);
+    ovsdb_idl_add_column(idl, &ovsrec_prefix_list_col_prefix_list_entries);
     ovsdb_idl_add_column(idl, &ovsrec_prefix_list_col_description);
 
-    ovsdb_idl_add_table(idl, &ovsrec_table_prefix_list_entries);
-    ovsdb_idl_add_column(idl, &ovsrec_prefix_list_entries_col_action);
-    ovsdb_idl_add_column(idl, &ovsrec_prefix_list_entries_col_prefix);
-    ovsdb_idl_add_column(idl, &ovsrec_prefix_list_entries_col_prefix_list);
-    ovsdb_idl_add_column(idl, &ovsrec_prefix_list_entries_col_sequence);
-
+    ovsdb_idl_add_table(idl, &ovsrec_table_prefix_list_entry);
+    ovsdb_idl_add_column(idl, &ovsrec_prefix_list_entry_col_action);
+    ovsdb_idl_add_column(idl, &ovsrec_prefix_list_entry_col_prefix);
+    ovsdb_idl_add_column(idl, &ovsrec_prefix_list_entry_col_le);
+    ovsdb_idl_add_column(idl, &ovsrec_prefix_list_entry_col_ge);
 
     ovsdb_idl_add_table(idl, &ovsrec_table_route_map);
     ovsdb_idl_add_column(idl, &ovsrec_route_map_col_name);
+    ovsdb_idl_add_column(idl, &ovsrec_route_map_col_route_map_entries);
 
-    ovsdb_idl_add_table(idl, &ovsrec_table_route_map_entries);
-    ovsdb_idl_add_column(idl, &ovsrec_route_map_entries_col_action);
-    ovsdb_idl_add_column(idl, &ovsrec_route_map_entries_col_description);
-    ovsdb_idl_add_column(idl, &ovsrec_route_map_entries_col_match);
-    ovsdb_idl_add_column(idl, &ovsrec_route_map_entries_col_preference);
-    ovsdb_idl_add_column(idl, &ovsrec_route_map_entries_col_route_map);
-    ovsdb_idl_add_column(idl, &ovsrec_route_map_entries_col_set);
+    ovsdb_idl_add_table(idl, &ovsrec_table_route_map_entry);
+    ovsdb_idl_add_column(idl, &ovsrec_route_map_entry_col_action);
+    ovsdb_idl_add_column(idl, &ovsrec_route_map_entry_col_description);
+    ovsdb_idl_add_column(idl, &ovsrec_route_map_entry_col_exitpolicy);
+    ovsdb_idl_add_column(idl, &ovsrec_route_map_entry_col_goto_target);
+    ovsdb_idl_add_column(idl, &ovsrec_route_map_entry_col_call);
+    ovsdb_idl_add_column(idl, &ovsrec_route_map_entry_col_match);
+    ovsdb_idl_add_column(idl, &ovsrec_route_map_entry_col_set);
 }
 
 
@@ -140,52 +144,50 @@ bgp_ovsdb_tables_init (struct ovsdb_idl *idl)
 {
     /* VRF Table */
     ovsdb_idl_add_table(idl, &ovsrec_table_vrf);
-    ovsdb_idl_add_column(idl, &ovsrec_vrf_col_name);
+    ovsdb_idl_add_column(idl, &ovsrec_vrf_col_bgp_routers);
 
     /* BGP router table */
     ovsdb_idl_add_table(idl, &ovsrec_table_bgp_router);
-    ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_asn);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_router_id);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_networks);
-    ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_vrf);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_maximum_paths);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_timers);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_redistribute);
-    ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_gr_stale_timer);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_always_compare_med);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_deterministic_med);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_gr_stale_timer);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_bgp_neighbors);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_other_config);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_status);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_external_ids);
 
     /* BGP neighbor table */
     ovsdb_idl_add_table(idl, &ovsrec_table_bgp_neighbor);
-    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_weight);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_is_peer_group);
-    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_bgp_peer_group);
-    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_bgp_router);
-    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_strict_capability_match);
-    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_tcp_port_number);
-    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_inbound_soft_reconfiguration);
-    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_statistics);
-    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_remote_as);
-    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_remove_private_as);
-    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_shutdown);
-    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_override_capability);
-    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_passive);
-    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_maximum_prefix_limit);
-    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_name);
-    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_status);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_description);
-    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_local_as);
-    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_advertisement_interval);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_shutdown);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_bgp_peer_group);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_local_interface);
-    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_external_ids);
-    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_password);
-    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_other_config);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_remote_as);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_allow_as_in);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_local_as);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_weight);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_tcp_port_number);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_advertisement_interval);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_maximum_prefix_limit);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_capability);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_override_capability);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_inbound_soft_reconfiguration);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_remove_private_as);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_passive);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_password);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_strict_capability_match);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_timers);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_route_maps);
-    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_allow_as_in);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_statistics);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_status);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_external_ids);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_other_config);
 
     /* BGP policy */
     bgp_policy_ovsdb_init(idl);
@@ -433,9 +435,10 @@ modify_bgp_neighbor_route_map(struct ovsrec_bgp_neighbor *ovs_bgpn,
             break;
         }
     }
-
+#ifndef CLEANUP_BGP
     daemon_neighbor_route_map_cmd_execute(bgp_instance, ovs_bgpn->name,
                                           afi, safi, name, direction);
+#endif
 }
 
 afi_t
@@ -456,7 +459,10 @@ static void
 apply_bgp_neighbor_route_map_changes(struct ovsrec_bgp_neighbor *ovs_bgpn,
                                      struct bgp *bgp_instance)
 {
+    afi_t afi = AFI_IP; // CLEANUP_BGP : Remove this when fixed below part
+#ifndef CLEANUP_BGP
     afi_t afi = network2afi(ovs_bgpn->name);
+#endif
     safi_t safi = SAFI_UNICAST;
 
     if (afi)
@@ -506,12 +512,14 @@ delete_bgp_router_config(struct ovsdb_idl *idl)
 
     while(bgp_cfg = bgp_lookup_by_name(NULL)) {
         bool match_found = 0;
+#ifndef CLEANUP_BGP
         OVSREC_BGP_ROUTER_FOR_EACH(bgp_del_row, idl) {
             if (bgp_cfg->as == bgp_del_row->asn) {
                 match_found = 1;
                 break;
             }
         }
+#endif
         if (!match_found) {
             VLOG_DBG("bgp_cfg->as : %d will be deleted from BGPD\n",
                      (int)(bgp_cfg->as));
@@ -530,10 +538,12 @@ insert_bgp_router_config(struct ovsdb_idl *idl, const struct ovsrec_bgp_router *
     OVSREC_BGP_ROUTER_FOR_EACH(bgp_insert_row, idl) {
         VLOG_INFO("New row insertion to BGP config\n");
         if (OVSREC_IDL_IS_ROW_INSERTED(bgp_insert_row, idl_seqno)) {
+#ifndef CLEANUP_BGP
             ret_status = bgp_get(&bgp_cfg, (as_t *)&bgp_insert_row->asn, NULL);
             if (!ret_status) {
                 VLOG_INFO("bgp_cfg->as : %d", (int)(bgp_cfg->as));
             }
+#endif
         }
     }
 }
@@ -546,7 +556,7 @@ modify_bgp_router_config(struct ovsdb_idl *idl, const struct ovsrec_bgp_router *
     struct bgp *bgp_cfg;
     as_t as;
     int ret_status;
-
+#ifndef CLEANUP_BGP
     OVSREC_BGP_ROUTER_FOR_EACH(bgp_mod_row, idl) {
         if (OVSREC_IDL_IS_ROW_INSERTED(bgp_mod_row, idl_seqno) ||
              OVSREC_IDL_IS_ROW_MODIFIED(bgp_mod_row, idl_seqno)) {
@@ -593,6 +603,7 @@ modify_bgp_router_config(struct ovsdb_idl *idl, const struct ovsrec_bgp_router *
             }
 	}
     }
+#endif
 }
 
 int
@@ -708,6 +719,8 @@ bgp_static_route_deletion(struct bgp *bgp_cfg,
     safi_t safi;
     int ret_status = 0;
     int i = 0;
+
+#ifndef CLEANUP_BGP
     if (bgp_cfg = bgp_lookup((as_t)bgp_mod_row->asn, NULL)) {
         bool match_found = 0;
         char prefix_str[256];
@@ -757,6 +770,7 @@ bgp_static_route_deletion(struct bgp *bgp_cfg,
             }
         }
     }
+#endif
     return ret_status;
 }
 
@@ -872,6 +886,7 @@ check_and_delete_bgp_neighbors (struct bgp *bgp, struct ovsdb_idl *idl)
 
     for (ALL_LIST_ELEMENTS(bgp->peer, node, nnode, peer)) {
 	deleted_from_database = true;
+#ifndef CLEANUP_BGP
         OVSREC_BGP_NEIGHBOR_FOR_EACH(bgpn, idl) {
             if (object_is_peer(bgpn) &&
 	        (0 == strcmp(bgpn->name, peer->host))) {
@@ -879,6 +894,7 @@ check_and_delete_bgp_neighbors (struct bgp *bgp, struct ovsdb_idl *idl)
 		    break;
             }
         }
+#endif
         if (deleted_from_database) {
             VLOG_ERR("bgp peer %s being deleted", peer->host);
              peer_delete(peer);
@@ -900,6 +916,7 @@ check_and_delete_bgp_neighbor_peer_groups (struct bgp *bgp,
 
     for (ALL_LIST_ELEMENTS(bgp->group, node, nnode, peer_group)) {
         deleted_from_database = true;
+#ifndef CLEANUP_BGP
         OVSREC_BGP_NEIGHBOR_FOR_EACH(bgpn, idl) {
             if (object_is_peer_group(bgpn) &&
 	        (0 == strcmp(bgpn->name, peer_group->name))) {
@@ -907,6 +924,7 @@ check_and_delete_bgp_neighbor_peer_groups (struct bgp *bgp,
 		    break;
             }
         }
+#endif
         if (deleted_from_database) {
 	    VLOG_ERR("peer group %s being deleted", peer_group->name);
              peer_group_delete(peer_group);
@@ -942,6 +960,7 @@ get_bgp_neighbor_with_VrfName_BgpRouterAsn_Ipaddr (struct ovsdb_idl *idl,
     if (NULL == vrf_name) {
 	vrf_name = DEFAULT_VRF_NAME;
     }
+#ifndef CLEANUP_BGP
     OVSREC_BGP_NEIGHBOR_FOR_EACH(nptr, idl) {
 	if (!object_is_peer_group(nptr) &&
 	    ipaddr && (0 == strcmp(ipaddr, nptr->name)) &&
@@ -950,6 +969,7 @@ get_bgp_neighbor_with_VrfName_BgpRouterAsn_Ipaddr (struct ovsdb_idl *idl,
 		(0 == strcmp(nptr->bgp_router->vrf->name, vrf_name)))
 		    return nptr;
     }
+#endif
     return NULL;
 }
 
@@ -1047,8 +1067,10 @@ void bgp_daemon_ovsdb_neighbor_update (struct peer *peer,
 	VLOG_ERR("%%bgp_daemon_ovsdb_neighbor_update cannot find db row\n");
 	return;
     }
+#ifndef CLEANUP_BGP
     VLOG_DBG("updating bgp neighbor %s remote-as %d in db\n",
 	ovs_bgp_neighbor_ptr->name, *ovs_bgp_neighbor_ptr->remote_as);
+#endif
     db_txn = ovsdb_idl_txn_create(idl);
     if (NULL == db_txn) {
 	VLOG_ERR("%%ovsdb_idl_txn_create failed in "
@@ -1110,6 +1132,7 @@ fetch_key_value (char **key, const int64_t *value,
 static void
 bgp_apply_bgp_neighbor_changes (struct ovsdb_idl *idl)
 {
+#ifndef CLEANUP_BGP
     struct ovsrec_bgp_neighbor *db_bgpn_p;
     struct bgp *bgp_instance;
     bool inserted = false;
@@ -1289,6 +1312,7 @@ bgp_apply_bgp_neighbor_changes (struct ovsdb_idl *idl)
                     db_bgpn_p->name, AFI_IP, SAFI_UNICAST, doit);
         }
     }
+#endif
 }
 
 static void

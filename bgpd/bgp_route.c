@@ -3740,14 +3740,22 @@ bgp_static_set (struct vty *vty, struct bgp *bgp, const char *ip_str,
   ret = str2prefix (ip_str, &p);
   if (! ret)
     {
+#ifndef ENABLE_OVSDB
       vty_out (vty, "%% Malformed prefix%s", VTY_NEWLINE);
+#else
+      VLOG_ERR("Malformed prefix");
+#endif
       return CMD_WARNING;
     }
 #ifdef HAVE_IPV6
   if (afi == AFI_IP6 && IN6_IS_ADDR_LINKLOCAL (&p.u.prefix6))
     {
+#ifndef ENABLE_OVSDB
       vty_out (vty, "%% Malformed prefix (link-local address)%s",
 	       VTY_NEWLINE);
+#else
+      VLOG_ERR("Malformed prefix (link-local address)");
+#endif
       return CMD_WARNING;
     }
 #endif /* HAVE_IPV6 */
@@ -3833,14 +3841,22 @@ bgp_static_unset (struct vty *vty, struct bgp *bgp, const char *ip_str,
   ret = str2prefix (ip_str, &p);
   if (! ret)
     {
+#ifndef ENABLE_OVSDB
       vty_out (vty, "%% Malformed prefix%s", VTY_NEWLINE);
+#else
+      VLOG_ERR("Malformed prefix");
+#endif
       return CMD_WARNING;
     }
 #ifdef HAVE_IPV6
   if (afi == AFI_IP6 && IN6_IS_ADDR_LINKLOCAL (&p.u.prefix6))
     {
+#ifndef ENABLE_OVSDB
       vty_out (vty, "%% Malformed prefix (link-local address)%s",
 	       VTY_NEWLINE);
+#else
+      VLOG_ERR("Malformed prefix (link-local address)");
+#endif
       return CMD_WARNING;
     }
 #endif /* HAVE_IPV6 */
@@ -3850,8 +3866,12 @@ bgp_static_unset (struct vty *vty, struct bgp *bgp, const char *ip_str,
   rn = bgp_node_lookup (bgp->route[afi][safi], &p);
   if (! rn)
     {
+#ifndef ENABLE_OVSDB
       vty_out (vty, "%% Can't find specified static route configuration.%s",
 	       VTY_NEWLINE);
+#else
+      VLOG_ERR("Can't find specified static route configuration.");
+#endif
       return CMD_WARNING;
     }
 

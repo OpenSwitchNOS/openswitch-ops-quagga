@@ -52,6 +52,8 @@
 #include "bgpd/bgp_ovsdb_route.h"
 #include "openvswitch/vlog.h"
 
+#define CLEANUP_BGP_ROUTE
+
 #define MAX_ARGC   10
 #define MAX_ARG_LEN  256
 
@@ -153,12 +155,13 @@ const struct ovsrec_vrf*
 bgp_ovsdb_get_vrf(struct bgp *bgp)
 {
     const struct ovsrec_bgp_router *bgp_row = NULL;
-
+#ifndef CLEANUP_BGP_ROUTE
     OVSREC_BGP_ROUTER_FOR_EACH(bgp_row, idl) {
         if (bgp_row->asn == (int64_t)bgp->as) {
             return bgp_row->vrf;
         }
     }
+#endif
     return NULL;
 }
 
@@ -726,12 +729,13 @@ policy_ovsdb_rt_map_get(struct ovsdb_idl *idl,
                         int *argc1, int *argcmatch, int *argcset,
                         unsigned long *pref)
 {
-    struct ovsrec_route_map_entries * rt_map_first;
-    struct ovsrec_route_map_entries * rt_map_next;
+#ifndef CLEANUP_BGP_ROUTE
+    struct ovsrec_route_map_entry * rt_map_first;
+    struct ovsrec_route_map_entry * rt_map_next;
     int i, j;
     char *tmp;
 
-    rt_map_first = ovsrec_route_map_entries_first(idl);
+    rt_map_first = ovsrec_route_map_entry_first(idl);
     if (rt_map_first == NULL) {
          VLOG_INFO("Nothing  route map configed\n");
          return;
@@ -778,6 +782,7 @@ policy_ovsdb_rt_map_get(struct ovsdb_idl *idl,
             }
         }
     }
+#endif
 }
 
 /*
@@ -1003,9 +1008,11 @@ policy_ovsdb_prefix_list_read(struct ovsdb_idl *idl,
                         int *argc1, int *argcseq,
                         int *seqnum)
 {
-    struct ovsrec_prefix_list_entries * prefix_first;
-    struct ovsrec_prefix_list_entries * prefix_next;
+    struct ovsrec_prefix_list_entry * prefix_first;
+    struct ovsrec_prefix_list_entry * prefix_next;
     char *tmp;
+
+#ifndef CLEANUP_BGP_ROUTE
 
     prefix_first = ovsrec_prefix_list_entries_first(idl);
     if (prefix_first == NULL) {
@@ -1016,7 +1023,7 @@ policy_ovsdb_prefix_list_read(struct ovsdb_idl *idl,
     if ( (OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED(prefix_first, idl_seqno)) ||
        (OVSREC_IDL_ANY_TABLE_ROWS_INSERTED(prefix_first, idl_seqno)) )
     {
-        OVSREC_PREFIX_LIST_ENTRIES_FOR_EACH(prefix_next, idl)
+        OVSREC_PREFIX_LIST_ENTRY_FOR_EACH(prefix_next, idl)
         {
             if ( (OVSREC_IDL_IS_ROW_INSERTED(prefix_next, idl_seqno)) ||
                  (OVSREC_IDL_IS_ROW_MODIFIED(prefix_next, idl_seqno)))
@@ -1035,6 +1042,7 @@ policy_ovsdb_prefix_list_read(struct ovsdb_idl *idl,
             }
         }
     }
+#endif
 }
 
 /*

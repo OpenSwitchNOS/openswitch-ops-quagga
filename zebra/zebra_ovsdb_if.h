@@ -68,4 +68,7 @@ struct zebra_route_del_data {
     struct nexthop *nexthop;
 };
 
+extern int zebra_create_txn(void);
+extern int zebra_finish_txn(void);
+
 #endif /* ZEBRA_OVSDB_IF_H */

@@ -6,9 +6,7 @@ from halonvsi.quagga import *
 # Flags for defining what types of switches will be used for BGP testing.
 # The "peer" is only applicable to tests that have more than one switch emulated
 enableHalonSwitch = True
-enablePeerHalonSwitch = False
-
-BGP_CONVERGENCE_DELAY_S = 10
+enablePeerHalonSwitch = True
 
 def getSwitchType(isHalon):
     if isHalon:
@@ -37,8 +35,10 @@ class BgpConfig(object):
     def addNetwork(self, network):
         self.networks.append(network)
 
-    def addRouteMap(self, neighbor, prefix_list, dir, action='', metric=''):
-        self.routeMaps.append([neighbor, prefix_list, dir, action, metric])
+    def addRouteMap(self, neighbor, prefix_list, dir, action='', metric='',
+                    community=''):
+        self.routeMaps.append([neighbor, prefix_list, dir, action,
+                               metric, community])
 
 # Prefix-list configurations
 class PrefixList(object):

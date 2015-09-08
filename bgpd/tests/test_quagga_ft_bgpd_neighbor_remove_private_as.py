@@ -43,6 +43,7 @@ BGP1_NETWORK        = "11.0.0.0"
 
 BGP2_ASN            = "2"
 BGP2_ROUTER_ID      = "9.0.0.2"
+BGP2_INTF2          = "29.0.0.4"
 BGP2_NETWORK        = "12.0.0.0"
 
 BGP3_ASN            = "65000"
@@ -58,7 +59,7 @@ BGP2_NEIGHBOR_ASN   = BGP1_ASN
 BGP2_NEIGHBOR1       = BGP3_ROUTER_ID
 BGP2_NEIGHBOR_ASN1   = BGP3_ASN
 
-BGP3_NEIGHBOR       = "29.0.0.4"
+BGP3_NEIGHBOR       = BGP2_INTF2
 BGP3_NEIGHBOR_ASN   = BGP2_ASN
 
 BGP_NETWORK_PL      = "8"
@@ -123,53 +124,80 @@ class bgpTest (HalonTest):
                                        build = True)
 
     def configure_switch_ips (self):
-        info("\nConfiguring switch IPs..")
+        info("\n########## Configuring switch IPs.. ##########\n")
 
         i = 0
         for switch in self.net.switches:
             # Configure the IPs between the switches
             if isinstance(switch, HalonSwitch):
-                switch.cmd("ovs-vsctl add-vrf-port vrf_default 1")
                 switch.cmdCLI("configure terminal")
                 switch.cmdCLI("interface 1")
-                switch.cmdCLI("ip address %s/%s" % (BGP_ROUTER_IDS[i], BGP_NETWORK_PL))
+                switch.cmdCLI("no shutdown")
+                switch.cmdCLI("ip address %s/%s" % (BGP_ROUTER_IDS[i],
+                                                    BGP_NETWORK_PL))
                 switch.cmdCLI("exit")
-                switch.cmd("/usr/bin/ovs-vsctl set interface 1 user_config:admin=up")
                 if i == 1:
-                    switch.cmd("ovs-vsctl add-vrf-port vrf_default 2")
                     switch.cmdCLI("configure terminal")
                     switch.cmdCLI("interface 2")
-                    switch.cmdCLI("ip address %s/%s" % ("29.0.0.4", BGP_NETWORK_PL))
+                    switch.cmdCLI("no shutdown")
+                    switch.cmdCLI("ip address %s/%s" % (BGP2_INTF2,
+                                                        BGP_NETWORK_PL))
                     switch.cmdCLI("exit")
-                    switch.cmd("/usr/bin/ovs-vsctl set interface 2 user_config:admin=up")
             else:
                 switch.setIP(ip=BGP_ROUTER_IDS[i], intf="%s-eth1" % switch.name)
+
+                if i == 1:
+                    switch.setIP(ip=BGP2_INTF2, intf="%s-eth2" % switch.name)
+
             i += 1
 
     def verify_bgp_running (self):
-        info("\nVerifying bgp processes..\n")
+        info("\n########## Verifying bgp processes.. ##########\n")
 
         for switch in self.net.switches:
             pid = switch.cmd("pgrep -f bgpd").strip()
             assert (pid != ""), "bgpd process not running on switch %s" % \
                                 switch.name
 
-            info("bgpd process exists on switch %s\n" % switch.name)
-
-        info("\n")
+            info("### bgpd process exists on switch %s ###\n" % switch.name)
 
     def configure_bgp (self):
-        info("\nConfiguring bgp on all switches..\n")
+        info("\n########## Configuring BGP on all switches.. ##########\n")
 
-        i = 0
-        for switch in self.net.switches:
+        i = NUM_OF_SWITCHES - 1
+        for iteration in xrange(NUM_OF_SWITCHES):
+            switch = self.net.switches[i]
             cfg_array = BGP_CONFIGS[i]
-            i += 1
+            i -= 1
 
             SwitchVtyshUtils.vtysh_cfg_cmd(switch, cfg_array)
 
-    def unconfigure_bgp (self):
-        info("Unconfiguring remove private AS for BGP2...\n")
+    def reconfigure_neighbor (self):
+        info("### Reconfiguring neighbor to refresh routes ###\n")
+        switch = self.net.switches[0]
+        cfg_array = []
+        cfg_array.append("router bgp %s" % BGP1_ASN)
+        cfg_array.append("no neighbor %s" % BGP1_NEIGHBOR)
+        SwitchVtyshUtils.vtysh_cfg_cmd(switch, cfg_array)
+
+        info("### Verifying route removed prior to proceeding ###\n")
+        network = BGP3_NETWORK
+        next_hop = BGP2_ROUTER_ID
+        route_should_exist = False
+        found = SwitchVtyshUtils.wait_for_route(switch, network, next_hop,
+                                                route_should_exist)
+
+        assert not found, "Route %s -> %s still exists" % (network, next_hop)
+
+        info("### Configuring neighbor again... ###\n")
+        cfg_array = []
+        cfg_array.append("router bgp %s" % BGP1_ASN)
+        cfg_array.append("neighbor %s remote-as %s" % (BGP1_NEIGHBOR,
+                                                       BGP1_NEIGHBOR_ASN))
+        SwitchVtyshUtils.vtysh_cfg_cmd(switch, cfg_array)
+
+    def unconfigure_remove_private_as (self):
+        info("### Unconfiguring remove private AS for BGP2... ###\n")
 
         switch = self.net.switches[1]
 
@@ -179,38 +207,69 @@ class bgpTest (HalonTest):
 
         SwitchVtyshUtils.vtysh_cfg_cmd(switch, cfg_array)
 
-    def verify_neighbor_remove_private_AS (switch, network, next_hop, path):
+    def verify_route (self):
+        info("### Verifying BGP route exists ###\n")
+
+        switch = self.net.switches[0]
+        found = SwitchVtyshUtils.wait_for_route(switch, BGP3_NETWORK,
+                                                BGP2_ROUTER_ID)
+        assert found, "Route %s -> %s was not found" % (BGP3_NETWORK,
+                                                        BGP2_ROUTER_ID)
+
+    def check_remove_private_as (self, switch, network, next_hop, asn):
+        info("### Checking remove private AS %s for %s -> %s ###\n" %
+             (asn, network, next_hop))
+
+        switch = self.net.switches[0]
         routes = SwitchVtyshUtils.vtysh_cmd(switch, "sh ip bgp").split(VTYSH_CR)
-        found = False
+
         for rte in routes:
-            # Try to match our advertised route first
-            if rte.find(network) >= 0:
-                if rte.find(next_hop) >= 0:
-                    if rte.find(path) >= 0:
-                        found = True
-                        break;
-        return found
+            if (network in rte) and (next_hop in rte) and (asn in rte):
+                info("### ASN was found ###\n")
+                return True
+
+        info("### ASN was not found ###\n")
+        return False
 
     def verify_neighbor_remove_private_AS (self):
-        info("Verifying neighbor peer remove-private AS : positive case\n")
-        sleep(50)
+        info("\n########## Verifying neighbor peer remove-private "
+             "AS ##########\n")
+
+        self.verify_route()
+
+        info("### Peer's AS number should not be visible ###\n")
+
         switch = self.net.switches[0]
-        found = SwitchVtyshUtils.verify_neighbor_remove_private_AS(switch,
-                BGP3_NETWORK, BGP2_ROUTER_ID, BGP3_ASN)
-        assert found == False, "Path %s not found on %s" % \
-            (BGP3_ASN, switch.name)
+        network = BGP3_NETWORK
+        next_hop = BGP2_ROUTER_ID
+        asn = BGP3_ASN
+        found = self.check_remove_private_as(switch, network, next_hop, asn)
+
+        assert found == False, "AS number %s is found on %s" % \
+                               (asn, switch.name)
+
+        info("### Verified AS number is not present ###\n")
 
     def verify_no_neighbor_remove_private_AS (self):
-        info("Verifying no neighbor peer remove-private AS : positive case\n")
-        sleep(50)
-        switch = self.net.switches[0]
-        found = SwitchVtyshUtils.verify_neighbor_remove_private_AS(switch,
-                BGP3_NETWORK, BGP2_ROUTER_ID, BGP3_ASN)
-        assert found == True, "Path %s not found on %s" % \
-            (BGP3_ASN, switch.name)
+        info("\n########## Verifying no neighbor peer remove-private "
+             "AS ##########\n")
 
-@pytest.mark.skipif(False, reason="Does not cleanup dockers fully")
-class Test_bgp:
+        self.unconfigure_remove_private_as()
+        self.reconfigure_neighbor()
+        self.verify_route()
+
+        info("### Peer's AS number should be visible ###\n")
+        switch = self.net.switches[0]
+        network = BGP3_NETWORK
+        next_hop = BGP2_ROUTER_ID
+        asn = BGP3_ASN
+
+        found = self.check_remove_private_as(switch, network, next_hop, asn)
+        assert found, "AS number %s is not found on %s" % (asn, switch.name)
+
+        info("### Verified AS number is present ###\n")
+
+class Test_bgpd_neighbor_remove_private_as:
     def setup (self):
         pass
 
@@ -218,10 +277,10 @@ class Test_bgp:
         pass
 
     def setup_class (cls):
-        Test_bgp.test_var = bgpTest()
+        Test_bgpd_neighbor_remove_private_as.test_var = bgpTest()
 
     def teardown_class (cls):
-        Test_bgp.test_var.net.stop()
+        Test_bgpd_neighbor_remove_private_as.test_var.net.stop()
 
     def setup_method (self, method):
         pass
@@ -232,11 +291,9 @@ class Test_bgp:
     def __del__ (self):
         del self.test_var
 
-    # the actual test function
     def test_bgp_full (self):
         self.test_var.configure_switch_ips()
         self.test_var.verify_bgp_running()
         self.test_var.configure_bgp()
         self.test_var.verify_neighbor_remove_private_AS()
-        self.test_var.unconfigure_bgp()
         self.test_var.verify_no_neighbor_remove_private_AS()

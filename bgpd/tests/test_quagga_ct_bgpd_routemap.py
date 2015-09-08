@@ -46,17 +46,15 @@ from bgpconfig import *
 # router bgp 1
 #  bgp router-id 8.0.0.1
 #  network 9.0.0.0/8
-#  network 10.0.0.0/8
 #  neighbor 8.0.0.2 remote-as 2
 #  neighbor 8.0.0.2 route-map BGP1_IN in
 # !
-# ip prefix-list BGP1_IN seq 5 deny 12.0.0.0/8
-# ip prefix-list BGP1_IN seq 10 permit 11.0.0.0/8
+# ip prefix-list BGP1_IN seq 5 deny 11.0.0.0/8
+# ip prefix-list BGP1_IN seq 10 permit 10.0.0.0/8
 # !
 # route-map BGP1_IN permit 5
-#  description Testing Route Map Description
+#  description A route-map description for testing.
 #  match ip address prefix-list BGP1_IN
-#  set metric 1000
 # !
 #
 # Configuration of BGP2:
@@ -64,20 +62,10 @@ from bgpconfig import *
 # !
 # router bgp 2
 #  bgp router-id 8.0.0.2
+#  network 10.0.0.0/8
 #  network 11.0.0.0/8
-#  network 12.0.0.0/8
-#  network 13.0.0.0/8
 #  neighbor 8.0.0.1 remote-as 1
-#  neighbor 8.0.0.1 route-map BGP2_OUT out
 # !
-# ip prefix-list BGP2_OUT seq 5 deny 13.0.0.0/8
-# ip prefix-list BGP2_OUT seq 10 permit 11.0.0.0/8
-# !
-# route-map BGP2_OUT permit 5
-#  description Testing Route Map Description
-#  match ip address prefix-list BGP2_OUT
-#  set metric 1000
-#!
 #
 # Expected routes of BGP1:
 # ----------------------------------------------------------------------------
@@ -88,8 +76,7 @@ from bgpconfig import *
 #
 #    Network          Next Hop            Metric LocPrf Weight Path
 # *> 9.0.0.0          0.0.0.0                  0         32768 i
-# *> 10.0.0.0         0.0.0.0                  0         32768 i
-# *> 11.0.0.0         8.0.0.2               1000             0 2 i
+# *> 10.0.0.0         8.0.0.2                  0             0 2 i
 #
 # Expected routes of BGP2:
 # ----------------------------------------------------------------------------
@@ -100,10 +87,8 @@ from bgpconfig import *
 #
 #    Network          Next Hop            Metric LocPrf Weight Path
 # *> 9.0.0.0          8.0.0.1                  0             0 1 i
-# *> 10.0.0.0         8.0.0.1                  0             0 1 i
+# *> 10.0.0.0         0.0.0.0                  0         32768 i
 # *> 11.0.0.0         0.0.0.0                  0         32768 i
-# *> 12.0.0.0         0.0.0.0                  0         32768 i
-# *> 13.0.0.0         0.0.0.0                  0         32768 i
 
 
 NUM_OF_SWITCHES = 2
@@ -112,6 +97,7 @@ SWITCH_PREFIX = "s"
 
 DEFAULT_PL = "8"
 DEFAULT_NETMASK = "255.0.0.0"
+RM_DESCRIPTION = "A route-map description for testing."
 
 class myTopo(Topo):
     def build (self, hsts=0, sws=2, **_opts):
@@ -141,36 +127,36 @@ class bgpTest (HalonTest):
                                        build = True)
 
     def configure_switch_ips (self):
-        info("\nConfiguring switch IPs..")
+        info("\n########## Configuring switch IPs.. ##########\n")
 
         i = 0
         for switch in self.net.switches:
             bgp_cfg = self.bgpConfigArr[i]
 
+            info("### Setting IP %s/%s on switch %s ###\n" %
+                 (bgp_cfg.routerid, DEFAULT_PL, switch.name))
+
             # Configure the IPs between the switches
             if isinstance(switch, HalonSwitch):
-                switch.cmd("ovs-vsctl add-vrf-port vrf_default 1")
                 switch.cmdCLI("configure terminal")
                 switch.cmdCLI("interface 1")
+                switch.cmdCLI("no shutdown")
                 switch.cmdCLI("ip address %s/%s" % (bgp_cfg.routerid, DEFAULT_PL))
                 switch.cmdCLI("exit")
-                switch.cmd("/usr/bin/ovs-vsctl set interface 1 user_config:admin=up")
             else:
                 switch.setIP(ip=bgp_cfg.routerid, intf="%s-eth1" % switch.name)
 
             i += 1
 
     def setup_bgp_config (self):
-        info("Setup of BGP configurations...\n")
+        info("\n########## Setup of BGP configurations... ##########\n")
 
         # Create BGP configurations
         self.bgpConfig1 = BgpConfig("1", "8.0.0.1", "9.0.0.0")
-        self.bgpConfig2 = BgpConfig("2", "8.0.0.2", "11.0.0.0")
+        self.bgpConfig2 = BgpConfig("2", "8.0.0.2", "10.0.0.0")
 
-        # Add additional network for the BGPs.
-        self.bgpConfig1.addNetwork("10.0.0.0")
-        self.bgpConfig2.addNetwork("12.0.0.0")
-        self.bgpConfig2.addNetwork("13.0.0.0")
+        # Add additional network for BGP2.
+        self.bgpConfig2.addNetwork("11.0.0.0")
 
         # Add the neighbors for each BGP config
         self.bgpConfig1.addNeighbor(self.bgpConfig2)
@@ -178,15 +164,14 @@ class bgpTest (HalonTest):
 
         self.bgpConfigArr = [self.bgpConfig1, self.bgpConfig2]
 
-        # Configure "deny" for "in" of the second network of BGP2 from BGP1
+        # Configure "deny" for "in" of the second network of BGP2
         neighbor = self.bgpConfig1.neighbors[0]
         network = neighbor.networks[1]
         prefixList = PrefixList("BGP%s_IN" % self.bgpConfig1.asn, 5, "deny",
                                 network, DEFAULT_PL)
 
         self.bgpConfig1.prefixLists.append(prefixList)
-        self.bgpConfig1.addRouteMap(neighbor, prefixList, "in",
-                                    "permit", "1000")
+        self.bgpConfig1.addRouteMap(neighbor, prefixList, "in", "permit")
 
         # Configure so that the other route can be permitted
         network = neighbor.networks[0]
@@ -195,30 +180,14 @@ class bgpTest (HalonTest):
 
         self.bgpConfig1.prefixLists.append(prefixList)
 
-        # Configure so that the third network of BGP2 will not be advertised out
-        # to BGP1. Deny "out"
-        neighbor = self.bgpConfig2.neighbors[0]
-        network = self.bgpConfig2.networks[2]
-        prefixList = PrefixList("BGP%s_OUT" % self.bgpConfig2.asn, 5, "deny",
-                                network, DEFAULT_PL)
-
-        self.bgpConfig2.prefixLists.append(prefixList)
-        self.bgpConfig2.addRouteMap(neighbor, prefixList,
-                                    "out", "permit", "1000")
-
-        # Configure so that the other route can be permitted
-        network = self.bgpConfig2.networks[0]
-        prefixList = PrefixList("BGP%s_OUT" % self.bgpConfig2.asn, 10, "permit",
-                                network, DEFAULT_PL)
-
-        self.bgpConfig2.prefixLists.append(prefixList)
-
     def apply_bgp_config (self):
-        info("Applying BGP configurations...\n")
+        info("\n########## Applying BGP configurations... ##########\n")
         self.all_cfg_array = []
 
         i = 0
         for bgp_cfg in self.bgpConfigArr:
+            info("### Applying configurations for BGP: %s ###\n" %
+                 bgp_cfg.routerid)
             cfg_array = []
 
             # Add any prefix-lists
@@ -259,18 +228,15 @@ class bgpTest (HalonTest):
         for routeMap in bgp_cfg.routeMaps:
             prefixList = routeMap[1]
             action = routeMap[3]
-            metric = routeMap[4]
 
             cfg_array.append("route-map %s %s %d" %
                              (prefixList.name, action,
                               prefixList.seq_num))
 
-            cfg_array.append("description Testing Route Map Description")
+            cfg_array.append("description %s" % RM_DESCRIPTION)
 
             cfg_array.append("match ip address prefix-list %s" %
                              prefixList.name)
-
-            cfg_array.append("set metric %s" % metric)
 
     def add_prefix_list_configs(self, bgp_cfg, cfg_array):
         # Add any prefix-lists
@@ -291,18 +257,17 @@ class bgpTest (HalonTest):
                              (neighbor.routerid, prefixList.name, dir))
 
     def verify_bgp_running (self):
-        info("Verifying bgp processes..\n")
+        info("\n########## Verifying bgp processes.. ##########\n")
 
         for switch in self.net.switches:
             pid = switch.cmd("pgrep -f bgpd").strip()
             assert (pid != ""), "bgpd process not running on switch %s" % \
                                 switch.name
 
-            info("bgpd process exists on switch %s\n" % switch.name)
-        info("\n")
+            info("### bgpd process exists on switch %s ###\n" % switch.name)
 
     def verify_bgp_configs (self):
-        info("Verifying all configurations..\n")
+        info("\n########## Verifying all configurations.. ##########\n")
 
         i = 0
         for switch in self.net.switches:
@@ -314,11 +279,10 @@ class bgpTest (HalonTest):
 
             i += 1
 
-    def verify_bgp_routes (self):
-        info("Verifying routes...\n")
+        info("### All configurations were verified successfully ###\n")
 
-        # Let BGP converge for a bit..
-        sleep(BGP_CONVERGENCE_DELAY_S)
+    def verify_bgp_routes (self):
+        info("\n########## Verifying routes... ##########\n")
 
         # For each bgp, verify that it is indeed advertising itself
         self.verify_advertised_routes()
@@ -327,7 +291,7 @@ class bgpTest (HalonTest):
         self.verify_routes_received()
 
     def verify_advertised_routes(self):
-        info("Verifying advertised routes...\n")
+        info("### Verifying advertised routes... ###\n")
 
         i = 0
         for bgp_cfg in self.bgpConfigArr:
@@ -336,8 +300,8 @@ class bgpTest (HalonTest):
             next_hop = "0.0.0.0"
 
             for network in bgp_cfg.networks:
-                found = SwitchVtyshUtils.verify_bgp_route(switch, network,
-                                                          next_hop)
+                found = SwitchVtyshUtils.wait_for_route(switch, network,
+                                                        next_hop)
 
                 assert found, "Could not find route (%s -> %s) on %s" % \
                               (network, next_hop, switch.name)
@@ -345,70 +309,53 @@ class bgpTest (HalonTest):
             i += 1
 
     def verify_routes_received(self):
-        info("Verifying routes received...\n")
+        info("### Verifying routes received... ###\n")
 
-        i = 0
-        for bgp_cfg in self.bgpConfigArr:
-            switch = self.net.switches[i]
-            neighbor = bgp_cfg.neighbors[0]
-            next_hop = neighbor.routerid
-
-            routesReceived = 0
-            for network in neighbor.networks:
-                found = SwitchVtyshUtils.verify_bgp_route(switch, network,
-                                                          next_hop)
-
-                if found:
-                    routesReceived += 1
-
-            info(SwitchVtyshUtils.vtysh_cmd(switch, "sh ip bgp"))
-
-            # For bgp 1, should have received 1 route. For bgp 2, should receive
-            # both routes.
-            successful = False
-            if i == 0:
-                if routesReceived == 1:
-                    successful = True
-            else:
-                if routesReceived == 2:
-                    successful = True
-
-            assert successful, \
-                   "Incorrect number of routes (%d) on switch %s" \
-                    % (routesReceived, switch.name)
-
-            i += 1
-
-    def verify_metric_value(self):
-        info("Verifying set metrics...\n")
-
-        # Verify metric for the expected route for BGP1
         switch = self.net.switches[0]
+        neighbor = self.bgpConfig1.neighbors[0]
+        next_hop = neighbor.routerid
 
-        # Network 1 of BGP2 is the permitted route
-        network = self.bgpConfig2.networks[0]
-        next_hop = self.bgpConfig2.routerid
-        routemap = self.bgpConfig1.routeMaps[0]
-        metric = routemap[4]
+        # First network of BGP2 should be permitted
+        network = neighbor.networks[0]
 
-        matching = False
+        info("### Verifying route for switch %s ###\n" % switch.name)
+        info("### Network: %s, Next-hop: %s - Should exist... ###\n" %
+             (network, next_hop))
 
-        routes = SwitchVtyshUtils.vtysh_cmd(switch, "sh ip bgp").split(VTYSH_CR)
+        found = SwitchVtyshUtils.wait_for_route(switch, network, next_hop)
 
-        for rte in routes:
-            if rte.find(network) >= 0:
-                if rte.find(next_hop) >= 0:
-                    info("Found related route with config:\n")
-                    info("%s\n" % rte)
+        assert found, "Route %s -> %s exists on %s" \
+                       % (network, next_hop, switch.name)
 
-                    if rte.find(metric) >= 0:
-                        matching = True
-                        break;
+        # Second network of BGP2 should NOT be permitted
+        network = neighbor.networks[1]
+        verify_route_exists = False
 
-        assert matching, "Metric not matching for %s" % switch.name
+        info("### Verifying routes for switch %s ###\n" % switch.name)
+        info("### Network: %s, Next-hop: %s - Should NOT exist... ###\n" %
+             (network, next_hop))
 
-@metricmetricmetricmetricmetricpytest.mark.skipif(True, reason="Does not cleanup dockers fully")
-class Test_bgp:
+        found = SwitchVtyshUtils.wait_for_route(switch, network, next_hop,
+                                                verify_route_exists)
+
+        assert not found, "Route %s -> %s does not exist on %s" \
+                           % (network, next_hop, switch.name)
+
+    def verify_routemap_description(self):
+        info("\n########## Verifying route-map description ##########\n")
+
+        switch = self.net.switches[0]
+        route_map_dump = switch.cmd("ovsdb-client dump")
+
+        found = False
+        if route_map_dump.find(RM_DESCRIPTION) >= 0:
+            found = True
+
+        assert found, "Route-map description not found."
+
+        info("### Matching description found ###\n")
+
+class Test_bgpd_routemap:
     def setup (self):
         pass
 
@@ -416,10 +363,10 @@ class Test_bgp:
         pass
 
     def setup_class (cls):
-        Test_bgp.test_var = bgpTest()
+        Test_bgpd_routemap.test_var = bgpTest()
 
     def teardown_class (cls):
-        Test_bgp.test_var.net.stop()
+        Test_bgpd_routemap.test_var.net.stop()
 
     def setup_method (self, method):
         pass
@@ -435,6 +382,6 @@ class Test_bgp:
         self.test_var.configure_switch_ips()
         self.test_var.verify_bgp_running()
         self.test_var.apply_bgp_config()
-        # self.test_var.verify_bgp_configs()
+        self.test_var.verify_bgp_configs()
         self.test_var.verify_bgp_routes()
-        self.test_var.verify_metric_value()
+        self.test_var.verify_routemap_description()

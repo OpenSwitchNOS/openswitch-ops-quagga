@@ -43,10 +43,10 @@
 #include "zebra/redistribute.h"
 #include "zebra/debug.h"
 #include "zebra/zebra_fpm.h"
-#include "coverage.h"
-#include "openvswitch/vlog.h"
 
 #ifdef ENABLE_OVSDB
+#include "coverage.h"
+#include "openvswitch/vlog.h"
 #include "zebra/zebra_ovsdb_if.h"
 #endif
 
@@ -1473,6 +1473,11 @@ rib_process (struct route_node *rn)
    * rib    --- NULL
    */
 
+#ifdef ENABLE_OVSDB
+  /* Create an IDL transaction to commit any route changes into DB */
+  zebra_create_rib_update_txn();
+#endif
+
   /* Same RIB entry is selected. Update FIB and finish. */
   if (select && select == fib)
     {
@@ -1608,6 +1613,11 @@ end:
    * Check if the dest can be deleted now.
    */
   rib_gc_dest (rn);
+
+#ifdef ENABLE_OVSDB
+  zebra_commit_rib_update_txn();
+#endif
+
 }
 
 /* Take a list of route_node structs and return 1, if there was a record

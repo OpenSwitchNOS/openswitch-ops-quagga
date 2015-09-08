@@ -68,4 +68,8 @@ struct zebra_route_del_data {
     struct nexthop *nexthop;
 };
 
+extern unsigned char rib_kernel_updates;
+extern int zebra_create_rib_update_txn(void);
+extern int zebra_commit_rib_update_txn(void);
+
 #endif /* ZEBRA_OVSDB_IF_H */

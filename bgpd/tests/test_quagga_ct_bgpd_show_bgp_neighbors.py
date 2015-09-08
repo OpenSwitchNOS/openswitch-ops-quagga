@@ -59,7 +59,7 @@ class myTopo(Topo):
     def build (self, hsts=0, sws=1, **_opts):
         self.hsts = hsts
         self.sws = sws
-        self.switch = self.addSwitch("1")
+        self.switch = self.addSwitch("s1")
 
 class showBgpNeighborTest (HalonTest):
 
@@ -83,31 +83,42 @@ class showBgpNeighborTest (HalonTest):
         return False
 
     def add_bgp_neighbor_to_switch (self):
-        info("\nsetting up switch with very basic BGP configuration\n")
+        info("\n########## Setting up switch with very basic "
+             "BGP configuration ##########\n")
+
         SwitchVtyshUtils.vtysh_cfg_cmd(self.switch, BGP_NEIGHBOR_CONFIG)
-        info("switch configuration complete\n")
+
+        info("### Switch configuration complete ###\n")
 
     def verify_bgp_neighbor_exists (self):
-        info("verifying that the configured bgp neighbor DOES exist\n")
-        show_output = SwitchVtyshUtils.vtysh_cmd(self.switch, SHOW_BGP_NEIGHBORS)
+        info("\n########## Verifying that the configured bgp "
+             "neighbor DOES exist ##########\n")
+
+        show_output = SwitchVtyshUtils.vtysh_cmd(self.switch,
+                                                 SHOW_BGP_NEIGHBORS)
         assert (self.bgp_neighbor_exists(show_output)), \
             "TEST FAILED: bgp neighbor does NOT exist but it should"
-        info("1st test passed\n")
+
+        info("### Verified neighbor does exist ###\n")
 
     def delete_bgp_neighbor_from_switch (self):
-        info("deleting bgp neighbor from the switch\n")
+        info("### Deleting bgp neighbor from the switch ###\n")
         SwitchVtyshUtils.vtysh_cfg_cmd(self.switch, NO_BGP_NEIGHBOR_CONFIG)
 
     def verify_bgp_neighbor_deleted (self):
-        info("verifying that the previously configured bgp neighbor does NOT exist\n")
-        show_output = SwitchVtyshUtils.vtysh_cmd(self.switch, SHOW_BGP_NEIGHBORS)
+        info("\n########## Verifying that the previously configured bgp "
+             "neighbor does NOT exist ##########\n")
+
+        self.delete_bgp_neighbor_from_switch()
+
+        show_output = SwitchVtyshUtils.vtysh_cmd(self.switch,
+                                                 SHOW_BGP_NEIGHBORS)
         assert (not self.bgp_neighbor_exists(show_output)), \
             "TEST FAILED: bgp neighbor DOES exist but it should NOT"
-        info("2nd test passed\n")
-        info("all tests successfully passed\n")
 
-@pytest.mark.skipif(True, reason="Dockers not fully cleaning up")
-class Test_show_bgp_neighbor:
+        info("### Verified neighbor does not exist ###\n")
+
+class Test_bgpd_show_bgp_neighbor:
 
     def setup (self):
         pass
@@ -116,10 +127,10 @@ class Test_show_bgp_neighbor:
         pass
 
     def setup_class (cls):
-        Test_show_bgp_neighbor.test_var = showBgpNeighborTest()
+        Test_bgpd_show_bgp_neighbor.test_var = showBgpNeighborTest()
 
     def teardown_class (cls):
-        Test_show_bgp_neighbor.test_var.net.stop()
+        Test_bgpd_show_bgp_neighbor.test_var.net.stop()
 
     def setup_method (self, method):
         pass
@@ -130,9 +141,7 @@ class Test_show_bgp_neighbor:
     def __del__ (self):
         del self.test_var
 
-    # the actual test function
     def test_show_bgp_neighbor (self):
         self.test_var.add_bgp_neighbor_to_switch()
         self.test_var.verify_bgp_neighbor_exists()
-        self.test_var.delete_bgp_neighbor_from_switch()
         self.test_var.verify_bgp_neighbor_deleted()

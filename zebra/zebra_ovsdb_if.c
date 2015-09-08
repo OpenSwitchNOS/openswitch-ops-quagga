@@ -72,6 +72,8 @@ static unsigned int idl_seqno;
 static char *appctl_path = NULL;
 static struct unixctl_server *appctl;
 static int system_configured = false;
+static struct ovsdb_idl_txn *zebra_txn = NULL;
+bool zebra_txn_updates = false;
 
 boolean exiting = false;
 /* Hash for ovsdb route.*/
@@ -184,7 +186,7 @@ usage(void)
     exit(EXIT_SUCCESS);
 }
 
-/* HALON_TODO: Need to merge this parse function with the main parse function
+/* OPS_TODO: Need to merge this parse function with the main parse function
  * in zebra to avoid issues.
  */
 static char *
@@ -350,7 +352,6 @@ bool is_rib_nh_rows_deleted(const struct ovsrec_route *route)
     return 0;
 }
 
-#if 0 /* For debugging */
 static void
 print_key(struct zebra_route_key *rkey)
 {
@@ -361,7 +362,6 @@ print_key(struct zebra_route_key *rkey)
         VLOG_DBG("ifname=0x%s", rkey->ifname);
     }
 }
-#endif
 
 /* Hash route key */
 unsigned int
@@ -470,7 +470,9 @@ zebra_route_hash_add(const struct ovsrec_route *route)
                         nexthop->ip_address ? nexthop->ip_address : "NONE",
                         tmp_key.ifname[0] ? tmp_key.ifname : "NONE");
 
-            //print_key(&tmp_key); For debugging.
+            if (VLOG_IS_DBG_ENABLED()) {
+                print_key(&tmp_key);
+            }
             add = hash_get(zebra_route_hash, &tmp_key,
                            zebra_route_hash_alloc);
             assert(add);
@@ -657,7 +659,9 @@ zebra_find_ovsdb_deleted_routes(afi_t afi, safi_t safi, u_int32_t id)
                         strncpy(rkey.ifname, nexthop->ifname, IF_NAMESIZE);
                 }
 
-                //print_key(&rkey); For debugging.
+                if (VLOG_IS_DBG_ENABLED()) {
+                    print_key(&rkey);
+                }
 
                 if (!hash_get(zebra_route_hash, &rkey, NULL)){
                     zebra_route_list_add_data(rn, rib, nexthop);
@@ -766,9 +770,12 @@ zebra_handle_static_route_change (const struct ovsrec_route *route)
         return;
     }
 
-    VLOG_DBG("address_family %s", route->address_family);
-    if (strcmp(route->address_family, OVSREC_ROUTE_ADDRESS_FAMILY_IPV6) == 0) {
-        ipv6_addr_type = true;
+    if (route->address_family) {
+       VLOG_DBG("address_family %s", route->address_family);
+       if (strcmp(route->address_family,
+                  OVSREC_ROUTE_ADDRESS_FAMILY_IPV6) == 0) {
+           ipv6_addr_type = true;
+       }
     }
 
     if (nexthop->ports) {
@@ -796,14 +803,18 @@ zebra_handle_static_route_change (const struct ovsrec_route *route)
         return;
     }
 
-    VLOG_DBG("Checking sub-address-family=%s", route->sub_address_family);
-    if (strcmp(route->sub_address_family,
-               OVSREC_ROUTE_SUB_ADDRESS_FAMILY_UNICAST) == 0) {
-        safi = SAFI_UNICAST;
+    if (route->sub_address_family) {
+        VLOG_DBG("Checking sub-address-family=%s", route->sub_address_family);
+        if (strcmp(route->sub_address_family,
+                   OVSREC_ROUTE_SUB_ADDRESS_FAMILY_UNICAST) == 0) {
+            safi = SAFI_UNICAST;
+        } else {
+            VLOG_DBG("BAD! Not valid sub-address-family=%s",
+                      route->sub_address_family);
+            return;
+        }
     } else {
-        VLOG_DBG("BAD! Not valid sub-address-family=%s",
-                  route->sub_address_family);
-        return;
+        safi = SAFI_UNICAST;
     }
 
     if (route->distance != NULL) {
@@ -1043,7 +1054,14 @@ zebra_reconfigure(struct ovsdb_idl *idl)
         return;
     }
 
+    /* Create txn for any IDL updates */
+    zebra_create_txn();
+
+    /* Apply all ovsdb notifications */
     zebra_apply_route_changes();
+
+    /* Submit any modifications in IDl to DB */
+    zebra_finish_txn();
 
     /* update the seq. number */
     idl_seqno = new_idl_seqno;
@@ -1191,14 +1209,12 @@ static int
 zebra_ovs_update_selected_route (struct ovsrec_route *ovs_route,
                                  bool *selected)
 {
-    enum ovsdb_idl_txn_status status;
-    struct ovsdb_idl_txn *txn = NULL;
-
     if (ovs_route) {
         /*
          * Found the route entry. Update the selected column.
          * ECMP: Update only if it is different.
          */
+        VLOG_DBG("Updating selected flag for route %s", ovs_route->prefix);
         if( (ovs_route->selected != NULL) &&
             (ovs_route->selected[0] == *selected) )
         {
@@ -1206,30 +1222,14 @@ zebra_ovs_update_selected_route (struct ovsrec_route *ovs_route,
             return 0;
         }
 
-        txn = ovsdb_idl_txn_create(idl);
-        if (!txn) {
-            VLOG_ERR("%s: Transaction creation failed" , __func__);
-            return -1;
-        }
         /*
-         * Update the selected bit
+         * Update the selected bit, and mark it to commit into DB.
          */
         ovsrec_route_set_selected(ovs_route, selected, 1);
+        zebra_txn_updates = true;
+        VLOG_DBG("Route update successful");
 
-        status = ovsdb_idl_txn_commit(txn);
-        ovsdb_idl_txn_destroy(txn);
-        if (!((status == TXN_SUCCESS) || (status == TXN_UNCHANGED)
-              || (status == TXN_INCOMPLETE))) {
-
-            /*
-             * HALON_TODO: In case f commit failure, retry.
-             */
-            VLOG_ERR("Route update failed. The transaction error is %s\n",
-                     ovsdb_idl_txn_status_to_string(status));
-            return -1;
-        }
     }
-    VLOG_DBG("Route update successful");
     return 0;
 }
 
@@ -1284,7 +1284,7 @@ zebra_update_selected_route_to_db (struct route_node *rn, struct rib *route,
 
                 OVSREC_ROUTE_FOR_EACH(ovs_route, idl) {
                     /*
-                     * HALON_TODO: Need to add support to check vrf
+                     * OPS_TODO: Need to add support to check vrf
                      */
                     VLOG_DBG("DB Entry: Prefix %s family %s from %s priv %p",
                              ovs_route->prefix, ovs_route->address_family,
@@ -1313,7 +1313,7 @@ zebra_update_selected_route_to_db (struct route_node *rn, struct rib *route,
 
                 OVSREC_ROUTE_FOR_EACH(ovs_route, idl) {
                     /*
-                     * HALON_TODO: Need to add support to check vrf
+                     * OPS_TODO: Need to add support to check vrf
                      */
                     VLOG_DBG("DB Entry: Prefix %s family %s from %s priv %p",
                              ovs_route->prefix, ovs_route->address_family,
@@ -1452,4 +1452,58 @@ zebra_add_route(bool is_ipv6, struct prefix *p, int type, safi_t safi,
     }
 
     return rc;
+}
+
+/*
+** Function to create transaction for submitting rib updates to DB.
+** Create only if not created already by main thread.
+*/
+int
+zebra_create_txn(void)
+{
+    if (zebra_txn == NULL) {
+        zebra_txn = ovsdb_idl_txn_create(idl);
+        if (!zebra_txn) {
+            VLOG_ERR("%s: Transaction creation failed" , __func__);
+            return 1;
+        }
+    }
+
+    /* Else txn already there, continue the updates and commit */
+    return 0;
+}
+
+/*
+** Function to commit the idl transaction if there are any updates to be
+** submitted to DB.
+*/
+int
+zebra_finish_txn(void)
+{
+    enum ovsdb_idl_txn_status status;
+
+    /* Commit txn if any updates to be submitted to DB */
+    if (zebra_txn_updates) {
+        if (zebra_txn) {
+            status = ovsdb_idl_txn_commit(zebra_txn);
+            if (!((status == TXN_SUCCESS) || (status == TXN_UNCHANGED)
+                      || (status == TXN_INCOMPLETE))) {
+                /*
+                 * OPS_TODO: In case of commit failure, retry.
+                 */
+                VLOG_ERR("Route update failed. The transaction error is %s",
+                         ovsdb_idl_txn_status_to_string(status));
+            } else {
+                zebra_txn_updates = false;
+            }
+        } else {
+            VLOG_ERR("Commiting NULL txn");
+        }
+    }
+
+    /* Finally in any case destory */
+    if (zebra_txn) {
+        ovsdb_idl_txn_destroy(zebra_txn);
+    }
+    zebra_txn = NULL;
 }

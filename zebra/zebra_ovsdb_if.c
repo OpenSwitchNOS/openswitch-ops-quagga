@@ -97,6 +97,112 @@ rib_add_ipv6_multipath (struct prefix_ipv6 *p, struct rib *rib, safi_t safi);
 #define OVSDB_ROUTE_IGNORE  3
 
 
+/*
+ ********************************************************************
+ * Start of the set of debugging functions for OVSDB zebra interface.
+ ********************************************************************
+ */
+
+/*
+ * This function dumps the details of the next-hops for a given route row in
+ * OVSDB route table.
+ */
+static void
+zebra_dump_ovsdb_nexthop_entry (const struct ovsrec_nexthop *nh_row)
+{
+    int port_index;
+
+    if (!nh_row) {
+        VLOG_DBG("    The next-hop entry is NULL\n");
+        return;
+    }
+
+    /*
+     * Printing next-hop row parameters.
+     */
+    VLOG_DBG("    Address = %s %s%s\n", nh_row->ip_address,
+             OVSREC_IDL_IS_ROW_INSERTED(nh_row, idl_seqno) ? "(I)":"",
+             OVSREC_IDL_IS_ROW_MODIFIED(nh_row, idl_seqno) ? "(M)":"");
+
+    /*
+     * Walk the port list for the next-hop and print the details of
+     * next-hop.
+     */
+    for (port_index = 0; port_index < nh_row->n_ports; ++port_index) {
+        VLOG_DBG("        The next-hop port is %s\n",
+                 (nh_row->ports[port_index]->name) ?
+                  nh_row->ports[port_index]->name :
+                  "NULL");
+    }
+}
+
+/*
+ * This function dumps the details of a route row in OVSDB route table.
+ */
+static void
+zebra_dump_ovsdb_route_entry (const struct ovsrec_route *route_row)
+{
+    int next_hop_index;
+
+    if (!route_row) {
+        VLOG_DBG("The route entry is NULL\n");
+        return;
+    }
+
+    /*
+     * Printing the route row details.
+     */
+    VLOG_DBG("Route = %s AF = %s protocol = %s vrf = %s\n %s%s",
+             route_row->prefix ? route_row->prefix : "NULL",
+             route_row->address_family ? route_row->address_family : "NULL",
+             route_row->from ? route_row->from : "NULL",
+             route_row->vrf ? (route_row->vrf->name ? route_row->vrf->name :
+                               "NULL") : "NULL",
+             OVSREC_IDL_IS_ROW_INSERTED(route_row, idl_seqno) ? "(I)":"",
+             OVSREC_IDL_IS_ROW_MODIFIED(route_row, idl_seqno) ? "(M)":"");
+
+    /*
+     * Walk the array of nxt-hops and print the route's next-hop details.
+     */
+    for (next_hop_index = 0; next_hop_index < route_row->n_nexthops;
+         ++next_hop_index) {
+         zebra_dump_ovsdb_nexthop_entry(route_row->nexthops[next_hop_index]);
+    }
+}
+
+/*
+ * This function causes the dumps of the entire OVSDB route table.
+ */
+static void
+zebra_dump_ovsdb_route_table ()
+{
+    const struct ovsrec_route *route_row = NULL;
+    int count = 0;
+
+    VLOG_DBG("Printing the OVSDB route table snapshot\n");
+
+    /*
+     * Walk all the entries in the OVSDB route table and print all the
+     * route entries.
+     */
+    OVSREC_ROUTE_FOR_EACH(route_row, idl)
+    {
+        if (route_row) {
+            ++count;
+            zebra_dump_ovsdb_route_entry(route_row);
+        }
+    }
+
+    VLOG_DBG("Total number of route entries in OVSDB route table are %d\n",
+             count);
+}
+
+/*
+ ******************************************************************
+ * End of the set of debugging functions for OVSDB zebra interface.
+ ******************************************************************
+ */
+
 /* ovs appctl dump function for this daemon
  * This is useful for debugging
  */
@@ -448,6 +554,15 @@ zebra_route_hash_add(const struct ovsrec_route *route)
     tmp_key.prefix_len = p.prefixlen;
 
     for (i = 0; i < route->n_nexthops; i++) {
+
+        /*
+         * Clear the next-hop specific entries in the 'zebra_route_key;
+         * structure since we are populating the next-hop interface address
+         * and next-hop interface conditionally.
+         */
+        memset(&(tmp_key.nexthop), 0, sizeof(struct ipv4v6_addr));
+        memset(&(tmp_key.ifname), 0, sizeof(tmp_key.ifname));
+
         nexthop = route->nexthops[i];
         if (nexthop) {
             if (nexthop->ip_address) {
@@ -465,10 +580,10 @@ zebra_route_hash_add(const struct ovsrec_route *route)
                         IF_NAMESIZE);
             }
 
-            VLOG_DBG ("Hash insert prefix %s nexthop %s, interface %s",
-                        route->prefix,
-                        nexthop->ip_address ? nexthop->ip_address : "NONE",
-                        tmp_key.ifname[0] ? tmp_key.ifname : "NONE");
+            VLOG_DBG("Hash insert prefix %s nexthop %s, interface %s",
+                     route->prefix,
+                     nexthop->ip_address ? nexthop->ip_address : "NONE",
+                     tmp_key.ifname[0] ? tmp_key.ifname : "NONE");
 
             //print_key(&tmp_key); For debugging.
             add = hash_get(zebra_route_hash, &tmp_key,
@@ -662,10 +777,10 @@ zebra_find_ovsdb_deleted_routes(afi_t afi, safi_t safi, u_int32_t id)
                 if (!hash_get(zebra_route_hash, &rkey, NULL)){
                     zebra_route_list_add_data(rn, rib, nexthop);
                     prefix2str(&rn->p, prefix_str, sizeof(prefix_str));
-                    VLOG_DBG ("Delete route, prefix %s, nexthop %s, interface %s",
-                               prefix_str[0] ? prefix_str : "NONE",
-                               nexthop_str[0] ? nexthop_str : "NONE",
-                               nexthop->ifname ? nexthop->ifname : "NONE");
+                    VLOG_DBG("Delete route, prefix %s, nexthop %s, interface %s",
+                             prefix_str[0] ? prefix_str : "NONE",
+                             nexthop_str[0] ? nexthop_str : "NONE",
+                             nexthop->ifname ? nexthop->ifname : "NONE");
                 }
 
             }
@@ -746,56 +861,38 @@ zebra_handle_static_route_change (const struct ovsrec_route *route)
     u_char type = 0;
     int ipv6_addr_type = 0;
     int ret;
+    int next_hop_index;
 
     VLOG_DBG("Rib prefix_str=%s", route->prefix);
-    /* Convert the prefix/len */
+
+    /*
+     * Extract all the next-hop independent route parameters from the
+     * OSVDB 'route' pointer.
+     *
+     * Convert the prefix/len
+     */
     ret = str2prefix (route->prefix, &p);
     if (ret <= 0) {
         VLOG_ERR("Malformed Dest address=%s", route->prefix);
         return;
     }
 
-    /* Apply mask for given prefix. */
+    /*
+     * Apply mask for given prefix.
+     */
     apply_mask(&p);
 
-    /* Get Nexthop ip/interface */
-    VLOG_DBG("Read nexthop %d", route->n_nexthops);
-    nexthop = route->nexthops[0];
-    if (nexthop == NULL) {
-        VLOG_DBG ("Null next hop");
-        return;
-    }
-
+    /*
+     * Extract the route's address-family
+     */
     VLOG_DBG("address_family %s", route->address_family);
     if (strcmp(route->address_family, OVSREC_ROUTE_ADDRESS_FAMILY_IPV6) == 0) {
         ipv6_addr_type = true;
     }
 
-    if (nexthop->ports) {
-        ifname = nexthop->ports[0]->name;
-        VLOG_DBG("Rib nexthop ifname=%s", ifname);
-        if (ipv6_addr_type) {
-            type = STATIC_IPV6_IFNAME;
-        }
-    } else if (nexthop->ip_address) {
-        if (ipv6_addr_type) {
-            ret = inet_pton (AF_INET6, nexthop->ip_address, &ipv6_gate);
-        } else {
-            ret = inet_aton(nexthop->ip_address, &gate);
-        }
-
-        if (ret == 1) {
-            type = STATIC_IPV6_GATEWAY;
-            VLOG_DBG("Rib nexthop ip=%s", nexthop->ip_address);
-        } else {
-            VLOG_ERR("BAD! Rib nexthop ip=%s", nexthop->ip_address);
-            return;
-        }
-    } else {
-        VLOG_DBG("BAD! No nexthop ip or iface");
-        return;
-    }
-
+    /*
+     * Extract the route's sub-address-family
+     */
     VLOG_DBG("Checking sub-address-family=%s", route->sub_address_family);
     if (strcmp(route->sub_address_family,
                OVSREC_ROUTE_SUB_ADDRESS_FAMILY_UNICAST) == 0) {
@@ -806,21 +903,78 @@ zebra_handle_static_route_change (const struct ovsrec_route *route)
         return;
     }
 
+    /*
+     * Get the route's administration distance.
+     */
     if (route->distance != NULL) {
         distance = route->distance[0];
     } else {
         distance = ZEBRA_STATIC_DISTANCE_DEFAULT;
     }
 
-    if (ipv6_addr_type) {
+    /*
+     * Walk all the next-hops of the route and check if any of the next-hops
+     * changed or got added.
+     */
+    VLOG_DBG("The total number of next-hops are: %d", route->n_nexthops);
+
+    for (next_hop_index = 0; next_hop_index < route->n_nexthops;
+         ++next_hop_index) {
+
+        VLOG_DBG("Walking next-hop number %d\n", next_hop_index);
+
+        /* Get Nexthop ip/interface */
+        nexthop = route->nexthops[next_hop_index];
+
+        if (nexthop == NULL) {
+            VLOG_DBG("Null next hop");
+            continue;
+        }
+
+        /*
+         * If the next-hop in the route has changed or a new
+         * next-hop has been added, then only look to program the
+         * static next-hop in the kernel.
+         */
+        if (OVSREC_IDL_IS_ROW_INSERTED(nexthop, idl_seqno) ||
+            OVSREC_IDL_IS_ROW_MODIFIED(nexthop, idl_seqno)) {
+
+            if (nexthop->ports) {
+                ifname = nexthop->ports[0]->name;
+                VLOG_DBG("Rib nexthop ifname=%s", ifname);
+                if (ipv6_addr_type) {
+                    type = STATIC_IPV6_IFNAME;
+                }
+            } else if (nexthop->ip_address) {
+                if (ipv6_addr_type) {
+                    ret = inet_pton (AF_INET6, nexthop->ip_address, &ipv6_gate);
+                } else {
+                    ret = inet_aton(nexthop->ip_address, &gate);
+                }
+
+                if (ret == 1) {
+                    type = STATIC_IPV6_GATEWAY;
+                    VLOG_DBG("Rib nexthop ip=%s", nexthop->ip_address);
+                } else {
+                    VLOG_DBG("BAD! Rib nexthop ip=%s", nexthop->ip_address);
+                    continue;
+                }
+            } else {
+                VLOG_DBG("BAD! No nexthop ip or iface");
+                continue;
+            }
+
+            if (ipv6_addr_type) {
 #ifdef HAVE_IPV6
-       static_add_ipv6 (&p, type, &ipv6_gate, ifname, flag, distance, 0, route);
+                static_add_ipv6(&p, type, &ipv6_gate, ifname, flag, distance, 0,
+                                route);
 #endif
-    } else {
-       static_add_ipv4_safi (safi, &p, ifname ? NULL : &gate, ifname,
-                             flag, distance, 0, route);
+            } else {
+                static_add_ipv4_safi(safi, &p, ifname ? NULL : &gate, ifname,
+                                     flag, distance, 0, route);
+            }
+        }
     }
-    return;
 }
 
 /*
@@ -989,6 +1143,13 @@ zebra_apply_route_changes (void)
         return;
     }
 
+    /*
+     * If debug logging is enabled, then dump the OVSDB route table.
+     */
+    if (VLOG_IS_DBG_ENABLED()) {
+        zebra_dump_ovsdb_route_table();
+    }
+
     if ( (!OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED(route_first, idl_seqno)) &&
        (!OVSREC_IDL_ANY_TABLE_ROWS_DELETED(route_first, idl_seqno))  &&
        (!OVSREC_IDL_ANY_TABLE_ROWS_INSERTED(route_first, idl_seqno)) )
@@ -1007,7 +1168,7 @@ zebra_apply_route_changes (void)
             nh_row = route_row->nexthops[0];
             if (nh_row == NULL)
             {
-                VLOG_DBG ("Null next hop");
+                VLOG_DBG("Null next hop");
                 continue;
             }
 
@@ -1015,7 +1176,8 @@ zebra_apply_route_changes (void)
                  (OVSREC_IDL_IS_ROW_MODIFIED(route_row, idl_seqno)) ||
                  (is_route_nh_rows_modified(route_row)) )
             {
-                VLOG_DBG("Row modification or inserts in ROUTE table");
+                VLOG_DBG("Row modification or inserts in ROUTE table "
+                         "for route %s\n", route_row->prefix);
                 zebra_handle_route_change(route_row);
             }
         }
@@ -1264,9 +1426,9 @@ zebra_update_selected_route_to_db (struct route_node *rn, struct rib *route,
         ovs_route = (struct ovsrec_route *)(route->ovsdb_route_row_ptr);
 
         VLOG_DBG("Cached OVSDB Route Entry: Prefix %s family %s "
-                 "from %s priv %p", ovs_route->prefix,
+                 "from %s priv %p selected = %s", ovs_route->prefix,
                  ovs_route->address_family, ovs_route->from,
-                 ovs_route->protocol_private);
+                 ovs_route->protocol_private, selected ? "true":"false");
     } else {
 
         p = &rn->p;
@@ -1352,7 +1514,10 @@ zebra_update_selected_route_to_db (struct route_node *rn, struct rib *route,
         if (ovs_route->protocol_private == NULL ||
             ovs_route->protocol_private[0] == false) {
 
-            VLOG_DBG("Updating the selected flag for the non-private routes");
+            VLOG_DBG("Updating the selected flag for the non-private routes. "
+                     "Setting selected %s for prefix %s",
+                     selected ? "true":"false", ovs_route->prefix);
+
             zebra_ovs_update_selected_route(ovs_route, &selected);
         }
     }

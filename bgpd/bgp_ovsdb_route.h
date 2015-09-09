@@ -63,6 +63,8 @@ enum
   PREFIX_LIST_MAX,
 } prefix_list;
 
+extern struct ovsdb_idl *idl;
+
 extern int policy_ovsdb_prefix_list_get (struct ovsdb_idl *idl);
 extern int policy_ovsdb_rt_map(struct ovsdb_idl *idl);
 

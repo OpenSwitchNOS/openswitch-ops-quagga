@@ -196,10 +196,24 @@ extern void route_map_delete_hook (void (*func) (const char *));
 extern void route_map_event_hook (void (*func) (route_map_event_t, const char *));
 
 #ifdef ENABLE_OVSDB
-struct route_map_index *
+/* Making route map list. */
+struct route_map_list
+{
+  struct route_map *head;
+  struct route_map *tail;
+
+  void (*add_hook) (const char *);
+  void (*delete_hook) (const char *);
+  void (*event_hook) (route_map_event_t, const char *);
+};
+
+static struct route_map_list route_map_master = { NULL, NULL, NULL, NULL };
+
+extern struct route_map_index *
 route_map_index_get (struct route_map *map, enum route_map_type type,
                      int pref);
-struct route_map * route_map_get (const char *name);
+extern struct route_map * route_map_get (const char *name);
+extern void route_map_index_delete (struct route_map_index *index, int notify);
 #endif
 
 #endif /* _ZEBRA_ROUTEMAP_H */

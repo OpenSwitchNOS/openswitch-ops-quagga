@@ -27,57 +27,53 @@ from halonutils.halonutil import *
 from halonvsi.quagga import *
 from vtyshutils import *
 from bgpconfig import *
-
-# Disabled since this test is a encapsulated by
-# test_bgpd_ct_routemap_neighbor_peergroup.py test.
-
 #
-# This case primarily tests the peer group. The test encapsulates the following
-# commands:
-#   * router bgp <asn>
-#   * bgp router-id <router-id>
-#   * network <network>
-#   * neighbor <peer-group-name> peer-group
-#   * neighbor <peer> remote-as <asn>
-#   * neighbor <peer> peer-group <peer-group-name>
-# Topology: Two switches are running BGP. Peer group configuration is used to
-#           configure the neighbor from BGP1.
+# This case tests if neighbor password CLI is working. It checks if MD5 authentication
+# is configured with the same password on both BGP peers. If the password is not same the
+# connection will not be made.
+# It also tests no neighbor password which does not enable MD5 authentication between
+# BGP peers
+#
+# The following command is tested:
+#   * neighbor <peer> password <passwd>
+#   * no neighbor <peer> password
 #
 # S1 [interface 1]<--->[interface 1] S2
 #
 BGP1_ASN            = "1"
 BGP1_ROUTER_ID      = "9.0.0.1"
 BGP1_NETWORK        = "11.0.0.0"
+BGP1_PASSWORD       = "1234"
+BGP1_WRONG_PASSWORD = "12"
 
 BGP2_ASN            = "2"
 BGP2_ROUTER_ID      = "9.0.0.2"
 BGP2_NETWORK        = "12.0.0.0"
+BGP2_PASSWORD       = "1234"
 
 BGP1_NEIGHBOR       = BGP2_ROUTER_ID
 BGP1_NEIGHBOR_ASN   = BGP2_ASN
+BGP1_NEIGHBOR_PASSWD= BGP1_PASSWORD
 
 BGP2_NEIGHBOR       = BGP1_ROUTER_ID
 BGP2_NEIGHBOR_ASN   = BGP1_ASN
+BGP2_NEIGHBOR_PASSWD= BGP2_PASSWORD
 
 BGP_NETWORK_PL      = "8"
 BGP_NETWORK_MASK    = "255.0.0.0"
-
 BGP_ROUTER_IDS      = [BGP1_ROUTER_ID, BGP2_ROUTER_ID]
-BGP_PEER_GROUP      = "extern-peer-group"
 
 BGP1_CONFIG = ["router bgp %s" % BGP1_ASN,
                "bgp router-id %s" % BGP1_ROUTER_ID,
                "network %s/%s" % (BGP1_NETWORK, BGP_NETWORK_PL),
-               "neighbor %s peer-group" % BGP_PEER_GROUP,
-               "neighbor %s remote-as %s" % (BGP_PEER_GROUP, BGP1_NEIGHBOR_ASN),
-               "neighbor %s peer-group %s" % (BGP1_NEIGHBOR, BGP_PEER_GROUP)]
+               "neighbor %s remote-as %s" % (BGP1_NEIGHBOR, BGP1_NEIGHBOR_ASN),
+               "neighbor %s password %s" % (BGP1_NEIGHBOR, BGP1_NEIGHBOR_PASSWD)]
 
 BGP2_CONFIG = ["router bgp %s" % BGP2_ASN,
                "bgp router-id %s" % BGP2_ROUTER_ID,
                "network %s/%s" % (BGP2_NETWORK, BGP_NETWORK_PL),
-               "neighbor %s peer-group" % BGP_PEER_GROUP,
-               "neighbor %s remote-as %s" % (BGP_PEER_GROUP, BGP2_NEIGHBOR_ASN),
-               "neighbor %s peer-group %s" % (BGP2_NEIGHBOR, BGP_PEER_GROUP)]
+               "neighbor %s remote-as %s" % (BGP2_NEIGHBOR, BGP2_NEIGHBOR_ASN),
+               "neighbor %s password %s" % (BGP2_NEIGHBOR, BGP2_NEIGHBOR_PASSWD)]
 
 BGP_CONFIGS = [BGP1_CONFIG, BGP2_CONFIG]
 
@@ -115,36 +111,23 @@ class bgpTest (HalonTest):
                                        build = True)
 
     def configure_switch_ips (self):
-        info("\nConfiguring switch IPs..")
+        info("\n########## Configuring switch IPs.. ##########\n")
 
         i = 0
         for switch in self.net.switches:
             # Configure the IPs between the switches
             if isinstance(switch, HalonSwitch):
-                switch.cmd("ovs-vsctl add-vrf-port vrf_default 1")
                 switch.cmdCLI("configure terminal")
                 switch.cmdCLI("interface 1")
+                switch.cmdCLI("no shutdown")
                 switch.cmdCLI("ip address %s/%s" % (BGP_ROUTER_IDS[i], BGP_NETWORK_PL))
                 switch.cmdCLI("exit")
-                switch.cmd("/usr/bin/ovs-vsctl set interface 1 user_config:admin=up")
             else:
                 switch.setIP(ip=BGP_ROUTER_IDS[i], intf="%s-eth1" % switch.name)
             i += 1
 
-    def verify_bgp_running (self):
-        info("\nVerifying bgp processes..\n")
-
-        for switch in self.net.switches:
-            pid = switch.cmd("pgrep -f bgpd").strip()
-            assert (pid != ""), "bgpd process not running on switch %s" % \
-                                switch.name
-
-            info("bgpd process exists on switch %s\n" % switch.name)
-
-        info("\n")
-
     def configure_bgp (self):
-        info("\nConfiguring bgp on all switches..\n")
+        info("\n########## Configuring BGP on all switches.. ##########\n")
 
         i = 0
         for switch in self.net.switches:
@@ -153,62 +136,76 @@ class bgpTest (HalonTest):
 
             SwitchVtyshUtils.vtysh_cfg_cmd(switch, cfg_array)
 
-    def verify_bgp_routes (self):
-        info("\nVerifying bgp routes..\n")
+    def verify_bgp_running (self):
+        info("\n########## Verifying bgp processes.. ##########\n")
 
-        # Wait some time to let BGP converge
-        sleep(BGP_CONVERGENCE_DELAY_S)
+        for switch in self.net.switches:
+            pid = switch.cmd("pgrep -f bgpd").strip()
+            assert (pid != ""), "bgpd process not running on switch %s" % \
+                                switch.name
 
-        self.verify_bgp_route(self.net.switches[0], BGP2_NETWORK,
-                              BGP2_ROUTER_ID)
-        self.verify_bgp_route(self.net.switches[1], BGP1_NETWORK,
-                              BGP1_ROUTER_ID)
+            info("### bgpd process exists on switch %s ###\n" % switch.name)
 
-    def verify_configs (self):
-        info("\nVerifying all configurations..\n")
-        for i in range(0, len(BGP_CONFIGS)):
-            bgp_cfg = BGP_CONFIGS[i]
-            switch = self.net.switches[i]
+    def verify_neighbor_password(self):
+        info("\n########## Verifying neighbor password ##########\n")
 
-            for cfg in bgp_cfg:
-                res = SwitchVtyshUtils.verify_cfg_exist(switch, [cfg])
-                assert res, "Config \"%s\" was not correctly configured!" % cfg
+        switch = self.net.switches[1]
+        found = SwitchVtyshUtils.wait_for_route(switch, BGP1_NETWORK,
+                                                BGP1_ROUTER_ID)
 
-    def verify_bgp_route (self, switch, network, next_hop):
-        found = SwitchVtyshUtils.verify_bgp_route(switch, network, next_hop)
+        assert found, "TCP connection not established(%s -> %s) on %s" % \
+                      (BGP1_NETWORK, BGP1_ROUTER_ID, switch.name)
 
-        assert found, "Could not find route (%s -> %s) on %s" % \
-                      (network, next_hop, switch.name)
+        info("### Connection established succesfully ###\n")
 
-    def unconfigure_peer_group (self):
+    def change_password(self, password):
+        info("### Changing password to \"%s\" ###\n" % password)
         switch = self.net.switches[0]
-
-        info("Unconfiguring peer-group on %s\n" % switch.name)
-
         cfg_array = []
         cfg_array.append("router bgp %s" % BGP1_ASN)
-        cfg_array.append("no neighbor %s peer-group %s" % (BGP1_NEIGHBOR,
-                                                           BGP_PEER_GROUP))
-
+        cfg_array.append("neighbor %s password %s" % (BGP1_NEIGHBOR, password))
         SwitchVtyshUtils.vtysh_cfg_cmd(switch, cfg_array)
 
-    def verify_bgp_route_removed (self):
-        info("Verifying route removed after peer removed from peer-group..\n")
+    def change_to_no_neighbor_password(self):
+        info("### Unsetting password ###\n")
 
         switch = self.net.switches[0]
+        cfg_array = []
+        cfg_array.append("router bgp %s" % BGP1_ASN)
+        cfg_array.append("no neighbor %s password" % BGP1_NEIGHBOR)
+        SwitchVtyshUtils.vtysh_cfg_cmd(switch, cfg_array)
 
-        # Wait some time to let BGP converge
-        sleep(BGP_CONVERGENCE_DELAY_S)
+        switch = self.net.switches[1]
+        cfg_array = []
+        cfg_array.append("router bgp %s" % BGP2_ASN)
+        cfg_array.append("no neighbor %s password" % BGP2_NEIGHBOR)
+        SwitchVtyshUtils.vtysh_cfg_cmd(switch, cfg_array)
 
-        # Verify that the neighbor's route info should be removed.
-        found = SwitchVtyshUtils.verify_bgp_route(switch, BGP2_NETWORK,
-                                                  BGP1_NEIGHBOR)
+    def verify_no_connection(self):
+        info("### Verifying no connection ###\n")
 
-        assert found == False, "Route still exists! (%s -> %s) on %s" % \
-                               (network, next_hop, switch.name)
+        switch = self.net.switches[1]
+        verify_route_exists = False
 
-@pytest.mark.skipif(True, reason="Does not cleanup dockers fully")
-class Test_bgp:
+        found = SwitchVtyshUtils.wait_for_route(switch, BGP1_NETWORK,
+                                                BGP1_ROUTER_ID,
+                                                verify_route_exists)
+
+        assert found == False, "TCP connection should not be established"
+
+    def verify_incorrect_password(self):
+        info("\n########## Verifying incorrect password ##########\n")
+
+        self.change_password(BGP1_WRONG_PASSWORD)
+        self.verify_no_connection()
+
+    def verify_no_neighbor_password(self):
+        info("\n########## Verifying \"no neighbor password\" ##########\n")
+
+        self.change_to_no_neighbor_password()
+        self.verify_no_connection()
+
+class Test_bgpd_neighbor_password:
     def setup (self):
         pass
 
@@ -216,10 +213,10 @@ class Test_bgp:
         pass
 
     def setup_class (cls):
-        Test_bgp.test_var = bgpTest()
+        Test_bgpd_neighbor_password.test_var = bgpTest()
 
     def teardown_class (cls):
-        Test_bgp.test_var.net.stop()
+        Test_bgpd_neighbor_password.test_var.net.stop()
 
     def setup_method (self, method):
         pass
@@ -230,12 +227,11 @@ class Test_bgp:
     def __del__ (self):
         del self.test_var
 
-    # the actual test function
     def test_bgp_full (self):
         self.test_var.configure_switch_ips()
-        self.test_var.verify_bgp_running()
         self.test_var.configure_bgp()
-        #self.test_var.verify_configs()
-        self.test_var.verify_bgp_routes()
-        self.test_var.unconfigure_peer_group()
-        self.test_var.verify_bgp_route_removed()
+        self.test_var.verify_neighbor_password()
+        self.test_var.verify_incorrect_password()
+        self.test_var.change_password(BGP1_PASSWORD)
+        self.test_var.verify_neighbor_password()
+        self.test_var.verify_no_neighbor_password()

@@ -828,13 +828,14 @@ bgp_zebra_announce (struct prefix *p, struct bgp_info *info, struct bgp *bgp, sa
 #endif /* HAVE_IPV6 */
 
 #else
-     bgp_ovsdb_add_rib_entry(p, info, bgp, safi);
+     bgp_ovsdb_announce_rib_entry(p, info, bgp, safi);
 #endif
 }
 
 void
-bgp_zebra_withdraw (struct prefix *p, struct bgp_info *info, safi_t safi)
+bgp_zebra_withdraw (struct prefix *p, struct bgp_info *info, struct bgp *bgp, safi_t safi)
 {
+#ifndef ENABLE_OVSDB
   int flags;
   struct peer *peer;
 
@@ -947,6 +948,9 @@ bgp_zebra_withdraw (struct prefix *p, struct bgp_info *info, safi_t safi)
                        (struct prefix_ipv6 *) p, &api);
     }
 #endif /* HAVE_IPV6 */
+#else
+  bgp_ovsdb_withdraw_rib_entry(p, info, bgp, safi);
+#endif
 }
 
 /* Other routes redistribution into BGP. */

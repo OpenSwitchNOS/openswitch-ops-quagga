@@ -185,7 +185,7 @@ bgp_info_unlock (struct bgp_info *binfo)
 }
 
 void
-bgp_info_add (struct bgp_node *rn, struct bgp_info *ri)
+bgp_info_add (struct bgp_node *rn, struct bgp_info *ri, safi_t safi)
 {
   struct bgp_info *top;
 
@@ -200,12 +200,15 @@ bgp_info_add (struct bgp_node *rn, struct bgp_info *ri)
   bgp_info_lock (ri);
   bgp_lock_node (rn);
   peer_lock (ri->peer); /* bgp_info peer reference */
+#ifdef ENABLE_OVSDB
+  bgp_ovsdb_add_local_rib_entry(&rn->p, ri, ri->peer->bgp, safi);
+#endif
 }
 
 /* Do the actual removal of info from RIB, for use by bgp_process
    completion callback *only* */
 static void
-bgp_info_reap (struct bgp_node *rn, struct bgp_info *ri)
+bgp_info_reap (struct bgp_node *rn, struct bgp_info *ri, safi_t safi)
 {
   if (ri->next)
     ri->next->prev = ri->prev;
@@ -213,10 +216,14 @@ bgp_info_reap (struct bgp_node *rn, struct bgp_info *ri)
     ri->prev->next = ri->next;
   else
     rn->info = ri->next;
+#ifdef ENABLE_OVSDB
+  bgp_ovsdb_delete_local_rib_entry(&rn->p, ri, ri->peer->bgp, safi);
+#endif
 
   bgp_info_mpath_dequeue (ri);
   bgp_info_unlock (ri);
   bgp_unlock_node (rn);
+
 }
 
 void
@@ -1310,8 +1317,8 @@ struct bgp_info_pair
 
 static void
 bgp_best_selection (struct bgp *bgp, struct bgp_node *rn,
-		    struct bgp_maxpaths_cfg *mpath_cfg,
-		    struct bgp_info_pair *result)
+                    struct bgp_maxpaths_cfg *mpath_cfg,
+                    struct bgp_info_pair *result, safi_t safi)
 {
   struct bgp_info *new_select;
   struct bgp_info *old_select;
@@ -1393,7 +1400,7 @@ bgp_best_selection (struct bgp *bgp, struct bgp_node *rn,
            */
           if (CHECK_FLAG (ri->flags, BGP_INFO_REMOVED)
               && (ri != old_select))
-              bgp_info_reap (rn, ri);
+              bgp_info_reap (rn, ri, safi);
 
           continue;
         }
@@ -1512,7 +1519,7 @@ bgp_process_rsclient (struct work_queue *wq, void *data)
   struct peer *rsclient = bgp_node_table (rn)->owner;
 
   /* Best path selection. */
-  bgp_best_selection (bgp, rn, &bgp->maxpaths[afi][safi], &old_and_new);
+  bgp_best_selection (bgp, rn, &bgp->maxpaths[afi][safi], &old_and_new, safi);
   new_select = old_and_new.new;
   old_select = old_and_new.old;
 
@@ -1553,7 +1560,7 @@ bgp_process_rsclient (struct work_queue *wq, void *data)
     }
 
   if (old_select && CHECK_FLAG (old_select->flags, BGP_INFO_REMOVED))
-    bgp_info_reap (rn, old_select);
+      bgp_info_reap (rn, old_select, safi);
 
   UNSET_FLAG (rn->flags, BGP_NODE_PROCESS_SCHEDULED);
   return WQ_SUCCESS;
@@ -1575,7 +1582,7 @@ bgp_process_main (struct work_queue *wq, void *data)
   struct peer *peer;
 
   /* Best path selection. */
-  bgp_best_selection (bgp, rn, &bgp->maxpaths[afi][safi], &old_and_new);
+  bgp_best_selection (bgp, rn, &bgp->maxpaths[afi][safi], &old_and_new, safi);
   old_select = old_and_new.old;
   new_select = old_and_new.new;
 
@@ -1590,6 +1597,9 @@ bgp_process_main (struct work_queue *wq, void *data)
           }
           UNSET_FLAG (old_select->flags, BGP_INFO_MULTIPATH_CHG);
           UNSET_FLAG (rn->flags, BGP_NODE_PROCESS_SCHEDULED);
+#ifdef ENABLE_OVSDB
+          bgp_ovsdb_update_local_rib_entry_attributes (p, old_select, bgp, safi);
+#endif
           return WQ_SUCCESS;
         }
     }
@@ -1624,28 +1634,22 @@ bgp_process_main (struct work_queue *wq, void *data)
 	  if (old_select
 	      && old_select->type == ZEBRA_ROUTE_BGP
 	      && old_select->sub_type == BGP_ROUTE_NORMAL) {
-#ifndef ENABLE_OVSDB
           bgp_zebra_withdraw (p, old_select, safi);
-#else
-          bgp_ovsdb_withdraw_rib_entry (p, old_select, bgp, safi);
-#endif
       }
-#ifdef ENABLE_OVSDB
-      if (new_select
-          && new_select->type == ZEBRA_ROUTE_BGP
-          && new_select->sub_type == BGP_ROUTE_STATIC) {
-          bgp_ovsdb_update_flags (p, new_select, bgp, safi);
-      }
-#endif
 	}
     }
+#ifdef ENABLE_OVSDB
+  if (old_select) {
+      bgp_ovsdb_update_local_rib_entry_attributes (p, old_select, bgp, safi);
+  }
+  if (new_select) {
+      bgp_ovsdb_update_local_rib_entry_attributes (p, new_select, bgp, safi);
+  }
+#endif
 
   /* Reap old select bgp_info, it it has been removed */
   if (old_select && CHECK_FLAG (old_select->flags, BGP_INFO_REMOVED)) {
-    bgp_info_reap (rn, old_select);
-#ifdef ENABLE_OVSDB
-    bgp_ovsdb_delete_rib_entry(p, old_select, bgp, safi);
-#endif
+      bgp_info_reap (rn, old_select, safi);
   }
 
   UNSET_FLAG (rn->flags, BGP_NODE_PROCESS_SCHEDULED);
@@ -1833,9 +1837,6 @@ bgp_rib_remove (struct bgp_node *rn, struct bgp_info *ri, struct peer *peer,
   if (!CHECK_FLAG (ri->flags, BGP_INFO_HISTORY))
   {
     bgp_info_delete (rn, ri); /* keep historical info */
-#ifdef ENABLE_OVSDB
-    bgp_ovsdb_delete_rib_entry(&rn->p, ri, peer->bgp, safi);
-#endif
   }
 
   bgp_process (peer->bgp, rn, afi, safi);
@@ -2024,7 +2025,7 @@ bgp_update_rsclient (struct peer *rsclient, afi_t afi, safi_t safi,
   bgp_info_set_flag (rn, new, BGP_INFO_VALID);
 
   /* Register new BGP information. */
-  bgp_info_add (rn, new);
+  bgp_info_add (rn, new, safi);
 
   /* route_node_get lock */
   bgp_unlock_node (rn);
@@ -2379,11 +2380,7 @@ bgp_update_main (struct peer *peer, struct prefix *p, struct attr *attr,
   bgp_aggregate_increment (bgp, p, new, afi, safi);
 
   /* Register new BGP information. */
-  bgp_info_add (rn, new);
-#ifdef ENABLE_OVSDB
-  /* Add new route entry in OVSDB route table */
-  //TODO bgp_ovsdb_add_rib_entry(p, new, bgp, safi);
-#endif
+  bgp_info_add (rn, new, safi);
 
   /* route_node_get lock */
   bgp_unlock_node (rn);
@@ -3088,7 +3085,7 @@ bgp_cleanup_routes (void)
 	  if (CHECK_FLAG (ri->flags, BGP_INFO_SELECTED)
 	      && ri->type == ZEBRA_ROUTE_BGP
 	      && ri->sub_type == BGP_ROUTE_NORMAL)
-	    bgp_zebra_withdraw (&rn->p, ri,SAFI_UNICAST);
+          bgp_zebra_withdraw (&rn->p, ri, SAFI_UNICAST);
 
       table = bgp->rib[AFI_IP6][SAFI_UNICAST];
 
@@ -3097,7 +3094,7 @@ bgp_cleanup_routes (void)
 	  if (CHECK_FLAG (ri->flags, BGP_INFO_SELECTED)
 	      && ri->type == ZEBRA_ROUTE_BGP
 	      && ri->sub_type == BGP_ROUTE_NORMAL)
-	    bgp_zebra_withdraw (&rn->p, ri,SAFI_UNICAST);
+          bgp_zebra_withdraw (&rn->p, ri, SAFI_UNICAST);
     }
 }
 
@@ -3457,7 +3454,7 @@ bgp_static_update_rsclient (struct peer *rsclient, struct prefix *p,
   new->uptime = bgp_clock ();
 
   /* Register new BGP information. */
-  bgp_info_add (rn, new);
+  bgp_info_add (rn, new, safi);
 
   /* route_node_get lock */
   bgp_unlock_node (rn);
@@ -3579,11 +3576,7 @@ bgp_static_update_main (struct bgp *bgp, struct prefix *p,
   bgp_aggregate_increment (bgp, p, new, afi, safi);
 
   /* Register new BGP information. */
-  bgp_info_add (rn, new);
-#ifdef ENABLE_OVSDB
-  /* Add new route entry in OVSDB route table */
-  bgp_ovsdb_add_rib_entry(p, new, bgp, safi);
-#endif
+  bgp_info_add (rn, new, safi);
 
   /* route_node_get lock */
   bgp_unlock_node (rn);
@@ -3636,7 +3629,7 @@ bgp_static_update_vpnv4 (struct bgp *bgp, struct prefix *p, afi_t afi,
   bgp_aggregate_increment (bgp, p, new, afi, safi);
 
   /* Register new BGP information. */
-  bgp_info_add (rn, new);
+  bgp_info_add (rn, new, safi);
 
   /* route_node_get lock */
   bgp_unlock_node (rn);
@@ -3666,9 +3659,6 @@ bgp_static_withdraw (struct bgp *bgp, struct prefix *p, afi_t afi,
     {
       bgp_aggregate_decrement (bgp, p, ri, afi, safi);
       bgp_info_delete (rn, ri);
-#ifdef ENABLE_OVSDB
-      bgp_ovsdb_delete_rib_entry(p, ri, bgp, safi);
-#endif
       bgp_process (bgp, rn, afi, safi);
     }
 
@@ -4718,7 +4708,7 @@ bgp_aggregate_route (struct bgp *bgp, struct prefix *p, struct bgp_info *rinew,
       new->attr = bgp_attr_aggregate_intern (bgp, origin, aspath, community, aggregate->as_set);
       new->uptime = bgp_clock ();
 
-      bgp_info_add (rn, new);
+      bgp_info_add (rn, new, safi);
       bgp_unlock_node (rn);
       bgp_process (bgp, rn, afi, safi);
     }
@@ -4903,7 +4893,7 @@ bgp_aggregate_add (struct bgp *bgp, struct prefix *p, afi_t afi, safi_t safi,
       new->attr = bgp_attr_aggregate_intern (bgp, origin, aspath, community, aggregate->as_set);
       new->uptime = bgp_clock ();
 
-      bgp_info_add (rn, new);
+      bgp_info_add (rn, new, safi);
       bgp_unlock_node (rn);
 
       /* Process change. */
@@ -5553,7 +5543,7 @@ bgp_redistribute_add (struct prefix *p, const struct in_addr *nexthop,
 	  new->uptime = bgp_clock ();
 
 	  bgp_aggregate_increment (bgp, p, new, afi, SAFI_UNICAST);
-	  bgp_info_add (bn, new);
+	  bgp_info_add (bn, new, SAFI_UNICAST);
 	  bgp_unlock_node (bn);
 	  bgp_process (bgp, bn, afi, SAFI_UNICAST);
 	}

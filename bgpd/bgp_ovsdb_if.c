@@ -236,21 +236,19 @@ bgp_ovsdb_tables_init (struct ovsdb_idl *idl)
     /* BGP policy */
     bgp_policy_ovsdb_init(idl);
 
-    /* RIB table */
+    /* Global RIB table */
     ovsdb_idl_add_table(idl, &ovsrec_table_route);
     ovsdb_idl_add_column(idl, &ovsrec_route_col_prefix);
     ovsdb_idl_add_column(idl, &ovsrec_route_col_from);
     ovsdb_idl_add_column(idl, &ovsrec_route_col_nexthops);
     ovsdb_idl_add_column(idl, &ovsrec_route_col_address_family);
     ovsdb_idl_add_column(idl, &ovsrec_route_col_sub_address_family);
-    ovsdb_idl_add_column(idl, &ovsrec_route_col_protocol_specific);
     ovsdb_idl_add_column(idl, &ovsrec_route_col_selected);
-    ovsdb_idl_add_column(idl, &ovsrec_route_col_protocol_private);
     ovsdb_idl_add_column(idl, &ovsrec_route_col_distance);
     ovsdb_idl_add_column(idl, &ovsrec_route_col_metric);
     ovsdb_idl_add_column(idl, &ovsrec_route_col_vrf);
 
-    /* nexthop table */
+    /* Global nexthop table */
     ovsdb_idl_add_table(idl, &ovsrec_table_nexthop);
     ovsdb_idl_add_column(idl, &ovsrec_nexthop_col_ip_address);
     ovsdb_idl_add_column(idl, &ovsrec_nexthop_col_selected);
@@ -258,6 +256,23 @@ bgp_ovsdb_tables_init (struct ovsdb_idl *idl)
     ovsdb_idl_add_column(idl, &ovsrec_nexthop_col_status);
     ovsdb_idl_add_column(idl, &ovsrec_nexthop_col_other_config);
     ovsdb_idl_add_column(idl, &ovsrec_nexthop_col_external_ids);
+
+    /* BGP RIB table */
+    ovsdb_idl_add_table(idl, &ovsrec_table_bgp_route);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_route_col_prefix);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_route_col_bgp_nexthops);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_route_col_address_family);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_route_col_sub_address_family);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_route_col_distance);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_route_col_metric);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_route_col_vrf);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_route_col_path_attributes);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_route_col_peer);
+
+    /* BGP Nexthop table */
+    ovsdb_idl_add_table(idl, &ovsrec_table_bgp_nexthop);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_nexthop_col_ip_address);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_nexthop_col_type);
 }
 
 /* Create a connection to the OVSDB at db_path and create a dB cache
@@ -1553,6 +1568,9 @@ bgp_reconfigure(struct ovsdb_idl *idl)
     bgp_apply_global_changes();
     bgp_apply_bgp_router_changes(idl);
     bgp_apply_bgp_neighbor_changes(idl);
+
+    /* Scan active route transaction list and handle completions */
+    bgp_txn_complete_processing();
 
     /* update the seq. number */
     idl_seqno = new_idl_seqno;

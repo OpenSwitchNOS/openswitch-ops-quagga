@@ -726,9 +726,11 @@ policy_rt_map_read_ovsdb_apply_deletion (struct ovsdb_idl *idl)
 
   /* route map */
   ovs_first = ovsrec_route_map_first(idl);
-  if (!OVSREC_IDL_ANY_TABLE_ROWS_DELETED(ovs_first, idl_seqno)) {
-      return;
+  if (ovs_first && !OVSREC_IDL_ANY_TABLE_ROWS_DELETED(ovs_first, idl_seqno)) {
+    VLOG_DBG("No route map rows were deleted");
+    return;
   }
+
   for (map = route_map_master.head; map; map = map->next) {
     matched = 0;
     OVSREC_ROUTE_MAP_FOR_EACH(ovs_map, idl) {
@@ -755,8 +757,9 @@ policy_rt_map_entry_read_ovsdb_apply_deletion (struct ovsdb_idl *idl)
 
   /* route map entry */
   ovs_first = ovsrec_route_map_entry_first(idl);
-  if (!OVSREC_IDL_ANY_TABLE_ROWS_DELETED(ovs_first, idl_seqno)) {
-      return;
+  if (ovs_first && !OVSREC_IDL_ANY_TABLE_ROWS_DELETED(ovs_first, idl_seqno)) {
+    VLOG_DBG("No route map entry rows were deleted");
+    return;
   }
 
   OVSREC_ROUTE_MAP_FOR_EACH(ovs_map, idl) {

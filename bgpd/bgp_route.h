@@ -187,7 +187,7 @@ extern void bgp_clear_stale_route (struct peer *, afi_t, safi_t);
 
 extern struct bgp_info *bgp_info_lock (struct bgp_info *);
 extern struct bgp_info *bgp_info_unlock (struct bgp_info *);
-extern void bgp_info_add (struct bgp_node *rn, struct bgp_info *ri);
+extern void bgp_info_add (struct bgp_node *rn, struct bgp_info *ri, safi_t safi);
 extern void bgp_info_delete (struct bgp_node *rn, struct bgp_info *ri);
 extern struct bgp_info_extra *bgp_info_extra_get (struct bgp_info *);
 extern void bgp_info_set_flag (struct bgp_node *, struct bgp_info *, u_int32_t);

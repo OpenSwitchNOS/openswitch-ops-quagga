@@ -28,22 +28,20 @@ from halonvsi.quagga import *
 from vtyshutils import *
 from bgpconfig import *
 
-# Disabled since this test is a very basic test for verifying configuration;
-# however, Halon currently doesn't support 'show running-config' command.
-# Can be enabled and extended later.
-
 #
 # Only one switch emulated for testing simple BGP configurations through vtysh.
 # This test checks the following commands:
 #   * router bgp <asn> # This is required, for testing the primary case;
 #   * bgp router-id <router-id-value>
-#
+#   * network <network>
 # Topology:
 #   S1 [interface 1]
 #
 
 BGP_ASN = "1"
 BGP_ROUTER_ID = "9.0.0.1"
+BGP_NETWORK = "11.0.0.0"
+BGP_PL = "8"
 NUM_OF_SWITCHES = 1
 NUM_HOSTS_PER_SWITCH = 0
 SWITCH_PREFIX = "s"
@@ -70,35 +68,39 @@ class bgpTest (HalonTest):
                                        build = True)
 
     def verify_bgp_running (self):
-        info("Verifying bgp processes..\n")
+        info("\n########## Verifying bgp process.. ##########\n")
 
         switch = self.net.switches[0]
         pid = switch.cmd("pgrep -f bgpd").strip()
         assert (pid != ""), "bgpd process not running on switch %s" % \
                             switch.name
 
-        info("bgpd process exists on switch %s\n" % switch.name)
-        info("\n")
+        info("### bgpd process exists on switch %s ###\n" % switch.name)
 
-    def verify_bgp_router_id (self):
-        config = "bgp router-id"
-        info("Verifying \"%s\"..\n" % config)
+    def configure_bgp (self):
+        info("\n########## Applying BGP configurations... ##########\n")
 
         switch = self.net.switches[0]
 
         cfg_array = []
         cfg_array.append("router bgp %s" % BGP_ASN)
         cfg_array.append("bgp router-id %s" % BGP_ROUTER_ID)
+        cfg_array.append("network %s/%s" % (BGP_NETWORK, BGP_PL))
 
         SwitchVtyshUtils.vtysh_cfg_cmd(switch, cfg_array)
 
-        res = SwitchVtyshUtils.verify_cfg_value(switch, [config], BGP_ROUTER_ID)
-        assert res, "Config \"%s\" was not correctly configured!" % config
+    def verify_bgp_router_id (self):
+        info("\n########## Verifying BGP Router-ID... ##########\n")
 
-        info("Config \"%s\" was correctly configured.\n" % config)
-        info("\n")
+        switch = self.net.switches[0]
+        results = SwitchVtyshUtils.vtysh_cmd(switch, "sh ip bgp")
 
-class Test_bgp:
+        found = BGP_ROUTER_ID in results
+        assert found, "BGP Router-ID %s not found" % BGP_ROUTER_ID
+
+        info("### BGP Router-ID %s found ###\n" % BGP_ROUTER_ID)
+
+class Test_bgpd_router_id:
     def setup (self):
         pass
 
@@ -106,10 +108,10 @@ class Test_bgp:
         pass
 
     def setup_class (cls):
-        Test_bgp.test_var = bgpTest()
+        Test_bgpd_router_id.test_var = bgpTest()
 
     def teardown_class (cls):
-        Test_bgp.test_var.net.stop()
+        Test_bgpd_router_id.test_var.net.stop()
 
     def setup_method (self, method):
         pass
@@ -122,4 +124,5 @@ class Test_bgp:
 
     def test_bgp_full (self):
         self.test_var.verify_bgp_running()
+        self.test_var.configure_bgp()
         self.test_var.verify_bgp_router_id()

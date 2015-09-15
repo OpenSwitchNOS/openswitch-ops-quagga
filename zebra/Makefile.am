@@ -42,6 +42,9 @@ endif
 testzebra_SOURCES = test_main.c zebra_rib.c interface.c connected.c debug.c \
 	zebra_vty.c \
 	kernel_null.c  redistribute_null.c ioctl_null.c misc_null.c
+if ENABLE_OVSDB
+testzebra_SOURCES += zebra_ovsdb_if.c
+endif
 
 noinst_HEADERS = \
 	connected.h ioctl.h rib.h rt.h zserv.h redistribute.h debug.h rtadv.h \

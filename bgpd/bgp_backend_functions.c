@@ -2282,6 +2282,7 @@ daemon_neighbor_remove_private_as_cmd_execute (struct bgp *bgp, char *peer_str,
     }
 }
 
+
 /* neighbor capability orf prefix-list. */
 DEFUN (neighbor_capability_orf_prefix,
        neighbor_capability_orf_prefix_cmd,
@@ -2377,34 +2378,6 @@ DEFUN (no_neighbor_nexthop_self,
                                  bgp_node_safi (vty),
                                  PEER_FLAG_NEXTHOP_SELF|PEER_FLAG_NEXTHOP_SELF_ALL);
 }
-
-/* neighbor remove-private-AS. */
-#if 0
-DEFUN (neighbor_remove_private_as,
-       neighbor_remove_private_as_cmd,
-       NEIGHBOR_CMD2 "remove-private-AS",
-       NEIGHBOR_STR
-       NEIGHBOR_ADDR_STR2
-       "Remove private AS number from outbound updates\n")
-{
-  return peer_af_flag_set_vty (vty, argv[0], bgp_node_afi (vty),
-                               bgp_node_safi (vty),
-                               PEER_FLAG_REMOVE_PRIVATE_AS);
-}
-
-DEFUN (no_neighbor_remove_private_as,
-       no_neighbor_remove_private_as_cmd,
-       NO_NEIGHBOR_CMD2 "remove-private-AS",
-       NO_STR
-       NEIGHBOR_STR
-       NEIGHBOR_ADDR_STR2
-       "Remove private AS number from outbound updates\n")
-{
-  return peer_af_flag_unset_vty (vty, argv[0], bgp_node_afi (vty),
-                                 bgp_node_safi (vty),
-                                 PEER_FLAG_REMOVE_PRIVATE_AS);
-}
-#endif
 
 /* neighbor send-community. */
 DEFUN (neighbor_send_community,
@@ -9725,21 +9698,6 @@ bgp_vty_init (void)
   install_element (BGP_VPNV4_NODE, &neighbor_nexthop_self_cmd);
   install_element (BGP_VPNV4_NODE, &no_neighbor_nexthop_self_cmd);
 
-  /* "neighbor remove-private-AS" commands. */
-#if 0
-  install_element (BGP_NODE, &neighbor_remove_private_as_cmd);
-  install_element (BGP_NODE, &no_neighbor_remove_private_as_cmd);
-  install_element (BGP_IPV4_NODE, &neighbor_remove_private_as_cmd);
-  install_element (BGP_IPV4_NODE, &no_neighbor_remove_private_as_cmd);
-  install_element (BGP_IPV4M_NODE, &neighbor_remove_private_as_cmd);
-  install_element (BGP_IPV4M_NODE, &no_neighbor_remove_private_as_cmd);
-  install_element (BGP_IPV6_NODE, &neighbor_remove_private_as_cmd);
-  install_element (BGP_IPV6_NODE, &no_neighbor_remove_private_as_cmd);
-  install_element (BGP_IPV6M_NODE, &neighbor_remove_private_as_cmd);
-  install_element (BGP_IPV6M_NODE, &no_neighbor_remove_private_as_cmd);
-  install_element (BGP_VPNV4_NODE, &neighbor_remove_private_as_cmd);
-  install_element (BGP_VPNV4_NODE, &no_neighbor_remove_private_as_cmd);
-#endif
 
   /* "neighbor send-community" commands.*/
   install_element (BGP_NODE, &neighbor_send_community_cmd);

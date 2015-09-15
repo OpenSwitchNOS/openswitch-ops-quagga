@@ -274,7 +274,7 @@ class Test_zebra_ecmp_static_routes_ft:
     def test_testSWConfigure(self):
         # Function to configure the topology
         self.test.testSWConfigure()
-        CLI(self.test.net)
+        #CLI(self.test.net)
 
     def test_testHostConfigure(self):
         # Function to configure the topology
@@ -284,12 +284,12 @@ class Test_zebra_ecmp_static_routes_ft:
     def test_testV4(self):
         # Function to test V4 ping
         self.test.testV4()
-        CLI(self.test.net)
+        #CLI(self.test.net)
 
     def test_testV4_route_delete(self):
         # Function to test V4 route delete
         self.test.testV4_route_delete()
-        CLI(self.test.net)
+        #CLI(self.test.net)
 
     def __del__(self):
         del self.test

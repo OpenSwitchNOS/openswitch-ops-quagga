@@ -407,7 +407,7 @@ class bgpTest (HalonTest):
 
         assert matching, "Metric not matching for %s" % switch.name
 
-@metricmetricmetricmetricmetricpytest.mark.skipif(True, reason="Does not cleanup dockers fully")
+@pytest.mark.skipif(True, reason="Does not cleanup dockers fully")
 class Test_bgp:
     def setup (self):
         pass

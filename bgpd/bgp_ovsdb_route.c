@@ -213,7 +213,7 @@ const struct ovsrec_vrf*
 bgp_ovsdb_get_vrf(struct bgp *bgp)
 {
     int j;
-    struct ovsrec_vrf *ovs_vrf;
+    const struct ovsrec_vrf *ovs_vrf;
 
     OVSREC_VRF_FOR_EACH (ovs_vrf, idl) {
         for (j = 0; j < ovs_vrf->n_bgp_routers; j ++) {
@@ -366,7 +366,7 @@ bgp_ovsdb_set_rib_nexthop(struct ovsdb_idl_txn *txn,
     }
     selected = 1;
     ovsrec_nexthop_set_selected(pnexthop, &selected, 1);
-    nexthop_list[0] = pnexthop;
+    nexthop_list[0] = (struct ovsrec_nexthop*) pnexthop;
     nexthop_list[0]->ip_address = xstrdup(nexthop_buf);
 
     int ii = 1;
@@ -387,7 +387,7 @@ bgp_ovsdb_set_rib_nexthop(struct ovsdb_idl_txn *txn,
             }
             selected = 1;
             ovsrec_nexthop_set_selected(pnexthop, &selected, 1);
-            nexthop_list[ii] = pnexthop;
+            nexthop_list[ii] = (struct ovsrec_nexthop*) pnexthop;
             nexthop_list[ii]->ip_address = xstrdup(nexthop_buf);
             ii++;
         }
@@ -1160,7 +1160,7 @@ policy_ovsdb_alloc_arg_list(int argcsize, int argvsize)
 void
 policy_rt_map_read_ovsdb_apply_deletion (struct ovsdb_idl *idl)
 {
-  struct ovsrec_route_map * ovs_map, *ovs_first;
+  const struct ovsrec_route_map *ovs_map, *ovs_first;
   int matched = 0;
   struct route_map * map;
 
@@ -1188,8 +1188,8 @@ policy_rt_map_read_ovsdb_apply_deletion (struct ovsdb_idl *idl)
 void
 policy_rt_map_entry_read_ovsdb_apply_deletion (struct ovsdb_idl *idl)
 {
-  struct ovsrec_route_map_entry *ovs_first;
-  struct ovsrec_route_map *ovs_map;
+  const struct ovsrec_route_map_entry *ovs_first;
+  const struct ovsrec_route_map *ovs_map;
   struct route_map_index *index;
   struct route_map * map;
   int matched = 0;
@@ -1230,10 +1230,10 @@ void
 policy_rt_map_do_change (struct ovsdb_idl *idl,
                         char **argv1, char **argvmatch, char **argvset)
 {
-  struct ovsrec_route_map * ovs_map;
+  const struct ovsrec_route_map * ovs_map;
   struct ovsrec_route_map_entry * ovs_entry;
   unsigned long pref;
-  char *tmp;
+  const char *tmp;
   int argc1, argcmatch, argcset;
   int i, j;
 
@@ -1298,13 +1298,13 @@ policy_rt_map_read_ovsdb_apply_changes (struct ovsdb_idl *idl)
   char **argvmatch;
   char **argvset;
   int ret;
-  struct ovsrec_route_map_entry * rt_map_first;
-  struct ovsrec_route_map_entry * rt_map_next;
+  const struct ovsrec_route_map_entry * rt_map_first;
+  const struct ovsrec_route_map_entry * rt_map_next;
   int j;
   char *tmp;
   struct smap_node *node;
-  struct ovsrec_route_map * ovs_map, *ovs_first;
-  struct ovsrec_route_map_entry * ovs_entry;
+  const struct ovsrec_route_map * ovs_map, *ovs_first;
+  const struct ovsrec_route_map_entry * ovs_entry;
 
 
   /*
@@ -1378,7 +1378,7 @@ policy_ovsdb_rt_map_vlog(int ret)
  */
 int
 policy_rt_map_apply_changes (struct ovsdb_idl *idl,
-                        char **argv1, char **argvmatch, char **argvset,
+                        const char **argv1, char **argvmatch, char **argvset,
                         int argc1, int argcmatch, int argcset,
                         unsigned long pref)
 {
@@ -1526,9 +1526,9 @@ policy_prefix_list_read_ovsdb_apply_changes (struct ovsdb_idl *idl)
   char **argv1;
   char **argvseq;
   int argc1 = -1 , argcseq = -1;
-  struct ovsrec_prefix_list_entry * prefix_first;
+  const struct ovsrec_prefix_list_entry * prefix_first;
   char *tmp;
-  struct ovsrec_prefix_list * ovs_plist;
+  const struct ovsrec_prefix_list * ovs_plist;
   struct ovsrec_prefix_list_entry * ovs_entry;
   int i;
 

@@ -28,19 +28,19 @@ from halonvsi.quagga import *
 from vtyshutils import *
 from bgpconfig import *
 
-# Disabled since this test is a encapsulated by
-# test_bgpd_ft_routemaps_with_hosts_ping.py test.
-
 #
-# This case tests the most basic configuration between two BGP instances by
-# verifying that the advertised routes are received on both instances running
-# BGP.
-#
-# The following commands are tested:
+# This case primarily tests the peer group. The test encapsulates the following
+# commands:
 #   * router bgp <asn>
 #   * bgp router-id <router-id>
 #   * network <network>
+#   * neighbor <peer-group-name> peer-group
 #   * neighbor <peer> remote-as <asn>
+#   * neighbor <peer> peer-group <peer-group-name>
+#   * no neighbor <peer> peer-group <peer-group-name>
+#
+# Topology: Two switches are running BGP. Peer group configuration is used to
+#           configure the neighbor from BGP1.
 #
 # S1 [interface 1]<--->[interface 1] S2
 #
@@ -60,17 +60,23 @@ BGP2_NEIGHBOR_ASN   = BGP1_ASN
 
 BGP_NETWORK_PL      = "8"
 BGP_NETWORK_MASK    = "255.0.0.0"
+
 BGP_ROUTER_IDS      = [BGP1_ROUTER_ID, BGP2_ROUTER_ID]
+BGP_PEER_GROUP      = "extern-peer-group"
 
 BGP1_CONFIG = ["router bgp %s" % BGP1_ASN,
                "bgp router-id %s" % BGP1_ROUTER_ID,
                "network %s/%s" % (BGP1_NETWORK, BGP_NETWORK_PL),
-               "neighbor %s remote-as %s" % (BGP1_NEIGHBOR, BGP1_NEIGHBOR_ASN)]
+               "neighbor %s peer-group" % BGP_PEER_GROUP,
+               "neighbor %s remote-as %s" % (BGP_PEER_GROUP, BGP1_NEIGHBOR_ASN),
+               "neighbor %s peer-group %s" % (BGP1_NEIGHBOR, BGP_PEER_GROUP)]
 
 BGP2_CONFIG = ["router bgp %s" % BGP2_ASN,
                "bgp router-id %s" % BGP2_ROUTER_ID,
                "network %s/%s" % (BGP2_NETWORK, BGP_NETWORK_PL),
-               "neighbor %s remote-as %s" % (BGP2_NEIGHBOR, BGP2_NEIGHBOR_ASN)]
+               "neighbor %s peer-group" % BGP_PEER_GROUP,
+               "neighbor %s remote-as %s" % (BGP_PEER_GROUP, BGP2_NEIGHBOR_ASN),
+               "neighbor %s peer-group %s" % (BGP2_NEIGHBOR, BGP_PEER_GROUP)]
 
 BGP_CONFIGS = [BGP1_CONFIG, BGP2_CONFIG]
 
@@ -108,36 +114,33 @@ class bgpTest (HalonTest):
                                        build = True)
 
     def configure_switch_ips (self):
-        info("\nConfiguring switch IPs..")
+        info("\n########## Configuring switch IPs.. ##########\n")
 
         i = 0
         for switch in self.net.switches:
             # Configure the IPs between the switches
             if isinstance(switch, HalonSwitch):
-                switch.cmd("ovs-vsctl add-vrf-port vrf_default 1")
                 switch.cmdCLI("configure terminal")
                 switch.cmdCLI("interface 1")
+                switch.cmdCLI("no shutdown")
                 switch.cmdCLI("ip address %s/%s" % (BGP_ROUTER_IDS[i], BGP_NETWORK_PL))
                 switch.cmdCLI("exit")
-                switch.cmd("/usr/bin/ovs-vsctl set interface 1 user_config:admin=up")
             else:
                 switch.setIP(ip=BGP_ROUTER_IDS[i], intf="%s-eth1" % switch.name)
             i += 1
 
     def verify_bgp_running (self):
-        info("\nVerifying bgp processes..\n")
+        info("\n########## Verifying bgp processes.. ##########\n")
 
         for switch in self.net.switches:
             pid = switch.cmd("pgrep -f bgpd").strip()
             assert (pid != ""), "bgpd process not running on switch %s" % \
                                 switch.name
 
-            info("bgpd process exists on switch %s\n" % switch.name)
-
-        info("\n")
+            info("### bgpd process exists on switch %s ###\n" % switch.name)
 
     def configure_bgp (self):
-        info("\nConfiguring bgp on all switches..\n")
+        info("\n########## Applying BGP configurations... ##########\n")
 
         i = 0
         for switch in self.net.switches:
@@ -146,45 +149,8 @@ class bgpTest (HalonTest):
 
             SwitchVtyshUtils.vtysh_cfg_cmd(switch, cfg_array)
 
-    def unconfigure_network_bgp (self):
-        info("Unconfiguring network for BGP1...\n")
-
-        switch = self.net.switches[0]
-
-        cfg_array = []
-        cfg_array.append("router bgp %s" % BGP1_ASN)
-        cfg_array.append("no router bgp %s" % BGP1_ASN)
-
-        SwitchVtyshUtils.vtysh_cfg_cmd(switch, cfg_array)
-
-    def verify_bgp_route_removed (self):
-        info("Verifying route from BGP1 on BGP2 removed...\n")
-
-        switch = self.net.switches[1]
-        network = BGP1_NETWORK
-        next_hop = BGP1_ROUTER_ID
-
-        # Wait some time to let BGP converge
-        sleep(BGP_CONVERGENCE_DELAY_S)
-        info("Verifying show ip bgp\n")
-        found = SwitchVtyshUtils.verify_bgp_route(switch, network,
-                                                  next_hop)
-
-        assert found == False, "Route (%s) was not successfully removed" % \
-                               network
-        # Verify show ip bgp <route> cmd
-        info("Verifying show ip bgp %s\n" % network)
-        found = SwitchVtyshUtils.verify_show_ip_bgp_route(switch, network,
-                                                          next_hop)
-
-        assert found == False, "Route (%s) was not successfully removed" % \
-                               network
-
     def verify_bgp_routes (self):
-        info("\nVerifying bgp routes..\n")
-
-        # Wait some time to let BGP converge
-        sleep(BGP_CONVERGENCE_DELAY_S)
+        info("\n########## Verifying routes... ##########\n")
 
         self.verify_bgp_route(self.net.switches[0], BGP2_NETWORK,
                               BGP2_ROUTER_ID)
@@ -192,7 +158,7 @@ class bgpTest (HalonTest):
                               BGP1_ROUTER_ID)
 
     def verify_configs (self):
-        info("\nVerifying all configurations..\n")
+        info("\n########## Verifying all configurations.. ##########\n")
 
         for i in range(0, len(BGP_CONFIGS)):
             bgp_cfg = BGP_CONFIGS[i]
@@ -202,29 +168,45 @@ class bgpTest (HalonTest):
                 res = SwitchVtyshUtils.verify_cfg_exist(switch, [cfg])
                 assert res, "Config \"%s\" was not correctly configured!" % cfg
 
+        info("### All configurations were verified successfully ###\n")
+
     def verify_bgp_route (self, switch, network, next_hop):
-        found = SwitchVtyshUtils.verify_bgp_route(switch, network,
-                                                  next_hop)
+        found = SwitchVtyshUtils.wait_for_route(switch, network, next_hop)
 
         assert found, "Could not find route (%s -> %s) on %s" % \
                       (network, next_hop, switch.name)
 
-    def verify_show_ip_bgp_route (self):
-        info("Verifying show ip bgp route : negative case\n")
+    def unconfigure_peer_group (self):
+        switch = self.net.switches[0]
+
+        info("\n########## Unconfiguring peer-group on %s ##########\n" %
+             switch.name)
+
+        cfg_array = []
+        cfg_array.append("router bgp %s" % BGP1_ASN)
+        cfg_array.append("no neighbor %s peer-group %s" % (BGP1_NEIGHBOR,
+                                                           BGP_PEER_GROUP))
+
+        SwitchVtyshUtils.vtysh_cfg_cmd(switch, cfg_array)
+
+    def verify_bgp_route_removed (self):
+        info("\n########## Verifying route removed after "
+             "peer removed from peer-group ##########\n")
+
         switch = self.net.switches[1]
-        found = SwitchVtyshUtils.verify_show_ip_bgp_route(switch, "1.1.1.0",
-                                                          "1.1.1.1")
-        assert found == False, "found route (%s -> %s) on %s" % \
-            ("1.1.1.0", "1.1.1.1", switch.name)
+        network = BGP1_NETWORK
+        next_hop = BGP1_ROUTER_ID
+        verify_route_exists = False
 
-        info("Verifying show ip bgp route : positive case\n")
-        found = SwitchVtyshUtils.verify_show_ip_bgp_route(switch, BGP1_NETWORK,
-                                                          BGP1_ROUTER_ID)
-        assert found, "Could not find route (%s -> %s) on %s" % \
-                      (BGP1_NETWORK, BGP1_ROUTER_ID, switch.name)
+        # Verify that the neighbor's route info should be removed.
+        found = SwitchVtyshUtils.wait_for_route(switch, network,
+                                                next_hop,
+                                                verify_route_exists)
 
-@pytest.mark.skipif(True, reason="Does not cleanup dockers fully")
-class Test_bgp:
+        assert found == False, "Route still exists! (%s -> %s) on %s" % \
+                               (network, next_hop, switch.name)
+
+class Test_bgpd_peergroup:
     def setup (self):
         pass
 
@@ -232,10 +214,10 @@ class Test_bgp:
         pass
 
     def setup_class (cls):
-        Test_bgp.test_var = bgpTest()
+        Test_bgpd_peergroup.test_var = bgpTest()
 
     def teardown_class (cls):
-        Test_bgp.test_var.net.stop()
+        Test_bgpd_peergroup.test_var.net.stop()
 
     def setup_method (self, method):
         pass
@@ -246,13 +228,11 @@ class Test_bgp:
     def __del__ (self):
         del self.test_var
 
-    # the actual test function
     def test_bgp_full (self):
         self.test_var.configure_switch_ips()
         self.test_var.verify_bgp_running()
         self.test_var.configure_bgp()
-        # self.test_var.verify_configs()
+        self.test_var.verify_configs()
         self.test_var.verify_bgp_routes()
-        self.test_var.verify_show_ip_bgp_route()
-        self.test_var.unconfigure_network_bgp()
+        self.test_var.unconfigure_peer_group()
         self.test_var.verify_bgp_route_removed()

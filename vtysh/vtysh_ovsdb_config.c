@@ -36,7 +36,7 @@ VLOG_DEFINE_THIS_MODULE(vtysh_ovsdb_config);
 extern struct ovsdb_idl *idl;
 
 /* vtysh ovsdb client list defintions */
-vtysh_ovsdb_client vtysh_open_vswitch_table_client_list[e_vtysh_open_vswitch_table_client_id_max] = {NULL};
+vtysh_ovsdb_client vtysh_system_table_client_list[e_vtysh_system_table_client_id_max] = {NULL};
 vtysh_ovsdb_client vtysh_interface_table_client_list[e_vtysh_interface_table_client_id_max] = {NULL};
 vtysh_ovsdb_client vtysh_vlan_table_client_list[e_vtysh_vlan_table_client_id_max] = {NULL};
 vtysh_ovsdb_client vtysh_port_table_client_list[e_vtysh_port_table_client_id_max] = {NULL};
@@ -52,7 +52,7 @@ vtysh_ovsdb_client vtysh_led_table_client_list[e_vtysh_led_table_client_id_max] 
 */
 vtysh_ovsdb_table_list vtysh_ovsdb_table[e_vtysh_table_id_max] =
 {
-  { "Open_v_switch Table", e_open_vswitch_table, &vtysh_open_vswitch_table_client_list},
+  { "Open_v_switch Table", e_system_table, &vtysh_system_table_client_list},
   { "Interface Table",    e_interface_table,   &vtysh_interface_table_client_list},
   { "Vlan Table",         e_vlan_table,        &vtysh_vlan_table_client_list},
   { "Port Table",         e_port_table,        &vtysh_port_table_client_list},
@@ -82,8 +82,8 @@ vtysh_ovsdb_table_get_maxclientid(vtysh_ovsdb_tableid tableid)
 
   switch(tableid)
   {
-    case e_open_vswitch_table:
-         ret_val = e_vtysh_open_vswitch_table_client_id_max;
+    case e_system_table:
+         ret_val = e_vtysh_system_table_client_id_max;
          break;
     case e_interface_table:
          ret_val = e_vtysh_interface_table_client_id_max;
@@ -137,8 +137,8 @@ vtysh_ovsdb_table_get_minclientid(vtysh_ovsdb_tableid tableid)
 
   switch(tableid)
   {
-    case e_open_vswitch_table:
-         ret_val = e_vtysh_open_vswitch_table_client_id_first;
+    case e_system_table:
+         ret_val = e_vtysh_system_table_client_id_first;
          break;
     case e_interface_table:
          ret_val = e_vtysh_interface_table_client_id_first;

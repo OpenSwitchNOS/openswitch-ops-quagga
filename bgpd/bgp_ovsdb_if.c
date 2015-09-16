@@ -226,10 +226,10 @@ ovsdb_init (const char *db_path)
     //ovsdb_idl_verify_write_only(idl);
 
     /* Cache OpenVSwitch table */
-    ovsdb_idl_add_table(idl, &ovsrec_table_open_vswitch);
+    ovsdb_idl_add_table(idl, &ovsrec_table_system);
 
-    ovsdb_idl_add_column(idl, &ovsrec_open_vswitch_col_cur_cfg);
-    ovsdb_idl_add_column(idl, &ovsrec_open_vswitch_col_hostname);
+    ovsdb_idl_add_column(idl, &ovsrec_system_col_cur_cfg);
+    ovsdb_idl_add_column(idl, &ovsrec_system_col_hostname);
 
     /* BGP tables */
     bgp_ovsdb_tables_init(idl);
@@ -384,19 +384,19 @@ bgp_ovs_clear_fds (void)
  */
 static inline void bgp_chk_for_system_configured(void)
 {
-    const struct ovsrec_open_vswitch *ovs_vsw = NULL;
+    const struct ovsrec_system *sys = NULL;
 
     if (system_configured) {
         /* Nothing to do if we're already configured. */
         return;
     }
 
-    ovs_vsw = ovsrec_open_vswitch_first(idl);
+    sys = ovsrec_system_first(idl);
 
-    if (ovs_vsw && (ovs_vsw->cur_cfg > (int64_t) 0)) {
+    if (sys && (sys->cur_cfg > (int64_t) 0)) {
         system_configured = true;
         VLOG_INFO("System is now configured (cur_cfg=%d).",
-                 (int)ovs_vsw->cur_cfg);
+                 (int)sys->cur_cfg);
     }
 }
 
@@ -479,22 +479,22 @@ apply_bgp_neighbor_route_map_changes(struct ovsrec_bgp_neighbor *ovs_bgpn,
 static void
 bgp_apply_global_changes (void)
 {
-    const struct ovsrec_open_vswitch *ovs;
+    const struct ovsrec_system *sys;
 
-    ovs = ovsrec_open_vswitch_first(idl);
-    if (OVSREC_IDL_ANY_TABLE_ROWS_DELETED(ovs, idl_seqno)) {
-        VLOG_WARN("First Row deleted from Open_vSwitch tbl\n");
+    sys = ovsrec_system_first(idl);
+    if (OVSREC_IDL_ANY_TABLE_ROWS_DELETED(sys, idl_seqno)) {
+        VLOG_WARN("First Row deleted from System tbl\n");
         return;
     }
-    if (!OVSREC_IDL_ANY_TABLE_ROWS_INSERTED(ovs, idl_seqno) &&
-            !OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED(ovs, idl_seqno)) {
-        VLOG_DBG("No Open_vSwitch cfg changes");
+    if (!OVSREC_IDL_ANY_TABLE_ROWS_INSERTED(sys, idl_seqno) &&
+            !OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED(sys, idl_seqno)) {
+        VLOG_DBG("No System cfg changes");
         return;
     }
 
-    if (ovs) {
+    if (sys) {
         /* Update the hostname */
-        bgp_set_hostname(ovs->hostname);
+        bgp_set_hostname(sys->hostname);
     }
 }
 

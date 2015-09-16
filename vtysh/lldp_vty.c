@@ -84,7 +84,7 @@ typedef struct lldp_nbr_info
    Takes true/false argument   */
 static int lldp_set_global_status(const char *status)
 {
-  const struct ovsrec_open_vswitch *row = NULL;
+  const struct ovsrec_system *row = NULL;
 
   if(!cli_do_config_start())
   {
@@ -92,7 +92,7 @@ static int lldp_set_global_status(const char *status)
     return CMD_OVSDB_FAILURE;
   }
 
-  row = ovsrec_open_vswitch_first(idl);
+  row = ovsrec_system_first(idl);
 
   if(!row)
   {
@@ -102,11 +102,11 @@ static int lldp_set_global_status(const char *status)
   }
 
   if(strcmp("true",status) == 0)
-     smap_replace(&row->other_config, OPEN_VSWITCH_OTHER_CONFIG_MAP_LLDP_ENABLE, status);
+     smap_replace(&row->other_config, SYSTEM_OTHER_CONFIG_MAP_LLDP_ENABLE, status);
   else
-    smap_remove(&row->other_config, OPEN_VSWITCH_OTHER_CONFIG_MAP_LLDP_ENABLE);
+    smap_remove(&row->other_config, SYSTEM_OTHER_CONFIG_MAP_LLDP_ENABLE);
 
-  ovsrec_open_vswitch_set_other_config(row, &row->other_config);
+  ovsrec_system_set_other_config(row, &row->other_config);
 
   if(cli_do_config_finish())
     return CMD_SUCCESS;
@@ -141,7 +141,7 @@ DEFUN (cli_lldp_no_set_global_status,
    If the holdtime is default then deletes the key from the column. */
 static int set_global_hold_time(const char *hold_time)
 {
-  const struct ovsrec_open_vswitch *row = NULL;
+  const struct ovsrec_system *row = NULL;
 
 
   if(!cli_do_config_start())
@@ -150,7 +150,7 @@ static int set_global_hold_time(const char *hold_time)
     return CMD_OVSDB_FAILURE;
   }
 
-  row = ovsrec_open_vswitch_first(idl);
+  row = ovsrec_system_first(idl);
 
   if(!row)
   {
@@ -159,12 +159,12 @@ static int set_global_hold_time(const char *hold_time)
     return CMD_OVSDB_FAILURE;
   }
 
-  if( OPEN_VSWITCH_OTHER_CONFIG_MAP_LLDP_HOLD_DEFAULT != atoi(hold_time))
-    smap_replace(&row->other_config, OPEN_VSWITCH_OTHER_CONFIG_MAP_LLDP_HOLD, hold_time);
+  if( SYSTEM_OTHER_CONFIG_MAP_LLDP_HOLD_DEFAULT != atoi(hold_time))
+    smap_replace(&row->other_config, SYSTEM_OTHER_CONFIG_MAP_LLDP_HOLD, hold_time);
   else
-    smap_remove(&row->other_config, OPEN_VSWITCH_OTHER_CONFIG_MAP_LLDP_HOLD);
+    smap_remove(&row->other_config, SYSTEM_OTHER_CONFIG_MAP_LLDP_HOLD);
 
-  ovsrec_open_vswitch_set_other_config(row, &row->other_config);
+  ovsrec_system_set_other_config(row, &row->other_config);
 
   if(cli_do_config_finish())
     return CMD_SUCCESS;
@@ -192,14 +192,14 @@ DEFUN (cli_lldp_no_set_hold_time,
        "Configure LLDP parameters.\n"
        "The amount of time a receiving device should hold the information sent by your device before discarding it.\n")
 {
-  return set_global_hold_time(OPEN_VSWITCH_OTHER_CONFIG_MAP_LLDP_HOLD_DEFAULT);
+  return set_global_hold_time(SYSTEM_OTHER_CONFIG_MAP_LLDP_HOLD_DEFAULT);
 }
 
 /* Sets LLDP transmission time if the transmision time passed is non-default.
    If the transmission time is default then deletes the key from the column. */
 static int lldp_set_global_timer(const char *timer)
 {
-  const struct ovsrec_open_vswitch *row = NULL;
+  const struct ovsrec_system *row = NULL;
 
   if(!cli_do_config_start())
   {
@@ -207,7 +207,7 @@ static int lldp_set_global_timer(const char *timer)
     return CMD_OVSDB_FAILURE;
   }
 
-  row = ovsrec_open_vswitch_first(idl);
+  row = ovsrec_system_first(idl);
 
   if(!row)
   {
@@ -216,12 +216,12 @@ static int lldp_set_global_timer(const char *timer)
     return CMD_OVSDB_FAILURE;
   }
 
-  if(OPEN_VSWITCH_OTHER_CONFIG_MAP_LLDP_TX_INTERVAL_DEFAULT != atoi(timer))
-    smap_replace(&row->other_config, OPEN_VSWITCH_OTHER_CONFIG_MAP_LLDP_TX_INTERVAL, timer);
+  if(SYSTEM_OTHER_CONFIG_MAP_LLDP_TX_INTERVAL_DEFAULT != atoi(timer))
+    smap_replace(&row->other_config, SYSTEM_OTHER_CONFIG_MAP_LLDP_TX_INTERVAL, timer);
   else
-    smap_remove(&row->other_config, OPEN_VSWITCH_OTHER_CONFIG_MAP_LLDP_TX_INTERVAL);
+    smap_remove(&row->other_config, SYSTEM_OTHER_CONFIG_MAP_LLDP_TX_INTERVAL);
 
-  ovsrec_open_vswitch_set_other_config(row, &row->other_config);
+  ovsrec_system_set_other_config(row, &row->other_config);
 
   if(cli_do_config_finish())
     return CMD_SUCCESS;
@@ -249,7 +249,7 @@ DEFUN (cli_no_lldp_set_timer,
        "Configure LLDP parameters.\n"
        "The interval at which LLDP status updates are transmitted to neighbors in seconds.\n")
 {
-  return lldp_set_global_timer(OPEN_VSWITCH_OTHER_CONFIG_MAP_LLDP_TX_INTERVAL_DEFAULT);
+  return lldp_set_global_timer(SYSTEM_OTHER_CONFIG_MAP_LLDP_TX_INTERVAL_DEFAULT);
 }
 
 /* Sets or increments lldp_num_clear_counters_requested value. */
@@ -260,7 +260,7 @@ DEFUN (cli_lldp_clear_counters,
        "Clear LLDP information.\n"
        "Clear LLDP counters.\n")
 {
-  const struct ovsrec_open_vswitch *row = NULL;
+  const struct ovsrec_system *row = NULL;
   int clear_counter = 0;
   char buffer[10];
 
@@ -270,7 +270,7 @@ DEFUN (cli_lldp_clear_counters,
     return CMD_OVSDB_FAILURE;
   }
 
-  row = ovsrec_open_vswitch_first(idl);
+  row = ovsrec_system_first(idl);
   if(!row)
   {
      VLOG_ERR(OVSDB_ROW_FETCH_ERROR);
@@ -283,7 +283,7 @@ DEFUN (cli_lldp_clear_counters,
 
   sprintf(buffer, "%d", clear_counter);
   smap_replace(&row->status, "lldp_num_clear_counters_requested", buffer);
-  ovsrec_open_vswitch_set_status(row, &row->status);
+  ovsrec_system_set_status(row, &row->status);
 
   if(cli_do_config_finish())
     return CMD_SUCCESS;
@@ -302,7 +302,7 @@ DEFUN (cli_lldp_clear_neighbors,
        "Clear LLDP information.\n"
        "Clear LLDP neighbor tables.\n")
 {
-  const struct ovsrec_open_vswitch *row = NULL;
+  const struct ovsrec_system *row = NULL;
   int clear_neighbor_table = 0;
   char buffer[10];
 
@@ -312,7 +312,7 @@ DEFUN (cli_lldp_clear_neighbors,
     return CMD_OVSDB_FAILURE;
   }
 
-  row = ovsrec_open_vswitch_first(idl);
+  row = ovsrec_system_first(idl);
   if(!row)
   {
     VLOG_ERR(OVSDB_ROW_FETCH_ERROR);
@@ -325,7 +325,7 @@ DEFUN (cli_lldp_clear_neighbors,
 
   sprintf(buffer, "%d", clear_neighbor_table);
   smap_replace(&row->status, "lldp_num_clear_table_requested", buffer);
-  ovsrec_open_vswitch_set_status(row, &row->status);
+  ovsrec_system_set_status(row, &row->status);
 
   if(cli_do_config_finish())
     return CMD_SUCCESS;
@@ -340,7 +340,7 @@ DEFUN (cli_lldp_clear_neighbors,
 static int
 lldp_set_tlv(const char *tlv_name, const char *status)
 {
-  const struct ovsrec_open_vswitch *row = NULL;
+  const struct ovsrec_system *row = NULL;
   char tlv[50]={0};
 
   if(!cli_do_config_start())
@@ -349,7 +349,7 @@ lldp_set_tlv(const char *tlv_name, const char *status)
     return CMD_OVSDB_FAILURE;
   }
 
-  row = ovsrec_open_vswitch_first(idl);
+  row = ovsrec_system_first(idl);
 
   if(!row)
   {
@@ -359,30 +359,30 @@ lldp_set_tlv(const char *tlv_name, const char *status)
   }
 
   if(0 == strcmp(tlv_name, "ManagementAddress"))
-    strcpy(tlv, OPEN_VSWITCH_OTHER_CONFIG_MAP_LLDP_TLV_MGMT_ADDR_ENABLE);
+    strcpy(tlv, SYSTEM_OTHER_CONFIG_MAP_LLDP_TLV_MGMT_ADDR_ENABLE);
   else if (0 == strcmp(tlv_name, "PortDescription"))
-    strcpy(tlv, OPEN_VSWITCH_OTHER_CONFIG_MAP_LLDP_TLV_PORT_DESC_ENABLE);
+    strcpy(tlv, SYSTEM_OTHER_CONFIG_MAP_LLDP_TLV_PORT_DESC_ENABLE);
   else if (0 == strcmp(tlv_name, "Port-VlanID"))
-    strcpy(tlv, OPEN_VSWITCH_OTHER_CONFIG_MAP_LLDP_TLV_PORT_VLAN_ID_ENABLE);
+    strcpy(tlv, SYSTEM_OTHER_CONFIG_MAP_LLDP_TLV_PORT_VLAN_ID_ENABLE);
   else if(0 == strcmp(tlv_name, "Port-VlanName"))
-    strcpy(tlv, OPEN_VSWITCH_OTHER_CONFIG_MAP_LLDP_TLV_PORT_VLAN_NAME_ENABLE);
+    strcpy(tlv, SYSTEM_OTHER_CONFIG_MAP_LLDP_TLV_PORT_VLAN_NAME_ENABLE);
   else if(0 == strcmp(tlv_name, "Port-Protocol-VlanId"))
-    strcpy(tlv, OPEN_VSWITCH_OTHER_CONFIG_MAP_LLDP_TLV_PORT_VLAN_ID_ENABLE);
+    strcpy(tlv, SYSTEM_OTHER_CONFIG_MAP_LLDP_TLV_PORT_VLAN_ID_ENABLE);
   else if(0 == strcmp(tlv_name, "Port-ProtocolID"))
-    strcpy(tlv, OPEN_VSWITCH_OTHER_CONFIG_MAP_LLDP_TLV_PORT_PROTO_ID_ENABLE);
+    strcpy(tlv, SYSTEM_OTHER_CONFIG_MAP_LLDP_TLV_PORT_PROTO_ID_ENABLE);
   else if(0 == strcmp(tlv_name, "SystemCapabilites"))
-    strcpy(tlv, OPEN_VSWITCH_OTHER_CONFIG_MAP_LLDP_TLV_SYS_CAP_ENABLE);
+    strcpy(tlv, SYSTEM_OTHER_CONFIG_MAP_LLDP_TLV_SYS_CAP_ENABLE);
   else if(0 == strcmp(tlv_name, "SystemDescription"))
-    strcpy(tlv, OPEN_VSWITCH_OTHER_CONFIG_MAP_LLDP_TLV_SYS_DESC_ENABLE);
+    strcpy(tlv, SYSTEM_OTHER_CONFIG_MAP_LLDP_TLV_SYS_DESC_ENABLE);
   else if(0 == strcmp(tlv_name, "SystemName"))
-    strcpy(tlv, OPEN_VSWITCH_OTHER_CONFIG_MAP_LLDP_TLV_SYS_NAME_ENABLE);
+    strcpy(tlv, SYSTEM_OTHER_CONFIG_MAP_LLDP_TLV_SYS_NAME_ENABLE);
 
   if(strcmp("false",status) == 0)
     smap_replace(&row->other_config, tlv, status);
   else
     smap_remove(&row->other_config, tlv);
 
-  ovsrec_open_vswitch_set_other_config(row, &row->other_config);
+  ovsrec_system_set_other_config(row, &row->other_config);
 
   if(cli_do_config_finish())
     return CMD_SUCCESS;
@@ -420,7 +420,7 @@ DEFUN (cli_no_lldp_select_tlv,
 /* Sets management address to be advertised by LLDP. */
 static int lldp_set_mgmt_address(const char *status, boolean set)
 {
-  const struct ovsrec_open_vswitch *row = NULL;
+  const struct ovsrec_system *row = NULL;
 
   if(!cli_do_config_start())
   {
@@ -428,7 +428,7 @@ static int lldp_set_mgmt_address(const char *status, boolean set)
     return CMD_OVSDB_FAILURE;
   }
 
-  row = ovsrec_open_vswitch_first(idl);
+  row = ovsrec_system_first(idl);
   if(!row)
   {
     VLOG_ERR(OVSDB_ROW_FETCH_ERROR);
@@ -437,11 +437,11 @@ static int lldp_set_mgmt_address(const char *status, boolean set)
   }
 
   if(set)
-    smap_replace(&row->other_config, OPEN_VSWITCH_OTHER_CONFIG_MAP_LLDP_MGMT_ADDR, status);
+    smap_replace(&row->other_config, SYSTEM_OTHER_CONFIG_MAP_LLDP_MGMT_ADDR, status);
   else
-    smap_remove(&row->other_config, OPEN_VSWITCH_OTHER_CONFIG_MAP_LLDP_MGMT_ADDR);
+    smap_remove(&row->other_config, SYSTEM_OTHER_CONFIG_MAP_LLDP_MGMT_ADDR);
 
-  ovsrec_open_vswitch_set_other_config(row, &row->other_config);
+  ovsrec_system_set_other_config(row, &row->other_config);
 
   if(cli_do_config_finish())
     return CMD_SUCCESS;
@@ -473,63 +473,63 @@ DEFUN (cli_lldp_set_no_mgmt_address,
 
 /* Prints TLVs enabled for LLDP*/
 void
-lldp_show_tlv(struct ovsrec_open_vswitch *row)
+lldp_show_tlv(struct ovsrec_system *row)
 {
   bool tlv_set = false;
 
   vty_out (vty, "%sTLVs advertised: %s", VTY_NEWLINE, VTY_NEWLINE);
   tlv_set = smap_get_bool(&row->other_config,
-                           OPEN_VSWITCH_OTHER_CONFIG_MAP_LLDP_TLV_MGMT_ADDR_ENABLE,
-                           OPEN_VSWITCH_OTHER_CONFIG_MAP_LLDP_TLV_DEFAULT);
+                           SYSTEM_OTHER_CONFIG_MAP_LLDP_TLV_MGMT_ADDR_ENABLE,
+                           SYSTEM_OTHER_CONFIG_MAP_LLDP_TLV_DEFAULT);
   if(tlv_set)
      vty_out (vty, "Management Adress %s", VTY_NEWLINE);
 
   tlv_set = smap_get_bool(&row->other_config,
-                           OPEN_VSWITCH_OTHER_CONFIG_MAP_LLDP_TLV_PORT_DESC_ENABLE,
-                           OPEN_VSWITCH_OTHER_CONFIG_MAP_LLDP_TLV_DEFAULT);
+                           SYSTEM_OTHER_CONFIG_MAP_LLDP_TLV_PORT_DESC_ENABLE,
+                           SYSTEM_OTHER_CONFIG_MAP_LLDP_TLV_DEFAULT);
   if(tlv_set)
      vty_out (vty, "Port description %s", VTY_NEWLINE);
 
   tlv_set = smap_get_bool(&row->other_config,
-                           OPEN_VSWITCH_OTHER_CONFIG_MAP_LLDP_TLV_PORT_VLAN_ID_ENABLE,
-                           OPEN_VSWITCH_OTHER_CONFIG_MAP_LLDP_TLV_DEFAULT);
+                           SYSTEM_OTHER_CONFIG_MAP_LLDP_TLV_PORT_VLAN_ID_ENABLE,
+                           SYSTEM_OTHER_CONFIG_MAP_LLDP_TLV_DEFAULT);
   if(tlv_set)
      vty_out (vty, "Port VLAN-ID %s", VTY_NEWLINE);
 
   tlv_set = smap_get_bool(&row->other_config,
-                           OPEN_VSWITCH_OTHER_CONFIG_MAP_LLDP_TLV_PORT_PROTO_VLAN_ID_ENABLE,
-                           OPEN_VSWITCH_OTHER_CONFIG_MAP_LLDP_TLV_DEFAULT);
+                           SYSTEM_OTHER_CONFIG_MAP_LLDP_TLV_PORT_PROTO_VLAN_ID_ENABLE,
+                           SYSTEM_OTHER_CONFIG_MAP_LLDP_TLV_DEFAULT);
   if(tlv_set)
      vty_out (vty, "Port Protocol VLAN-ID %s", VTY_NEWLINE);
 
   tlv_set = smap_get_bool(&row->other_config,
-                           OPEN_VSWITCH_OTHER_CONFIG_MAP_LLDP_TLV_PORT_VLAN_NAME_ENABLE,
-                           OPEN_VSWITCH_OTHER_CONFIG_MAP_LLDP_TLV_DEFAULT);
+                           SYSTEM_OTHER_CONFIG_MAP_LLDP_TLV_PORT_VLAN_NAME_ENABLE,
+                           SYSTEM_OTHER_CONFIG_MAP_LLDP_TLV_DEFAULT);
   if(tlv_set)
      vty_out (vty, "Port VLAN Name %s", VTY_NEWLINE);
 
   tlv_set = smap_get_bool(&row->other_config,
-                           OPEN_VSWITCH_OTHER_CONFIG_MAP_LLDP_TLV_PORT_PROTO_ID_ENABLE,
-                           OPEN_VSWITCH_OTHER_CONFIG_MAP_LLDP_TLV_DEFAULT);
+                           SYSTEM_OTHER_CONFIG_MAP_LLDP_TLV_PORT_PROTO_ID_ENABLE,
+                           SYSTEM_OTHER_CONFIG_MAP_LLDP_TLV_DEFAULT);
   if(tlv_set)
      vty_out (vty, "Port Protocol-ID %s", VTY_NEWLINE);
 
   tlv_set = smap_get_bool(&row->other_config,
-                           OPEN_VSWITCH_OTHER_CONFIG_MAP_LLDP_TLV_SYS_CAP_ENABLE,
-                           OPEN_VSWITCH_OTHER_CONFIG_MAP_LLDP_TLV_DEFAULT);
+                           SYSTEM_OTHER_CONFIG_MAP_LLDP_TLV_SYS_CAP_ENABLE,
+                           SYSTEM_OTHER_CONFIG_MAP_LLDP_TLV_DEFAULT);
 
   if(tlv_set)
      vty_out (vty, "System capabilities %s", VTY_NEWLINE);
 
   tlv_set = smap_get_bool(&row->other_config,
-                           OPEN_VSWITCH_OTHER_CONFIG_MAP_LLDP_TLV_SYS_DESC_ENABLE,
-                           OPEN_VSWITCH_OTHER_CONFIG_MAP_LLDP_TLV_DEFAULT);
+                           SYSTEM_OTHER_CONFIG_MAP_LLDP_TLV_SYS_DESC_ENABLE,
+                           SYSTEM_OTHER_CONFIG_MAP_LLDP_TLV_DEFAULT);
   if(tlv_set)
      vty_out (vty, "System description %s", VTY_NEWLINE);
 
   tlv_set = smap_get_bool(&row->other_config,
-                           OPEN_VSWITCH_OTHER_CONFIG_MAP_LLDP_TLV_SYS_NAME_ENABLE,
-                           OPEN_VSWITCH_OTHER_CONFIG_MAP_LLDP_TLV_DEFAULT);
+                           SYSTEM_OTHER_CONFIG_MAP_LLDP_TLV_SYS_NAME_ENABLE,
+                           SYSTEM_OTHER_CONFIG_MAP_LLDP_TLV_DEFAULT);
   if(tlv_set)
      vty_out (vty, "System name %s", VTY_NEWLINE);
 }
@@ -541,10 +541,10 @@ DEFUN (cli_lldp_show_tlv,
        "Show various LLDP settings.\n"
        "Show TLVs advertised by LLDP.\n")
 {
-  const struct ovsrec_open_vswitch *row = NULL;
+  const struct ovsrec_system *row = NULL;
 
   ovsdb_idl_run(idl);
-  row = ovsrec_open_vswitch_first(idl);
+  row = ovsrec_system_first(idl);
 
   if(!row)
   {
@@ -627,7 +627,7 @@ DEFUN (cli_lldp_show_config,
        "Show LLDP configuration. \n")
 {
   const struct ovsrec_interface *ifrow = NULL;
-  const struct ovsrec_open_vswitch *row = NULL;
+  const struct ovsrec_system *row = NULL;
   bool lldp_enabled = false;
   int tx_interval = 0;
   int hold_time = 0;
@@ -636,7 +636,7 @@ DEFUN (cli_lldp_show_config,
   lldp_intf_stats *temp = NULL, *current = NULL;
 
   ovsdb_idl_run(idl);
-  row = ovsrec_open_vswitch_first(idl);
+  row = ovsrec_system_first(idl);
 
   if(!row)
   {
@@ -646,16 +646,16 @@ DEFUN (cli_lldp_show_config,
   vty_out(vty, "LLDP Global Configuration:%s%s", VTY_NEWLINE, VTY_NEWLINE);
 
   lldp_enabled = smap_get_bool(&row->other_config,
-                               OPEN_VSWITCH_OTHER_CONFIG_MAP_LLDP_ENABLE,
-                               OPEN_VSWITCH_OTHER_CONFIG_MAP_LLDP_ENABLE_DEFAULT);
+                               SYSTEM_OTHER_CONFIG_MAP_LLDP_ENABLE,
+                               SYSTEM_OTHER_CONFIG_MAP_LLDP_ENABLE_DEFAULT);
 
   tx_interval = smap_get_int(&row->other_config,
-                               OPEN_VSWITCH_OTHER_CONFIG_MAP_LLDP_TX_INTERVAL,
-                               OPEN_VSWITCH_OTHER_CONFIG_MAP_LLDP_TX_INTERVAL_DEFAULT);
+                               SYSTEM_OTHER_CONFIG_MAP_LLDP_TX_INTERVAL,
+                               SYSTEM_OTHER_CONFIG_MAP_LLDP_TX_INTERVAL_DEFAULT);
 
   hold_time = smap_get_int(&row->other_config,
-                             OPEN_VSWITCH_OTHER_CONFIG_MAP_LLDP_HOLD,
-                             OPEN_VSWITCH_OTHER_CONFIG_MAP_LLDP_HOLD_DEFAULT);
+                             SYSTEM_OTHER_CONFIG_MAP_LLDP_HOLD,
+                             SYSTEM_OTHER_CONFIG_MAP_LLDP_HOLD_DEFAULT);
 
   vty_out(vty, "LLDP Enabled :%s%s", lldp_enabled?"Yes":"No",VTY_NEWLINE);
 
@@ -761,7 +761,7 @@ DEFUN (cli_lldp_show_statistics,
        "Show LLDP statistics.\n")
 {
   const struct ovsrec_interface *ifrow = NULL;
-  const struct ovsrec_open_vswitch *row = NULL;
+  const struct ovsrec_system *row = NULL;
   bool lldp_enabled = false;
   int tx_interval = 0;
   int hold_time = 0;
@@ -782,7 +782,7 @@ DEFUN (cli_lldp_show_statistics,
   unsigned int index;
 
   ovsdb_idl_run(idl);
-  row = ovsrec_open_vswitch_first(idl);
+  row = ovsrec_system_first(idl);
 
   if(!row)
   {
@@ -889,7 +889,7 @@ DEFUN (cli_lldp_show_neighbor_info,
        "Show global LLDP neighbor information.\n")
 {
   const struct ovsrec_interface *ifrow = NULL;
-  const struct ovsrec_open_vswitch *row = NULL;
+  const struct ovsrec_system *row = NULL;
   lldp_neighbor_info *nbr_info = NULL;
   lldp_neighbor_info *new_intf_nbr_info = NULL;
   lldp_neighbor_info *temp = NULL, *current = NULL;
@@ -910,7 +910,7 @@ DEFUN (cli_lldp_show_neighbor_info,
   unsigned int index = 0;
 
   ovsdb_idl_run(idl);
-  row = ovsrec_open_vswitch_first(idl);
+  row = ovsrec_system_first(idl);
 
   if(!row)
   {

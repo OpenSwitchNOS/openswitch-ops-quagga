@@ -229,10 +229,10 @@ ovsdb_init (const char *db_path)
   ovsdb_idl_verify_write_only(idl);
 
   /* Cache OpenVSwitch table */
-  ovsdb_idl_add_table(idl, &ovsrec_table_open_vswitch);
+  ovsdb_idl_add_table(idl, &ovsrec_table_system);
 
-  ovsdb_idl_add_column(idl, &ovsrec_open_vswitch_col_cur_cfg);
-  ovsdb_idl_add_column(idl, &ovsrec_open_vswitch_col_hostname);
+  ovsdb_idl_add_column(idl, &ovsrec_system_col_cur_cfg);
+  ovsdb_idl_add_column(idl, &ovsrec_system_col_hostname);
 
   /* Register for ROUTE table */
   /* We need to register for columns to really get rows in the idl */
@@ -419,13 +419,13 @@ zebra_ovs_clear_fds (void)
 static inline void
 zebra_chk_for_system_configured (void)
 {
-  const struct ovsrec_open_vswitch *ovs_vsw = NULL;
+  const struct ovsrec_system *ovs_vsw = NULL;
 
   if (system_configured)
     /* Nothing to do if we're already configured. */
     return;
 
-  ovs_vsw = ovsrec_open_vswitch_first(idl);
+  ovs_vsw = ovsrec_system_first(idl);
 
   if (ovs_vsw && (ovs_vsw->cur_cfg > (int64_t) 0))
     {

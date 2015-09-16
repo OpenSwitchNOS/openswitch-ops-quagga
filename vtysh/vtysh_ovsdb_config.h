@@ -38,7 +38,7 @@ typedef enum vtysh_ret_val_enum
 typedef enum vtysh_ovsdb_table_idenum
 {
   e_vtysh_table_id_first = 0,
-  e_open_vswitch_table = 0,
+  e_system_table = 0,
   e_interface_table,
   e_vlan_table,
   e_port_table,
@@ -51,12 +51,12 @@ typedef enum vtysh_ovsdb_table_idenum
 } vtysh_ovsdb_tableid;
 
 /* Open_v_switch Table Client ID type */
-typedef enum vtysh_ovsdb_open_vswitch_table_client_idenum
+typedef enum vtysh_ovsdb_system_table_client_idenum
 {
   /* client callback based on client-id value */
-  e_vtysh_open_vswitch_table_client_id_first = 0,
-  e_vtysh_open_vswitch_table_config,
-  e_vtysh_open_vswitch_table_client_id_max
+  e_vtysh_system_table_client_id_first = 0,
+  e_vtysh_system_table_config,
+  e_vtysh_system_table_client_id_max
 } vtysh_ovsdb_openvswicth_table_clientid;
 
 /* Interface Table client-id type */

@@ -96,7 +96,7 @@ rib_add_ipv6_multipath (struct prefix_ipv6 *p, struct rib *rib, safi_t safi);
 #define OVSDB_ROUTE_MIN     0
 #define OVSDB_ROUTE_ADD     1
 #define OVSDB_ROUTE_DELETE  2
-#define OVSDB_ROUTE_IGNORE  3
+
 
 
 /*
@@ -801,13 +801,7 @@ zebra_route_delete(void)
     zebra_route_del_init();
     /* Add ovsdb route and nexthop in hash */
     OVSREC_ROUTE_FOR_EACH(route_row, idl) {
-        /*
-         * We are interested in the routes that are not private.
-         */
-        if (route_row->protocol_private == NULL ||
-            route_row->protocol_private[0] == false) {
-            zebra_route_hash_add(route_row);
-        }
+        zebra_route_hash_add(route_row);
     }
 
     zebra_find_ovsdb_deleted_routes(AFI_IP, SAFI_UNICAST, 0);
@@ -998,40 +992,12 @@ zebra_route_action_calculate (const struct ovsrec_route *route)
 {
     /*
      * Logic:
-     * If protocol_private is updated to TRUE, delete the route
-     * If protocol_private is updated to FALSE, add the route
      * If public route inserted, add the route
      * If public row is modified, add the route
-     * If private route is inserted, ignore
-     * If private row is modified, ignore
      */
-    if (OVSREC_IDL_IS_ROW_MODIFIED(route, idl_seqno)) {
-        if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_route_col_protocol_private,
-                                          idl_seqno)) {
-            if ((route->protocol_private != NULL) &&
-                (route->protocol_private[0] == true)) {
-                /* protocol_private converted to true */
-                return OVSDB_ROUTE_DELETE;
-            } else {
-                /* protocol_private converted to false */
-                return OVSDB_ROUTE_ADD;
-            }
-        } else {
-            /* route column (not protocol_private) modified */
-            if ((route->protocol_private != NULL) &&
-                (route->protocol_private[0] == true)) {
-                return OVSDB_ROUTE_IGNORE;
-            } else {
-                return OVSDB_ROUTE_ADD;
-            }
-        }
-    } else if (OVSREC_IDL_IS_ROW_INSERTED(route, idl_seqno)) {
-        if ((route->protocol_private == NULL) ||
-            (route->protocol_private[0] == false)) {
-            return OVSDB_ROUTE_ADD;
-        } else {
-            return OVSDB_ROUTE_IGNORE;
-        }
+    if (OVSREC_IDL_IS_ROW_MODIFIED(route, idl_seqno)
+        || OVSREC_IDL_IS_ROW_INSERTED(route, idl_seqno)) {
+        return OVSDB_ROUTE_ADD;
     }
     return OVSDB_ROUTE_MIN;
 }
@@ -1072,7 +1038,6 @@ zebra_handle_proto_route_change (const struct ovsrec_route *route,
         case OVSDB_ROUTE_DELETE:
             /* Delete is handled in process_delete */
             break;
-        case OVSDB_ROUTE_IGNORE:
         default:
             break;
         }
@@ -1092,7 +1057,6 @@ zebra_handle_proto_route_change (const struct ovsrec_route *route,
         case OVSDB_ROUTE_DELETE:
             /* Delete is handled in process_delete */
             break;
-        case OVSDB_ROUTE_IGNORE:
         default:
             break;
         }
@@ -1426,9 +1390,9 @@ zebra_update_selected_route_to_db (struct route_node *rn, struct rib *route,
         ovs_route = (struct ovsrec_route *)(route->ovsdb_route_row_ptr);
 
         VLOG_DBG("Cached OVSDB Route Entry: Prefix %s family %s "
-                 "from %s priv %p selected = %s", ovs_route->prefix,
+                 "from %s selected = %s", ovs_route->prefix,
                  ovs_route->address_family, ovs_route->from,
-                 ovs_route->protocol_private, selected ? "true":"false");
+                 selected ? "true":"false");
     } else {
 
         p = &rn->p;
@@ -1448,9 +1412,9 @@ zebra_update_selected_route_to_db (struct route_node *rn, struct rib *route,
                     /*
                      * OPS_TODO: Need to add support to check vrf
                      */
-                    VLOG_DBG("DB Entry: Prefix %s family %s from %s priv %p",
+                    VLOG_DBG("DB Entry: Prefix %s family %s from %s",
                              ovs_route->prefix, ovs_route->address_family,
-                             ovs_route->from, ovs_route->protocol_private);
+                             ovs_route->from);
 
                     if (!strcmp(ovs_route->address_family,
                                     OVSREC_ROUTE_ADDRESS_FAMILY_IPV4)) {
@@ -1477,9 +1441,9 @@ zebra_update_selected_route_to_db (struct route_node *rn, struct rib *route,
                     /*
                      * OPS_TODO: Need to add support to check vrf
                      */
-                    VLOG_DBG("DB Entry: Prefix %s family %s from %s priv %p",
+                    VLOG_DBG("DB Entry: Prefix %s family %s from %s",
                              ovs_route->prefix, ovs_route->address_family,
-                             ovs_route->from, ovs_route->protocol_private);
+                             ovs_route->from);
 
                     if (!strcmp(ovs_route->address_family,
                                         OVSREC_ROUTE_ADDRESS_FAMILY_IPV6)) {
@@ -1505,21 +1469,10 @@ zebra_update_selected_route_to_db (struct route_node *rn, struct rib *route,
     }
 
     if (ovs_route) {
-
-        /*
-         * We should not be checking for protcol_private here The fact that zebra
-         * has it, means that this is no longer private! Just blindly update.
-         * We will take care of only allowing non private routes to zebra.
-         */
-        if (ovs_route->protocol_private == NULL ||
-            ovs_route->protocol_private[0] == false) {
-
-            VLOG_DBG("Updating the selected flag for the non-private routes. "
-                     "Setting selected %s for prefix %s",
-                     selected ? "true":"false", ovs_route->prefix);
-
-            zebra_ovs_update_selected_route(ovs_route, &selected);
-        }
+        VLOG_DBG("Updating the selected flag for routes"
+                 "Setting selected %s for prefix %s",
+                 selected ? "true":"false", ovs_route->prefix);
+        zebra_ovs_update_selected_route(ovs_route, &selected);
     }
     return 0;
 }

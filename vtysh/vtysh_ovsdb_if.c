@@ -118,15 +118,15 @@ ovsdb_init(const char *db_path)
     idl_seqno = ovsdb_idl_get_seqno(idl);
 
     /* Add hostname columns */
-    ovsdb_idl_add_table(idl, &ovsrec_table_open_vswitch);
-    ovsdb_idl_add_column(idl, &ovsrec_open_vswitch_col_hostname);
+    ovsdb_idl_add_table(idl, &ovsrec_table_system);
+    ovsdb_idl_add_column(idl, &ovsrec_system_col_hostname);
 
     /* Add tables and columns for LLDP configuration */
-    ovsdb_idl_add_table(idl, &ovsrec_table_open_vswitch);
-    ovsdb_idl_add_column(idl, &ovsrec_open_vswitch_col_cur_cfg);
-    ovsdb_idl_add_column(idl, &ovsrec_open_vswitch_col_other_config);
-    ovsdb_idl_add_column(idl, &ovsrec_open_vswitch_col_lldp_statistics);
-    ovsdb_idl_add_column(idl, &ovsrec_open_vswitch_col_status);
+    ovsdb_idl_add_table(idl, &ovsrec_table_system);
+    ovsdb_idl_add_column(idl, &ovsrec_system_col_cur_cfg);
+    ovsdb_idl_add_column(idl, &ovsrec_system_col_other_config);
+    ovsdb_idl_add_column(idl, &ovsrec_system_col_lldp_statistics);
+    ovsdb_idl_add_column(idl, &ovsrec_system_col_status);
 
     ovsdb_idl_add_table(idl, &ovsrec_table_interface);
     ovsdb_idl_add_column(idl, &ovsrec_interface_col_name);
@@ -201,38 +201,38 @@ void vtysh_ovsdb_init(int argc, char *argv[])
 
 /*
  * The set command to set the hostname column in the
- * open_vswitch table from the set-hotname command
+ * system table from the set-hotname command
  */
 void vtysh_ovsdb_hostname_set(const char* in)
 {
-    const struct ovsrec_open_vswitch *ovs= NULL;
+    const struct ovsrec_system *ovs= NULL;
 
-    ovs = ovsrec_open_vswitch_first(idl);
+    ovs = ovsrec_system_first(idl);
 
     if(ovs)
     {
         txn = ovsdb_idl_txn_create(idl);
-        ovsrec_open_vswitch_set_hostname(ovs, in);
+        ovsrec_system_set_hostname(ovs, in);
         ovsdb_idl_txn_commit(txn);
         ovsdb_idl_txn_destroy(txn);
         VLOG_DBG("Hostname set to %s in table",in);
     }
     else
     {
-        VLOG_ERR("unable to retrieve any open_vswitch table rows");
+        VLOG_ERR("unable to retrieve any system table rows");
     }
 }
 
 /*
- * The get command to read from the ovsdb open_vswitch table
+ * The get command to read from the ovsdb system table
  * hostname column from the vtysh get-hostname command
  */
 char* vtysh_ovsdb_hostname_get()
 {
-    const struct ovsrec_open_vswitch *ovs;
+    const struct ovsrec_system *ovs;
     ovsdb_idl_run(idl);
     ovsdb_idl_wait(idl);
-    ovs = ovsrec_open_vswitch_first(idl);
+    ovs = ovsrec_system_first(idl);
 
     if(ovs)
     {
@@ -242,7 +242,7 @@ char* vtysh_ovsdb_hostname_get()
     }
     else
     {
-        VLOG_ERR("unable to  retrieve any open_vswitch table rows");
+        VLOG_ERR("unable to  retrieve any system table rows");
     }
 
     return NULL;

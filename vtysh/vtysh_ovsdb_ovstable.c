@@ -34,7 +34,7 @@ char clientname[] = "vtysh_ovsdb_ovstable_clientcallback";
 
 /*-----------------------------------------------------------------------------
 | Function : vtysh_ovsdb_ovstable_parse_othercfg
-| Responsibility : parse other_config in open_vswitch table
+| Responsibility : parse other_config in system table
 | Parameters :
 |    ifrow_config : other_config object pointer
 |    fp : file pointer
@@ -51,7 +51,7 @@ vtysh_ovsdb_ovstable_parse_othercfg(const struct smap *ifrow_config, vtysh_ovsdb
     return e_vtysh_error;
   }
 
-  data = smap_get(ifrow_config, OPEN_VSWITCH_OTHER_CONFIG_MAP_LLDP_ENABLE);
+  data = smap_get(ifrow_config, SYSTEM_OTHER_CONFIG_MAP_LLDP_ENABLE);
   if (data)
   {
     if (VTYSH_STR_EQ(data, "true"))
@@ -61,29 +61,29 @@ vtysh_ovsdb_ovstable_parse_othercfg(const struct smap *ifrow_config, vtysh_ovsdb
   }
 
   data = NULL;
-  data = smap_get(ifrow_config, OPEN_VSWITCH_OTHER_CONFIG_MAP_LLDP_HOLD );
+  data = smap_get(ifrow_config, SYSTEM_OTHER_CONFIG_MAP_LLDP_HOLD );
   if (data)
   {
     hold_time = atoi(data);
-    if ( OPEN_VSWITCH_OTHER_CONFIG_MAP_LLDP_HOLD_DEFAULT != hold_time)
+    if ( SYSTEM_OTHER_CONFIG_MAP_LLDP_HOLD_DEFAULT != hold_time)
     {
       vtysh_ovsdb_cli_print(p_msg, "lldp holdtime %d", hold_time);
     }
   }
 
   data = NULL;
-  data = smap_get(ifrow_config, OPEN_VSWITCH_OTHER_CONFIG_MAP_LLDP_TX_INTERVAL);
+  data = smap_get(ifrow_config, SYSTEM_OTHER_CONFIG_MAP_LLDP_TX_INTERVAL);
   if (data)
   {
     transmit_interval = atoi(data);
-    if ( OPEN_VSWITCH_OTHER_CONFIG_MAP_LLDP_TX_INTERVAL_DEFAULT != hold_time)
+    if ( SYSTEM_OTHER_CONFIG_MAP_LLDP_TX_INTERVAL_DEFAULT != hold_time)
     {
       vtysh_ovsdb_cli_print(p_msg, "lldp transmit-time %d", transmit_interval);
     }
   }
 
   data = NULL;
-  data = smap_get(ifrow_config, OPEN_VSWITCH_OTHER_CONFIG_MAP_LLDP_TLV_MGMT_ADDR_ENABLE);
+  data = smap_get(ifrow_config, SYSTEM_OTHER_CONFIG_MAP_LLDP_TLV_MGMT_ADDR_ENABLE);
   if (data)
   {
     if (VTYSH_STR_EQ(data, "false"))
@@ -93,7 +93,7 @@ vtysh_ovsdb_ovstable_parse_othercfg(const struct smap *ifrow_config, vtysh_ovsdb
   }
 
   data = NULL;
-  data = smap_get(ifrow_config, OPEN_VSWITCH_OTHER_CONFIG_MAP_LLDP_TLV_PORT_DESC_ENABLE);
+  data = smap_get(ifrow_config, SYSTEM_OTHER_CONFIG_MAP_LLDP_TLV_PORT_DESC_ENABLE);
   if (data)
   {
     if (VTYSH_STR_EQ(data, "false"))
@@ -103,7 +103,7 @@ vtysh_ovsdb_ovstable_parse_othercfg(const struct smap *ifrow_config, vtysh_ovsdb
   }
 
   data = NULL;
-  data = smap_get(ifrow_config, OPEN_VSWITCH_OTHER_CONFIG_MAP_LLDP_TLV_PORT_VLAN_ID_ENABLE);
+  data = smap_get(ifrow_config, SYSTEM_OTHER_CONFIG_MAP_LLDP_TLV_PORT_VLAN_ID_ENABLE);
   if (data)
   {
     if (VTYSH_STR_EQ(data, "false"))
@@ -113,7 +113,7 @@ vtysh_ovsdb_ovstable_parse_othercfg(const struct smap *ifrow_config, vtysh_ovsdb
   }
 
   data = NULL;
-  data = smap_get(ifrow_config, OPEN_VSWITCH_OTHER_CONFIG_MAP_LLDP_TLV_SYS_CAP_ENABLE);
+  data = smap_get(ifrow_config, SYSTEM_OTHER_CONFIG_MAP_LLDP_TLV_SYS_CAP_ENABLE);
   if (data)
   {
     if (VTYSH_STR_EQ(data, "false"))
@@ -123,7 +123,7 @@ vtysh_ovsdb_ovstable_parse_othercfg(const struct smap *ifrow_config, vtysh_ovsdb
   }
 
   data = NULL;
-  data = smap_get(ifrow_config, OPEN_VSWITCH_OTHER_CONFIG_MAP_LLDP_TLV_SYS_DESC_ENABLE);
+  data = smap_get(ifrow_config, SYSTEM_OTHER_CONFIG_MAP_LLDP_TLV_SYS_DESC_ENABLE);
   if (data)
   {
     if (VTYSH_STR_EQ(data, "false"))
@@ -133,7 +133,7 @@ vtysh_ovsdb_ovstable_parse_othercfg(const struct smap *ifrow_config, vtysh_ovsdb
   }
 
   data = NULL;
-  data = smap_get(ifrow_config, OPEN_VSWITCH_OTHER_CONFIG_MAP_LLDP_TLV_SYS_NAME_ENABLE);
+  data = smap_get(ifrow_config, SYSTEM_OTHER_CONFIG_MAP_LLDP_TLV_SYS_NAME_ENABLE);
   if (data)
   {
     if (VTYSH_STR_EQ(data, "false"))
@@ -143,7 +143,7 @@ vtysh_ovsdb_ovstable_parse_othercfg(const struct smap *ifrow_config, vtysh_ovsdb
   }
 
   data = NULL;
-  data = smap_get(ifrow_config, OPEN_VSWITCH_OTHER_CONFIG_MAP_LLDP_MGMT_ADDR);
+  data = smap_get(ifrow_config, SYSTEM_OTHER_CONFIG_MAP_LLDP_MGMT_ADDR);
   if (data)
   {
     vtysh_ovsdb_cli_print(p_msg, "lldp management-address %s", data);
@@ -164,11 +164,11 @@ vtysh_ovsdb_ovstable_clientcallback(void *p_private)
 {
   vtysh_ovsdb_cbmsg_ptr p_msg = (vtysh_ovsdb_cbmsg *)p_private;
 
-  const struct ovsrec_open_vswitch *vswrow;
+  const struct ovsrec_system *vswrow;
 
   vtysh_ovsdb_config_logmsg(VTYSH_OVSDB_CONFIG_DBG,
                            "vtysh_ovsdb_ovstable_clientcallback entered");
-  vswrow = ovsrec_open_vswitch_first(p_msg->idl);
+  vswrow = ovsrec_system_first(p_msg->idl);
 
   if(vswrow)
   {
@@ -194,10 +194,10 @@ vtysh_ovsdb_init_ovstableclients()
   vtysh_ovsdb_client client;
 
   client.p_client_name = clientname;
-  client.client_id = e_vtysh_open_vswitch_table_config;
+  client.client_id = e_vtysh_system_table_config;
   client.p_callback = &vtysh_ovsdb_ovstable_clientcallback;
 
-  vtysh_ovsdbtable_addclient(e_open_vswitch_table, e_vtysh_open_vswitch_table_config, &client);
+  vtysh_ovsdbtable_addclient(e_system_table, e_vtysh_system_table_config, &client);
 
   return e_vtysh_ok;
 }

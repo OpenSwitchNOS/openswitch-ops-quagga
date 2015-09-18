@@ -192,6 +192,7 @@ bgp_ovsdb_tables_init (struct ovsdb_idl *idl)
 {
     /* VRF Table */
     ovsdb_idl_add_table(idl, &ovsrec_table_vrf);
+    ovsdb_idl_add_column(idl, &ovsrec_vrf_col_name);
     ovsdb_idl_add_column(idl, &ovsrec_vrf_col_bgp_routers);
 
     /* BGP router table */
@@ -1029,6 +1030,9 @@ delete_bgp_neighbors_and_peer_groups (struct ovsdb_idl *idl)
    }
 }
 
+/*
+** vrf_name CAN be NULL but ipaddr should NOT be passed as NULL
+*/
 static const struct ovsrec_bgp_neighbor *
 get_bgp_neighbor_with_VrfName_BgpRouterAsn_Ipaddr (struct ovsdb_idl *idl,
     char *vrf_name,
@@ -1043,17 +1047,17 @@ get_bgp_neighbor_with_VrfName_BgpRouterAsn_Ipaddr (struct ovsdb_idl *idl,
 	vrf_name = DEFAULT_VRF_NAME;
     }
 
-    OVSREC_VRF_FOR_EACH (ovs_vrf, idl) {
+    OVSREC_VRF_FOR_EACH(ovs_vrf, idl) {
       if (strcmp(ovs_vrf->name, vrf_name)) {
           continue;
       }
-      for (i = 0; i < ovs_vrf->n_bgp_routers; i ++) {
+      for (i = 0; i < ovs_vrf->n_bgp_routers; i++) {
           if (asn != ovs_vrf->key_bgp_routers[i]) {
               continue;
           }
           ovs_bgp = ovs_vrf->value_bgp_routers[i];
-          for (j = 0; j < ovs_bgp->n_bgp_neighbors; j ++) {
-	      if (ipaddr && (!strcmp(ipaddr, ovs_bgp->key_bgp_neighbors[j]))) {
+          for (j = 0; j < ovs_bgp->n_bgp_neighbors; j++) {
+	      if (0 == strcmp(ipaddr, ovs_bgp->key_bgp_neighbors[j])) {
                   return ovs_bgp->value_bgp_neighbors[j];
               }
           }

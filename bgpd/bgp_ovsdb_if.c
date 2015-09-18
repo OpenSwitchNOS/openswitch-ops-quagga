@@ -639,15 +639,9 @@ modify_bgp_router_config(struct ovsdb_idl *idl,
     }
 
     /* Check if bgp timers are modified */
-    if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_bgp_router_col_timers, idl_seqno)) {
-        ret_status = modify_bgp_timers_config(bgp_cfg,bgp_mod_row);
-        if (!ret_status) {
-            VLOG_INFO("BGP timers set as : "
-                              "bgp_cfg->default_keepalive : %d"
-                              "bgp_cfg->default_holdtime : %d",
-                               bgp_cfg->default_keepalive,
-                               bgp_cfg->default_holdtime);
-        }
+    if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_bgp_router_col_timers,
+                                      idl_seqno)) {
+        modify_bgp_timers_config(bgp_cfg,bgp_mod_row);
     }
 }
 
@@ -804,36 +798,59 @@ bgp_static_route_deletion(struct bgp *bgp_cfg,
 }
 
 int
-modify_bgp_maxpaths_config(struct bgp *bgp_cfg, const struct ovsrec_bgp_router *bgp_mod_row)
+modify_bgp_maxpaths_config(struct bgp *bgp_cfg,
+                           const struct ovsrec_bgp_router *bgp_mod_row)
 {
-    bgp_flag_set(bgp_cfg, BGP_FLAG_ASPATH_MULTIPATH_RELAX);
-    return bgp_maximum_paths_set(bgp_cfg, AFI_IP, SAFI_UNICAST,
-                                 BGP_PEER_EBGP,
-				 (u_int16_t)bgp_mod_row->maximum_paths[0]);
+    int res;
+
+    if (bgp_mod_row->n_maximum_paths && bgp_mod_row->maximum_paths[0]) {
+        VLOG_DBG("Setting max paths");
+        bgp_flag_set(bgp_cfg, BGP_FLAG_ASPATH_MULTIPATH_RELAX);
+        res = bgp_maximum_paths_set(bgp_cfg, AFI_IP, SAFI_UNICAST,
+                                    BGP_PEER_EBGP,
+                                    (u_int16_t)bgp_mod_row->maximum_paths[0]);
+    } else {
+        VLOG_DBG("Unsetting max paths");
+        bgp_flag_unset(bgp_cfg, BGP_FLAG_ASPATH_MULTIPATH_RELAX);
+        res = bgp_maximum_paths_unset(bgp_cfg, AFI_IP, SAFI_UNICAST,
+                                      BGP_PEER_EBGP);
+    }
+
+    return res;
 }
 
 int
-modify_bgp_timers_config (struct bgp *bgp_cfg,
-    const struct ovsrec_bgp_router *bgp_mod_row)
+modify_bgp_timers_config(struct bgp *bgp_cfg,
+                         const struct ovsrec_bgp_router *bgp_mod_row)
 {
-    int64_t keepalive=0, holdtime=0;
+    int64_t keepalive=0, holdtime=0, ret_status=0;
     struct smap smap;
     const struct ovsdb_datum *datum;
 
-    datum = ovsrec_bgp_router_get_timers(bgp_mod_row,
-        OVSDB_TYPE_STRING, OVSDB_TYPE_INTEGER);
+    datum = ovsrec_bgp_router_get_timers(bgp_mod_row, OVSDB_TYPE_STRING,
+                                         OVSDB_TYPE_INTEGER);
 
     /* Can be seen on ovsdb restart */
     if (NULL == datum) {
         VLOG_DBG("No value found for given key");
-        return -1;
+        ret_status = -1;
+    } else {
+        if (bgp_mod_row->n_timers) {
+            ovsdb_datum_get_int64_value_given_string_key(datum,
+                bgp_mod_row->key_timers[1], &keepalive);
+            ovsdb_datum_get_int64_value_given_string_key(datum,
+                bgp_mod_row->key_timers[0], &holdtime);
+
+            ret_status = bgp_timers_set(bgp_cfg, keepalive, holdtime);
+            VLOG_DBG("Set keepalive:%lld and holdtime:%lld timers",
+                     keepalive, holdtime);
+        } else {
+            ret_status = bgp_timers_unset(bgp_cfg);
+            VLOG_DBG("Timers have been unset");
+        }
     }
-    ovsdb_datum_get_int64_value_given_string_key(datum,
-        bgp_mod_row->key_timers[1], &keepalive);
-    ovsdb_datum_get_int64_value_given_string_key(datum,
-        bgp_mod_row->key_timers[0], &holdtime);
-    return
-        bgp_timers_set(bgp_cfg, keepalive, holdtime);
+
+    return ret_status;
 }
 
 static int

@@ -49,7 +49,7 @@ BGP_CONFIG = ["router bgp %s" % BGP_ASN,
               "bgp router-id %s" % BGP_ROUTER_ID,
               "network %s/%s" % (BGP_NETWORK, BGP_NETWORK_PL)]
 
-NUM_OF_SWITCHES = 2
+NUM_OF_SWITCHES = 1
 NUM_HOSTS_PER_SWITCH = 0
 
 SWITCH_PREFIX = "s"

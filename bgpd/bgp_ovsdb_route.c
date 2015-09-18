@@ -1192,37 +1192,140 @@ policy_rt_map_read_ovsdb_apply_deletion (struct ovsdb_idl *idl)
 void
 policy_rt_map_entry_read_ovsdb_apply_deletion (struct ovsdb_idl *idl)
 {
-  const struct ovsrec_route_map_entry *ovs_first;
-  const struct ovsrec_route_map *ovs_map;
-  struct route_map_index *index;
-  struct route_map * map;
-  int matched = 0;
-  int i;
+    const struct ovsrec_route_map_entry *ovs_first;
+    const struct ovsrec_route_map *ovs_map;
+    struct route_map_index *index;
+    struct route_map * map;
+    int matched = 0;
+    int i;
 
-  /* route map entry */
-  ovs_first = ovsrec_route_map_entry_first(idl);
-  if (ovs_first && !OVSREC_IDL_ANY_TABLE_ROWS_DELETED(ovs_first, idl_seqno)) {
-    VLOG_DBG("No route map entry rows were deleted");
-    return;
-  }
-
-  OVSREC_ROUTE_MAP_FOR_EACH(ovs_map, idl) {
-    map = route_map_lookup_by_name(ovs_map->name);
-    for (index = map->head; index; index = index->next) {
-      matched = 0;
-      for (i = 0; i < ovs_map->n_route_map_entries; i ++) {
-        if (index->pref == ovs_map->key_route_map_entries[i]) {
-          matched = 1;
-          break;
-        }
-      }
-      if (!matched) {
-        route_map_index_delete (index, 1);
-      }
+    /* route map entry */
+    ovs_first = ovsrec_route_map_entry_first(idl);
+    if (ovs_first && !OVSREC_IDL_ANY_TABLE_ROWS_DELETED(ovs_first, idl_seqno)) {
+        VLOG_DBG("No route map entry deletions detected.");
+        return;
     }
-  }
+
+    for (map = route_map_master.head; map; map = map->next) {
+        OVSREC_ROUTE_MAP_FOR_EACH(ovs_map, idl) {
+            if (strcmp (map->name, ovs_map->name) == 0) {
+                for (index = map->head; index; index = index->next) {
+                    matched = 0;
+                    for (i = 0; i < ovs_map->n_route_map_entries; i ++) {
+                        if (index->pref == ovs_map->key_route_map_entries[i]) {
+                            matched = 1;
+                            break;
+                        }
+                    }
+
+                    if (!matched) {
+                        route_map_index_delete (index, 1);
+
+                        /* If this route rule is the last one,
+                           delete route map itself. */
+                        if (route_map_empty (map))
+                            route_map_delete (map);
+                    }
+                }
+            }
+        }
+    }
 }
 
+void
+policy_rt_map_description_ovsdb_apply_changes(
+    struct ovsrec_route_map_entry *ovs_entry,
+    char **argv1, int *argc)
+{
+    if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_route_map_entry_col_description,
+                                      idl_seqno)) {
+        VLOG_DBG("Route-map description was modified");
+        *argc = RT_MAP_DESCRIPTION;
+        if (ovs_entry->description) {
+            VLOG_DBG("Setting description %s", ovs_entry->description);
+            strcpy(argv1[RT_MAP_DESCRIPTION], ovs_entry->description);
+        } else {
+            VLOG_DBG("Unsetting description");
+            argv1[RT_MAP_DESCRIPTION] = NULL;
+        }
+    }
+}
+
+void
+policy_rt_map_match_ovsdb_apply_changes(
+    struct ovsrec_route_map_entry *ovs_entry,
+    struct route_map *map, unsigned long pref, int action,
+    char **argv, int *argc)
+{
+    VLOG_DBG("Checking for route map match changes...");
+    struct route_map_rule_cmd *cmd;
+    struct route_map_index *index;
+    char *match_name;
+    const char *tmp;
+
+    if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_route_map_entry_col_match,
+                                      idl_seqno)) {
+        VLOG_DBG("Route map match was changed. Detecting additions/deletions.");
+        int i;
+        for (i = 0, *argc = 0; match_table[i].table_key; i++) {
+            tmp  = smap_get(&ovs_entry->match, match_table[i].table_key);
+            match_name = match_table[i].cli_cmd;
+            if (tmp) {
+                strcpy(argv[*argc++], match_name);
+                strcpy(argv[*argc++], tmp);
+            } else {
+                /* Value was not found in the ovsdb record, check if
+                 * it exists in BGP. If exists, then indicates it was deleted.
+                 */
+                index = route_map_index_lookup(map, action, pref);
+                if (index) {
+                    /* Attempt to delete the match rule. */
+                    if (route_map_delete_match(index, match_name, NULL) == 0) {
+                        VLOG_DBG("Route map match deleted");
+                    }
+                }
+            }
+        }
+    }
+}
+
+void
+policy_rt_map_set_ovsdb_apply_changes(
+    struct ovsrec_route_map_entry *ovs_entry,
+    struct route_map *map, unsigned long pref, int action,
+    char **argv, int *argc)
+{
+    VLOG_DBG("Checking for route map set changes...");
+    struct route_map_rule_cmd *cmd;
+    struct route_map_index *index;
+    char *set_name;
+    const char *tmp;
+
+    if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_route_map_entry_col_set,
+                                      idl_seqno)) {
+        VLOG_DBG("Route map set was changed. Detecting additions/deletions.");
+        int i;
+        for (i = 0, *argc = 0; set_table[i].table_key; i++) {
+            tmp  = smap_get(&ovs_entry->set, set_table[i].table_key);
+            set_name = set_table[i].cli_cmd;
+            if (tmp) {
+                strcpy(argv[*argc++], set_name);
+                strcpy(argv[*argc++], tmp);
+            } else {
+                /* Value was not found in the ovsdb record, check if
+                 * it exists in BGP. If exists, then indicates it was deleted.
+                 */
+                index = route_map_index_lookup(map, action, pref);
+                if (index) {
+                    /* Attempt to delete the set rule. */
+                    if (route_map_delete_set(index, set_name, NULL) == 0) {
+                        VLOG_DBG("Route map set deleted");
+                    }
+                }
+            }
+        }
+    }
+}
 
 /*
  * route-map RM_TO_UPSTREAM_PEER permit 10
@@ -1234,122 +1337,110 @@ void
 policy_rt_map_do_change (struct ovsdb_idl *idl,
                         char **argv1, char **argvmatch, char **argvset)
 {
-  const struct ovsrec_route_map * ovs_map;
-  struct ovsrec_route_map_entry * ovs_entry;
-  unsigned long pref;
-  const char *tmp;
-  int argc1, argcmatch, argcset;
-  int i, j;
+    const struct ovsrec_route_map * ovs_map;
+    struct ovsrec_route_map_entry * ovs_entry;
+    struct route_map *map;
+    unsigned long pref;
+    int argc1, argcmatch, argcset;
+    int i;
+    int rmap_action;
 
-  /*
-   * Read from ovsdb
-   */
-  OVSREC_ROUTE_MAP_FOR_EACH(ovs_map, idl) {
-      strcpy(argv1[RT_MAP_NAME], ovs_map->name);
-      argc1 = RT_MAP_NAME;
+    /*
+     * Read from ovsdb
+     */
+    OVSREC_ROUTE_MAP_FOR_EACH(ovs_map, idl) {
+        strcpy(argv1[RT_MAP_NAME], ovs_map->name);
+        argc1 = RT_MAP_NAME;
 
-      for (i = 0; i < ovs_map->n_route_map_entries; i ++) {
-          ovs_entry = ovs_map->value_route_map_entries[i];
-          if ( !(OVSREC_IDL_IS_ROW_INSERTED(ovs_entry, idl_seqno)) &&
-                 !(OVSREC_IDL_IS_ROW_MODIFIED(ovs_entry, idl_seqno))) {
-              continue;
-          }
-          strcpy(argv1[RT_MAP_ACTION], ovs_entry->action);
-          argc1 = RT_MAP_ACTION;
-          pref = ovs_map->key_route_map_entries[i];
+        /* Get route map associated with the provided name. */
+        map = route_map_get(argv1[RT_MAP_NAME]);
 
-          if (ovs_entry->description) {
-              strcpy(argv1[RT_MAP_DESCRIPTION], ovs_entry->description);
-              argc1 = RT_MAP_DESCRIPTION;
-          }
+        for (i = 0; i < ovs_map->n_route_map_entries; i ++) {
+            ovs_entry = ovs_map->value_route_map_entries[i];
+            if (!(OVSREC_IDL_IS_ROW_INSERTED(ovs_entry, idl_seqno)) &&
+                !(OVSREC_IDL_IS_ROW_MODIFIED(ovs_entry, idl_seqno))) {
+                continue;
+            }
 
-          for (i = 0, j = 0; match_table[i].table_key; i++ ) {
-              tmp  = smap_get(&ovs_entry->match, match_table[i].table_key);
-              if (tmp) {
-                  strcpy(argvmatch[j++], match_table[i].cli_cmd);
-                  strcpy(argvmatch[j++], tmp);
-              }
-          }
-          argcmatch = j;
+            strcpy(argv1[RT_MAP_ACTION], ovs_entry->action);
+            /* Convert route-map action string and check if valid. */
+            if (route_map_action_str_to_enum(argv1[RT_MAP_ACTION],
+                                             &rmap_action) != CMD_SUCCESS) {
+                VLOG_ERR("Invalid action");
+                return;
+            }
 
-          for (i = 0, j = 0; set_table[i].table_key; i++ ) {
-              tmp  = smap_get(&ovs_entry->set, set_table[i].table_key);
-              if (tmp) {
-                  strcpy(argvset[j++], set_table[i].cli_cmd);
-                  strcpy(argvset[j++], tmp);
-              }
-          }
-          argcset = j;
-          /*
-           * programming back end
-           */
-          policy_rt_map_apply_changes (idl, argv1, argvmatch, argvset,
-                        argc1, argcmatch, argcset, pref);
-      }
-  }
+            argc1 = RT_MAP_ACTION;
+            pref = ovs_map->key_route_map_entries[i];
+            /* Preference check. */
+            if ((pref == ULONG_MAX) || (pref == 0) || (pref > 65535)) {
+                VLOG_ERR("Invalid pref value");
+                return;
+            }
+
+            policy_rt_map_description_ovsdb_apply_changes(ovs_entry, argv1,
+                                                          &argc1);
+
+            policy_rt_map_match_ovsdb_apply_changes(ovs_entry, map, pref,
+                                                    rmap_action, argvmatch,
+                                                    &argcmatch);
+
+            policy_rt_map_set_ovsdb_apply_changes(ovs_entry, map, pref,
+                                                  rmap_action, argvset,
+                                                  &argcset);
+
+            /*
+             * programming back end
+             */
+            policy_rt_map_apply_changes(map, argv1, argvmatch, argvset, argc1,
+                                        argcmatch, argcset, pref, rmap_action);
+        }
+    }
 }
-
 
 int
 policy_rt_map_read_ovsdb_apply_changes (struct ovsdb_idl *idl)
 {
-  int permit;
-  unsigned long pref = 0;
-  struct route_map *map;
-  struct route_map_index *index;
-  int i;
-  char **argv1;
-  char **argvmatch;
-  char **argvset;
-  int ret;
-  const struct ovsrec_route_map_entry * rt_map_first;
-  const struct ovsrec_route_map_entry * rt_map_next;
-  int j;
-  char *tmp;
-  struct smap_node *node;
-  const struct ovsrec_route_map * ovs_map, *ovs_first;
-  const struct ovsrec_route_map_entry * ovs_entry;
+    char **argv1;
+    char **argvmatch;
+    char **argvset;
+    const struct ovsrec_route_map_entry * rt_map_first;
+    const struct ovsrec_route_map_entry * rt_map_next;
 
+    /* Handle route map deletion */
+    policy_rt_map_read_ovsdb_apply_deletion (idl);
 
-  /*
-   * handle route map deletion
-   */
-  policy_rt_map_read_ovsdb_apply_deletion (idl);
-  /*
-   * handle route map entry deletion
-   */
-  policy_rt_map_entry_read_ovsdb_apply_deletion (idl);
+    /* Handle route map entry deletion */
+    policy_rt_map_entry_read_ovsdb_apply_deletion (idl);
 
- /* handle route map insert/change case */
-  rt_map_first = ovsrec_route_map_entry_first(idl);
-  if (rt_map_first == NULL) {
-      VLOG_INFO("Nothing configed for route map\n");
-      return CMD_SUCCESS;
-  }
+    /* handle route map insert/change case */
+    rt_map_first = ovsrec_route_map_entry_first(idl);
+    if (rt_map_first == NULL) {
+        VLOG_DBG("Nothing was configured for route map");
+        return CMD_SUCCESS;
+    }
 
-  if ( !(OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED(rt_map_first, idl_seqno)) &&
-         !(OVSREC_IDL_ANY_TABLE_ROWS_INSERTED(rt_map_first, idl_seqno)) ) {
-      VLOG_INFO("Nothing changed for route map\n");
-      return CMD_SUCCESS;
-  }
+    if (!(OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED(rt_map_first, idl_seqno)) &&
+        !(OVSREC_IDL_ANY_TABLE_ROWS_INSERTED(rt_map_first, idl_seqno))) {
+        VLOG_DBG("Nothing was changed for route map");
+        return CMD_SUCCESS;
+    }
 
-  /*
-   * alloc three argv lists
-   */
-  if (!(argv1 = policy_ovsdb_alloc_arg_list(MAX_ARGC, MAX_ARG_LEN)) ||
-       !(argvmatch = policy_ovsdb_alloc_arg_list(MAX_ARGC, MAX_ARG_LEN)) ||
-         !(argvset = policy_ovsdb_alloc_arg_list(MAX_ARGC, MAX_ARG_LEN))) {
-      VLOG_INFO("Memory allocation failed for working buffer\n");
-      return CMD_SUCCESS;
-  }
+    /* Alloc three argv lists */
+    if (!(argv1 = policy_ovsdb_alloc_arg_list(MAX_ARGC, MAX_ARG_LEN)) ||
+        !(argvmatch = policy_ovsdb_alloc_arg_list(MAX_ARGC, MAX_ARG_LEN)) ||
+        !(argvset = policy_ovsdb_alloc_arg_list(MAX_ARGC, MAX_ARG_LEN))) {
+        VLOG_ERR("Memory allocation failed for working buffer\n");
+        return CMD_SUCCESS;
+    }
 
-  policy_rt_map_do_change(idl, argv1, argvmatch, argvset);
+    policy_rt_map_do_change(idl, argv1, argvmatch, argvset);
 
-  policy_ovsdb_free_arg_list(&argv1, MAX_ARGC);
-  policy_ovsdb_free_arg_list(&argvmatch, MAX_ARGC);
-  policy_ovsdb_free_arg_list(&argvset, MAX_ARGC);
+    policy_ovsdb_free_arg_list(&argv1, MAX_ARGC);
+    policy_ovsdb_free_arg_list(&argvmatch, MAX_ARGC);
+    policy_ovsdb_free_arg_list(&argvset, MAX_ARGC);
 
-  return CMD_SUCCESS;
+    return CMD_SUCCESS;
 }
 
 /*
@@ -1373,6 +1464,23 @@ policy_ovsdb_rt_map_vlog(int ret)
     return CMD_SUCCESS;
 }
 
+int route_map_action_str_to_enum(const char *action_str, int *action) {
+    if (!action_str || !action_str[0]) {
+        VLOG_ERR("Invalid action string");
+        return CMD_WARNING;
+    }
+
+    int action_len = strlen(action_str);
+    if (strncmp(action_str, "permit", action_len) == 0)
+        *action = RMAP_PERMIT;
+    else if (strncmp(action_str, "deny", action_len) == 0)
+        *action = RMAP_DENY;
+    else
+        return CMD_WARNING;
+
+    return CMD_SUCCESS;
+}
+
 /*
  * Set up route map at the back end
  * Read from ovsdb, then program back end policy route map
@@ -1381,66 +1489,61 @@ policy_ovsdb_rt_map_vlog(int ret)
  * route-map RM_TO_UPSTREAM_PEER permit 10
  */
 int
-policy_rt_map_apply_changes (struct ovsdb_idl *idl,
-                        const char **argv1, char **argvmatch, char **argvset,
-                        int argc1, int argcmatch, int argcset,
-                        unsigned long pref)
+policy_rt_map_apply_changes (struct route_map *map,
+                             const char **argv1, char **argvmatch, char **argvset,
+                             int argc1, int argcmatch, int argcset,
+                             unsigned long pref, int action)
 {
-  int permit;
-  struct route_map *map;
-  struct route_map_index *index;
-  int i;
-  int ret;
+    int i;
+    int ret;
+    struct route_map_index *index;
 
-  if (! argc1)
-      return CMD_SUCCESS;
+    if (! argc1)
+        return CMD_SUCCESS;
 
-  /* Get route map. */
-  map = route_map_get (argv1[RT_MAP_NAME]);
+    index = route_map_index_get(map, action, pref);
 
-  /* Permit check. */
-  if (strncmp (argv1[RT_MAP_ACTION], "permit", strlen (argv1[RT_MAP_ACTION])) == 0)
-    permit = RMAP_PERMIT;
-  else if (strncmp (argv1[RT_MAP_ACTION], "deny", strlen (argv1[RT_MAP_ACTION])) == 0)
-    permit = RMAP_DENY;
-  else {
-      return CMD_SUCCESS;
-  }
+    if (argc1 == RT_MAP_DESCRIPTION) {
+        if (index->description)
+            XFREE (MTYPE_TMP, index->description);
 
-  /* Preference check. */
-  if (pref == ULONG_MAX) {
-      return CMD_SUCCESS;
-  }
-  if (pref == 0 || pref > 65535) {
-      return CMD_SUCCESS;
-  }
+        index->description = argv1[RT_MAP_DESCRIPTION] ?
+                                argv_concat (&argv1[RT_MAP_DESCRIPTION], 1, 0) :
+                                NULL;
+    }
 
-  index = route_map_index_get (map, permit, pref);
+    /*
+    * Add route map match command
+    */
+    for (i = 0; i < argcmatch; i += 2) {
+        ret = route_map_add_match (index, argvmatch[i], argvmatch[i+1]);
+        /* log if error */
+        ret = policy_ovsdb_rt_map_vlog(ret);
+    }
 
-  if (argc1 == RT_MAP_DESCRIPTION) {
-      if (index->description)
-        XFREE (MTYPE_TMP, index->description);
-      index->description = argv_concat (&argv1[RT_MAP_DESCRIPTION], 1, 0);
-  }
+    /*
+    * Add route map set command
+    */
+    for (i = 0; i < argcset; i += 2) {
+        ret = route_map_add_set (index, argvset[i], argvset[i+1]);
+        ret = policy_ovsdb_rt_map_vlog(ret);
+    }
 
-  /*
-   * Add route map match command
-   */
-  for (i = 0; i < argcmatch; i += 2) {
-      ret = route_map_add_match (index, argvmatch[i], argvmatch[i+1]);
-      /* log if error */
-      ret = policy_ovsdb_rt_map_vlog(ret);
-  }
+    return CMD_SUCCESS;
+}
 
-  /*
-   * Add route map set command
-   */
-  for (i = 0; i < argcset; i += 2) {
-      ret = route_map_add_set (index, argvset[i], argvset[i+1]);
-      ret = policy_ovsdb_rt_map_vlog(ret);
-  }
+int
+prefix_list_type_str_to_enum(char *typestr, enum prefix_list_type *type)
+{
+    /* Check filter type. */
+    if (strncmp("permit", typestr, 1) == 0)
+        *type = PREFIX_PERMIT;
+    else if (strncmp("deny", typestr, 1) == 0)
+        *type = PREFIX_DENY;
+    else
+        return CMD_WARNING;
 
-  return CMD_SUCCESS;
+    return CMD_SUCCESS;
 }
 
 /*
@@ -1471,13 +1574,10 @@ policy_prefix_list_apply_changes (struct ovsdb_idl *idl,
   /* Get prefix_list with name. */
   plist = prefix_list_get (afi, argv1[PREFIX_LIST_NAME]);
 
-  /* Check filter type. */
-  if (strncmp ("permit", argv1[PREFIX_LIST_ACTION], 1) == 0)
-    type = PREFIX_PERMIT;
-  else if (strncmp ("deny", argv1[PREFIX_LIST_ACTION], 1) == 0)
-    type = PREFIX_DENY;
-  else {
-        return CMD_SUCCESS;
+  if (prefix_list_type_str_to_enum(argv1[PREFIX_LIST_ACTION],
+                                   &type) != CMD_SUCCESS) {
+    VLOG_ERR("Invalid prefix-list type");
+    return CMD_SUCCESS;
   }
 
   /* "any" is special token for matching any IPv4 addresses.  */
@@ -1513,72 +1613,246 @@ policy_prefix_list_apply_changes (struct ovsdb_idl *idl,
   return CMD_SUCCESS;
 }
 
-int
-policy_prefix_list_read_ovsdb_apply_changes (struct ovsdb_idl *idl)
+const struct ovsrec_prefix_list *
+lookup_prefix_list_from_ovsdb(const char *name)
 {
-  int ret;
-  enum prefix_list_type type;
-  struct prefix_list *plist;
-  struct prefix_list_entry *pentry;
-  struct prefix_list_entry *dup;
-  struct prefix p;
-  int any = 0;
-  int seqnum = -1;
-  int lenum = 0;
-  int genum = 0;
-  afi_t afi = AFI_IP;
-  char **argv1;
-  char **argvseq;
-  int argc1 = -1 , argcseq = -1;
-  const struct ovsrec_prefix_list_entry * prefix_first;
-  char *tmp;
-  const struct ovsrec_prefix_list * ovs_plist;
-  struct ovsrec_prefix_list_entry * ovs_entry;
-  int i;
+    const struct ovsrec_prefix_list *ovs_plist;
 
-  prefix_first = ovsrec_prefix_list_entry_first(idl);
-  if (prefix_first == NULL) {
-       VLOG_INFO("Nothing  prefix list configed\n");
-     return CMD_SUCCESS;
-  }
-
-  if ( !(OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED(prefix_first, idl_seqno)) &&
-     !(OVSREC_IDL_ANY_TABLE_ROWS_INSERTED(prefix_first, idl_seqno)) ) {
-     VLOG_INFO("Nothing changed for prefix list \n");
-     return CMD_SUCCESS;
-  }
-  /*
-   * allocate two argv lists
-   */
-  if (!(argv1 = policy_ovsdb_alloc_arg_list(MAX_ARGC, MAX_ARG_LEN)) ||
-         !(argvseq = policy_ovsdb_alloc_arg_list(MAX_ARGC, MAX_ARG_LEN))) {
-     return CMD_SUCCESS;
-  }
-  /*
-   * Read ovsdb and apply changes
-   */
-  OVSREC_PREFIX_LIST_FOR_EACH(ovs_plist, idl) {
-    strcpy(argv1[PREFIX_LIST_NAME], ovs_plist->name);
-    argc1 = PREFIX_LIST_NAME;
-    for (i = 0; i < ovs_plist->n_prefix_list_entries; i ++) {
-        ovs_entry = ovs_plist->value_prefix_list_entries[i];
-        if ( !(OVSREC_IDL_IS_ROW_INSERTED(ovs_entry, idl_seqno)) &&
-               !(OVSREC_IDL_IS_ROW_MODIFIED(ovs_entry, idl_seqno))) {
-            continue;
-        }
-        VLOG_INFO("prefix list configed modified \n");
-        strcpy(argv1[PREFIX_LIST_ACTION], ovs_entry->action);
-        strcpy(argv1[PREFIX_LIST_PREFIX], ovs_entry->prefix);
-        argc1 = PREFIX_LIST_PREFIX + 1;
-        seqnum = ovs_plist->key_prefix_list_entries[i];
-        argcseq =1 ;
-
-        policy_prefix_list_apply_changes (idl, argv1, argvseq,
-                        argc1, argcseq, seqnum);
+    if (!name) {
+        VLOG_ERR("Prefix List name is NULL.");
+        return NULL;
     }
- }
 
-  policy_ovsdb_free_arg_list(&argv1, MAX_ARGC);
-  policy_ovsdb_free_arg_list(&argvseq, MAX_ARGC);
-  return CMD_SUCCESS;
+    OVSREC_PREFIX_LIST_FOR_EACH(ovs_plist, idl) {
+        if (strcmp (name, ovs_plist->name) == 0) {
+            return ovs_plist;
+        }
+    }
+
+    return NULL;
+}
+
+void
+prefix_list_read_ovsdb_delete_from_master(struct prefix_list *plist_head)
+{
+    struct prefix_list * plist;
+
+    if (!plist_head) {
+        VLOG_ERR("Prefix List head is NULL.");
+        return;
+    }
+
+    for (plist = plist_head; plist; plist = plist->next) {
+        if (!lookup_prefix_list_from_ovsdb(plist->name)) {
+            VLOG_DBG("Deleting prefix list: %s", plist->name);
+            prefix_list_delete(plist);
+        }
+    }
+}
+
+bool
+prefix_list_compare_ovs_quagga_plist_entry(
+        int64_t ovs_seq_num,
+        struct ovsrec_prefix_list_entry *ovs_plist_entry,
+        struct prefix_list_entry *plist_entry)
+{
+    int le = 0, ge = 0;
+    enum prefix_list_type type;
+    char prefix_str[256];
+    int prefix_str_len;
+
+    prefix_str_len = sizeof(prefix_str);
+    memset(prefix_str, 0, prefix_str_len);
+
+    if (prefix2str(&plist_entry->prefix, prefix_str, prefix_str_len)) {
+        VLOG_ERR("Invalid prefix string");
+        return false;
+    }
+
+    if (!ovs_plist_entry || !plist_entry) {
+        VLOG_ERR("Invalid prefix list entry");
+        return false;
+    }
+
+    if (prefix_list_type_str_to_enum(ovs_plist_entry->action,
+                                     &type) != CMD_SUCCESS) {
+        VLOG_ERR("Invalid prefix-list type");
+        return false;
+    }
+
+    if ((ovs_seq_num == plist_entry->seq) && (type == plist_entry->type) &&
+        !strcmp(ovs_plist_entry->prefix, prefix_str)) {
+        le = plist_entry->le;
+        ge = plist_entry->ge;
+
+        if (!(ovs_plist_entry->n_le && (le != ovs_plist_entry->le[0])) &&
+            !(ovs_plist_entry->n_ge && (ge != ovs_plist_entry->ge[0]))) {
+            VLOG_DBG("prefix-list entry values match");
+            return true;
+        }
+    }
+
+    return false;
+}
+
+void
+prefix_list_entry_read_ovsdb_delete_from_master(struct prefix_list *plist_head)
+{
+    struct prefix_list *plist;
+    struct prefix_list_entry *plist_entry;
+    const struct ovsrec_prefix_list *ovs_plist;
+    struct ovsrec_prefix_list_entry *ovs_plist_entry;
+
+    int update_list = 1;
+    int i;
+
+    if (!plist_head) {
+        VLOG_ERR("Prefix List head is NULL.");
+        return;
+    }
+
+    for (plist = plist_head; plist; plist = plist->next) {
+        ovs_plist = lookup_prefix_list_from_ovsdb(plist->name);
+        if (ovs_plist) {
+            for (plist_entry = plist->head; plist_entry;
+                 plist_entry = plist_entry->next) {
+                bool matched = false;
+
+                // Search against entries in prefix list stored in OVSDB
+                for (i = 0; i < ovs_plist->n_prefix_list_entries; i++) {
+                    // The key of the prefix list entry is the seq number
+                    int64_t ovs_seqnum = ovs_plist->key_prefix_list_entries[i];
+                    ovs_plist_entry = ovs_plist->value_prefix_list_entries[i];
+
+                    if (prefix_list_compare_ovs_quagga_plist_entry(ovs_seqnum,
+                            ovs_plist_entry, plist_entry)) {
+                        matched = true;
+                        break;
+                    }
+                }
+
+                if (!matched) {
+                    VLOG_DBG("Match not found. Deleting plist entry");
+                    prefix_list_entry_delete(plist, plist_entry, update_list);
+                }
+            }
+        }
+    }
+}
+
+void
+policy_prefix_list_read_ovsdb_apply_deletion(struct ovsdb_idl *idl)
+{
+    const struct ovsrec_prefix_list *ovs_first;
+    struct prefix_master *master;
+    afi_t afi = AFI_IP;
+
+    ovs_first = ovsrec_prefix_list_first(idl);
+    if (ovs_first && !OVSREC_IDL_ANY_TABLE_ROWS_DELETED(ovs_first, idl_seqno)) {
+        VLOG_DBG("No prefix list deletions detected.");
+        return;
+    }
+
+    master = prefix_master_get (afi);
+    if (master == NULL) {
+        VLOG_DBG("No prefix list to delete");
+        return;
+    }
+
+    // Check number based name list
+    prefix_list_read_ovsdb_delete_from_master(master->num.head);
+
+    // Check string based name list
+    prefix_list_read_ovsdb_delete_from_master(master->str.head);
+}
+
+void
+policy_prefix_list_entry_read_ovsdb_apply_deletion (struct ovsdb_idl *idl)
+{
+    const struct ovsrec_prefix_list *ovs_first;
+    struct prefix_master *master;
+    afi_t afi = AFI_IP;
+
+    /* prefix list */
+    ovs_first = ovsrec_prefix_list_first(idl);
+    if (ovs_first && !OVSREC_IDL_ANY_TABLE_ROWS_DELETED(ovs_first, idl_seqno)) {
+        VLOG_DBG("No prefix list deletions detected.");
+        return;
+    }
+
+    master = prefix_master_get (afi);
+    if (master == NULL) {
+        VLOG_DBG("No prefix list to delete");
+        return;
+    }
+
+    // Check number based name list
+    prefix_list_entry_read_ovsdb_delete_from_master(master->num.head);
+
+    // Check string based name list
+    prefix_list_entry_read_ovsdb_delete_from_master(master->str.head);
+}
+
+int
+policy_prefix_list_read_ovsdb_apply_changes(struct ovsdb_idl *idl)
+{
+    int ret;
+    int seqnum = -1;
+    char **argv1;
+    char **argvseq;
+    int argc1 = -1 , argcseq = -1;
+    const struct ovsrec_prefix_list_entry * prefix_first;
+    const struct ovsrec_prefix_list * ovs_plist;
+    struct ovsrec_prefix_list_entry * ovs_entry;
+    int i;
+
+    /* Handle prefix list deletions. */
+    policy_prefix_list_read_ovsdb_apply_deletion (idl);
+
+    /* Handle prefix list entry deletions. */
+    policy_prefix_list_entry_read_ovsdb_apply_deletion (idl);
+
+    prefix_first = ovsrec_prefix_list_entry_first(idl);
+    if (prefix_first == NULL) {
+        VLOG_DBG("No prefix list configured");
+        return CMD_SUCCESS;
+    }
+
+    if (!(OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED(prefix_first, idl_seqno)) &&
+        !(OVSREC_IDL_ANY_TABLE_ROWS_INSERTED(prefix_first, idl_seqno))) {
+        VLOG_DBG("No changes for prefix list");
+        return CMD_SUCCESS;
+    }
+
+    /* Allocate two argv lists. */
+    if (!(argv1 = policy_ovsdb_alloc_arg_list(MAX_ARGC, MAX_ARG_LEN)) ||
+        !(argvseq = policy_ovsdb_alloc_arg_list(MAX_ARGC, MAX_ARG_LEN))) {
+        return CMD_SUCCESS;
+    }
+
+    /* Read ovsdb and apply changes */
+    OVSREC_PREFIX_LIST_FOR_EACH(ovs_plist, idl) {
+        strcpy(argv1[PREFIX_LIST_NAME], ovs_plist->name);
+        argc1 = PREFIX_LIST_NAME;
+        for (i = 0; i < ovs_plist->n_prefix_list_entries; i ++) {
+            ovs_entry = ovs_plist->value_prefix_list_entries[i];
+            if (!(OVSREC_IDL_IS_ROW_INSERTED(ovs_entry, idl_seqno)) &&
+                !(OVSREC_IDL_IS_ROW_MODIFIED(ovs_entry, idl_seqno))) {
+                continue;
+            }
+            VLOG_DBG("prefix list config modified");
+            strcpy(argv1[PREFIX_LIST_ACTION], ovs_entry->action);
+            strcpy(argv1[PREFIX_LIST_PREFIX], ovs_entry->prefix);
+            argc1 = PREFIX_LIST_PREFIX + 1;
+            seqnum = ovs_plist->key_prefix_list_entries[i];
+            argcseq =1 ;
+
+            policy_prefix_list_apply_changes(idl, argv1, argvseq,
+                                             argc1, argcseq, seqnum);
+        }
+    }
+
+    policy_ovsdb_free_arg_list(&argv1, MAX_ARGC);
+    policy_ovsdb_free_arg_list(&argvseq, MAX_ARGC);
+    return CMD_SUCCESS;
 }

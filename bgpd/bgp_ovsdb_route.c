@@ -1164,29 +1164,31 @@ policy_ovsdb_alloc_arg_list(int argcsize, int argvsize)
 void
 policy_rt_map_read_ovsdb_apply_deletion (struct ovsdb_idl *idl)
 {
-  const struct ovsrec_route_map *ovs_map, *ovs_first;
-  int matched = 0;
-  struct route_map * map;
+    const struct ovsrec_route_map *ovs_map, *ovs_first;
+    int matched = 0;
+    struct route_map * map;
 
-  /* route map */
-  ovs_first = ovsrec_route_map_first(idl);
-  if (ovs_first && !OVSREC_IDL_ANY_TABLE_ROWS_DELETED(ovs_first, idl_seqno)) {
-    VLOG_DBG("No route map rows were deleted");
-    return;
-  }
+    /* route map */
+    ovs_first = ovsrec_route_map_first(idl);
+    if (ovs_first && !OVSREC_IDL_ANY_TABLE_ROWS_DELETED(ovs_first, idl_seqno)) {
+        VLOG_DBG("No route map rows were deleted");
+        return;
+    }
 
-  for (map = route_map_master.head; map; map = map->next) {
-    matched = 0;
-    OVSREC_ROUTE_MAP_FOR_EACH(ovs_map, idl) {
-      if (strcmp (map->name, ovs_map->name) == 0) {
-        matched = 1;
-        break;
-      }
+    for (map = route_map_master.head; map; map = map->next) {
+        matched = 0;
+        OVSREC_ROUTE_MAP_FOR_EACH(ovs_map, idl) {
+            if (strcmp (map->name, ovs_map->name) == 0) {
+                matched = 1;
+                break;
+            }
+        }
+
+        if (!matched) {
+            route_map_delete (map);
+            VLOG_DBG("Route map row deleted");
+        }
     }
-    if (!matched) {
-      route_map_delete (map);
-    }
-  }
 }
 
 void
@@ -1206,12 +1208,22 @@ policy_rt_map_entry_read_ovsdb_apply_deletion (struct ovsdb_idl *idl)
         return;
     }
 
+    VLOG_DBG("Checking for route map entry deletions");
     for (map = route_map_master.head; map; map = map->next) {
+        VLOG_DBG("Finding route-map with name: %s", map->name);
+
         OVSREC_ROUTE_MAP_FOR_EACH(ovs_map, idl) {
+            VLOG_DBG("Comparing against route-map with name: %s",
+                     ovs_map->name);
+
             if (strcmp (map->name, ovs_map->name) == 0) {
                 for (index = map->head; index; index = index->next) {
+                    VLOG_DBG("Checking pref %lld", index->pref);
+
                     matched = 0;
                     for (i = 0; i < ovs_map->n_route_map_entries; i ++) {
+                        VLOG_DBG("Checking against pref %lld", index->pref);
+
                         if (index->pref == ovs_map->key_route_map_entries[i]) {
                             matched = 1;
                             break;
@@ -1220,11 +1232,7 @@ policy_rt_map_entry_read_ovsdb_apply_deletion (struct ovsdb_idl *idl)
 
                     if (!matched) {
                         route_map_index_delete (index, 1);
-
-                        /* If this route rule is the last one,
-                           delete route map itself. */
-                        if (route_map_empty (map))
-                            route_map_delete (map);
+                        VLOG_DBG("Route map entry deleted");
                     }
                 }
             }
@@ -1268,12 +1276,17 @@ policy_rt_map_match_ovsdb_apply_changes(
         VLOG_DBG("Route map match was changed. Detecting additions/deletions.");
         int i;
         for (i = 0, *argc = 0; match_table[i].table_key; i++) {
+            VLOG_DBG("Checking value for: %s", match_table[i].table_key);
+
             tmp  = smap_get(&ovs_entry->match, match_table[i].table_key);
             match_name = match_table[i].cli_cmd;
             if (tmp) {
-                strcpy(argv[*argc++], match_name);
-                strcpy(argv[*argc++], tmp);
+                VLOG_DBG("Value was set with: %s", tmp);
+                strcpy(argv[(*argc)++], match_name);
+                strcpy(argv[(*argc)++], tmp);
             } else {
+                VLOG_DBG("Value was not set. Detecting deletion.");
+
                 /* Value was not found in the ovsdb record, check if
                  * it exists in BGP. If exists, then indicates it was deleted.
                  */
@@ -1306,12 +1319,17 @@ policy_rt_map_set_ovsdb_apply_changes(
         VLOG_DBG("Route map set was changed. Detecting additions/deletions.");
         int i;
         for (i = 0, *argc = 0; set_table[i].table_key; i++) {
+            VLOG_DBG("Checking value for: %s", set_table[i].table_key);
+
             tmp  = smap_get(&ovs_entry->set, set_table[i].table_key);
             set_name = set_table[i].cli_cmd;
             if (tmp) {
-                strcpy(argv[*argc++], set_name);
-                strcpy(argv[*argc++], tmp);
+                VLOG_DBG("Value was set with: %s", tmp);
+                strcpy(argv[(*argc)++], set_name);
+                strcpy(argv[(*argc)++], tmp);
             } else {
+                VLOG_DBG("Value was not set. Detecting deletion.");
+
                 /* Value was not found in the ovsdb record, check if
                  * it exists in BGP. If exists, then indicates it was deleted.
                  */
@@ -1334,14 +1352,14 @@ policy_rt_map_set_ovsdb_apply_changes(
  * Read rt map config from ovsdb to argv
  */
 void
-policy_rt_map_do_change (struct ovsdb_idl *idl,
+policy_rt_map_do_change(struct ovsdb_idl *idl,
                         char **argv1, char **argvmatch, char **argvset)
 {
     const struct ovsrec_route_map * ovs_map;
     struct ovsrec_route_map_entry * ovs_entry;
     struct route_map *map;
     unsigned long pref;
-    int argc1, argcmatch, argcset;
+    int argc1 = 0, argcmatch = 0, argcset = 0;
     int i;
     int rmap_action;
 
@@ -1353,6 +1371,7 @@ policy_rt_map_do_change (struct ovsdb_idl *idl,
         argc1 = RT_MAP_NAME;
 
         /* Get route map associated with the provided name. */
+        VLOG_DBG("Configuring for route-map with name: %s", argv1[RT_MAP_NAME]);
         map = route_map_get(argv1[RT_MAP_NAME]);
 
         for (i = 0; i < ovs_map->n_route_map_entries; i ++) {
@@ -1498,10 +1517,17 @@ policy_rt_map_apply_changes (struct route_map *map,
     int ret;
     struct route_map_index *index;
 
-    if (! argc1)
+    if (!argc1) {
+        VLOG_DBG("Nothing to configure for route-map");
         return CMD_SUCCESS;
+    }
 
     index = route_map_index_get(map, action, pref);
+
+    if (!index) {
+        VLOG_ERR("Route map not found");
+        return CMD_SUCCESS;
+    }
 
     if (argc1 == RT_MAP_DESCRIPTION) {
         if (index->description)
@@ -1638,7 +1664,7 @@ prefix_list_read_ovsdb_delete_from_master(struct prefix_list *plist_head)
     struct prefix_list * plist;
 
     if (!plist_head) {
-        VLOG_ERR("Prefix List head is NULL.");
+        VLOG_DBG("Prefix List head is NULL.");
         return;
     }
 
@@ -1707,10 +1733,11 @@ prefix_list_entry_read_ovsdb_delete_from_master(struct prefix_list *plist_head)
     int i;
 
     if (!plist_head) {
-        VLOG_ERR("Prefix List head is NULL.");
+        VLOG_DBG("Prefix List head is NULL.");
         return;
     }
 
+    VLOG_DBG("Checking for prefix list entry deletions.");
     for (plist = plist_head; plist; plist = plist->next) {
         ovs_plist = lookup_prefix_list_from_ovsdb(plist->name);
         if (ovs_plist) {
@@ -1732,7 +1759,7 @@ prefix_list_entry_read_ovsdb_delete_from_master(struct prefix_list *plist_head)
                 }
 
                 if (!matched) {
-                    VLOG_DBG("Match not found. Deleting plist entry");
+                    VLOG_DBG("Deleting plist entry");
                     prefix_list_entry_delete(plist, plist_entry, update_list);
                 }
             }
@@ -1769,14 +1796,14 @@ policy_prefix_list_read_ovsdb_apply_deletion(struct ovsdb_idl *idl)
 void
 policy_prefix_list_entry_read_ovsdb_apply_deletion (struct ovsdb_idl *idl)
 {
-    const struct ovsrec_prefix_list *ovs_first;
+    const struct ovsrec_prefix_list_entry *ovs_first;
     struct prefix_master *master;
     afi_t afi = AFI_IP;
 
     /* prefix list */
-    ovs_first = ovsrec_prefix_list_first(idl);
+    ovs_first = ovsrec_prefix_list_entry_first(idl);
     if (ovs_first && !OVSREC_IDL_ANY_TABLE_ROWS_DELETED(ovs_first, idl_seqno)) {
-        VLOG_DBG("No prefix list deletions detected.");
+        VLOG_DBG("No prefix list entry deletions detected.");
         return;
     }
 

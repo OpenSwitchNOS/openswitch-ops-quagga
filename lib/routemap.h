@@ -207,7 +207,7 @@ struct route_map_list
   void (*event_hook) (route_map_event_t, const char *);
 };
 
-static struct route_map_list route_map_master = { NULL, NULL, NULL, NULL };
+extern struct route_map_list route_map_master;
 
 extern struct route_map_index *
 route_map_index_get (struct route_map *map, enum route_map_type type,
@@ -217,6 +217,7 @@ extern void route_map_index_delete (struct route_map_index *index, int notify);
 extern struct route_map_index *route_map_index_lookup(struct route_map *map,
                                                       enum route_map_type type,
                                                       int pref);
+extern void route_map_delete(struct route_map *map);
 #endif
 
 #endif /* _ZEBRA_ROUTEMAP_H */

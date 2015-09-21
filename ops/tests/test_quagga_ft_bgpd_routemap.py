@@ -382,16 +382,13 @@ class bgpTest (HalonTest):
         routes = SwitchVtyshUtils.vtysh_cmd(switch, "sh ip bgp").split(VTYSH_CR)
 
         for rte in routes:
-            if rte.find(network) >= 0:
-                if rte.find(next_hop) >= 0:
-                    info("### Found route (%s -> %s) with metric %s ###\n" %
-                         (network, next_hop, metric))
-
-                    if rte.find(metric) >= 0:
-                        matching = True
-                        break;
+            if (network in rte) and (next_hop in rte) and (metric in rte):
+                matching = True
+                break;
 
         assert matching, "Metric not matching for %s" % switch.name
+
+        info("### Metric was found in route ###\n")
 
     def verify_community_value(self):
         info("\n########## Verifying community value ##########\n")
@@ -403,14 +400,127 @@ class bgpTest (HalonTest):
         community = routemap[5]
 
         cmd = "sh ip bgp %s" % network
-        network_info = SwitchVtyshUtils.vtysh_cmd(switch, "sh ip bgp %s")
+        network_info = SwitchVtyshUtils.vtysh_cmd(switch, cmd)
 
-        matching = network_info.find(RM_COMMUNITY)
-
-        assert matching, "Community value not matching for network %s" % network
+        assert RM_COMMUNITY in network_info, \
+               "Community value not matching for network %s" % network
 
         info("### Community value %s matching for network %s ###\n" %
              (community, network))
+
+    def reconfigure_neighbor(self):
+        info("### Reset connection from BGP2 via reconfiguring neighbor ###\n")
+        switch = self.net.switches[1]
+        neighbor = self.bgpConfig2.neighbors[0]
+
+        cfg_array = []
+        cfg_array.append("router bgp %s" % self.bgpConfig2.asn)
+        cfg_array.append("no neighbor %s" % neighbor.routerid)
+
+        SwitchVtyshUtils.vtysh_cfg_cmd(switch, cfg_array)
+
+        info("### Waiting for route to be removed ###\n")
+        network = neighbor.networks[1]
+        next_hop = neighbor.routerid
+        route_should_exist = False
+
+        found = SwitchVtyshUtils.wait_for_route(switch, network, next_hop,
+                                                route_should_exist)
+
+        assert not found, "Route %s -> %s exists on %s" \
+                          % (network, next_hop, switch.name)
+
+        info("### Reconfiguring neighbor (BGP1) on BGP2 ###\n")
+        cfg_array = []
+        cfg_array.append("router bgp %s" % self.bgpConfig2.asn)
+        cfg_array.append("neighbor %s remote-as %s" % (neighbor.routerid,
+                                                       neighbor.asn))
+        SwitchVtyshUtils.vtysh_cfg_cmd(switch, cfg_array)
+
+        info("### Waiting for route to be received again ###\n")
+
+        found = SwitchVtyshUtils.wait_for_route(switch, network, next_hop)
+
+        assert found, "Route %s -> %s was not found on %s" \
+                      % (network, next_hop, switch.name)
+
+    def verify_no_set_metric_and_community_values(self):
+        info("\n########## Verifying no community and no "
+             "set metric values ##########\n")
+
+        info("### Setting no set metric and no community on BGP1 ###\n")
+        switch = self.net.switches[0]
+        # Network 2 of BGP1 is the permitted route
+        network = self.bgpConfig1.networks[1]
+        next_hop = self.bgpConfig1.routerid
+        routeMap = self.bgpConfig1.routeMaps[0]
+        prefixList = routeMap[1]
+        action = routeMap[3]
+        metric = routeMap[4]
+        community = routeMap[5]
+
+        cfg_array = []
+        cfg_array.append("route-map %s %s %d" %
+                         (prefixList.name, action,
+                          prefixList.seq_num))
+        cfg_array.append("no set metric")
+        cfg_array.append("no set community")
+
+        SwitchVtyshUtils.vtysh_cfg_cmd(switch, cfg_array)
+
+        self.reconfigure_neighbor()
+
+        info("### Verifying no set metric. Metric should not exist ###\n")
+        switch = self.net.switches[1]
+        routes = SwitchVtyshUtils.vtysh_cmd(switch, "sh ip bgp").split(VTYSH_CR)
+
+        metric_found = False
+        for rte in routes:
+            if (network in rte) and (next_hop in rte) and (metric in rte):
+                metric_found = True
+                break;
+
+        assert not metric_found, "Metric was found"
+
+        info("### Metric was successfully unset on BGP1 ###\n")
+        info("### Verifying no set community ###\n")
+
+        cmd = "sh ip bgp %s" % network
+        network_info = SwitchVtyshUtils.vtysh_cmd(switch, cmd)
+
+        assert RM_COMMUNITY not in network_info, "Community should not be set"
+
+        info("### Community value was successfully unset ###\n")
+
+    def verify_no_route_map_match(self):
+        info("\n########## Verifying no route-map match ##########\n")
+        info("### Removing route-map configuration ###\n")
+        switch = self.net.switches[0]
+        routeMap = self.bgpConfig1.routeMaps[0]
+        prefixList = routeMap[1]
+        action = routeMap[3]
+
+        cfg_array = []
+        cfg_array.append("route-map %s %s %d" %
+                         (prefixList.name, action,
+                          prefixList.seq_num))
+        cfg_array.append("no match ip address prefix-list %s" % prefixList.name)
+
+        SwitchVtyshUtils.vtysh_cfg_cmd(switch, cfg_array)
+
+        self.reconfigure_neighbor()
+
+        info("### Verifying first network of BGP1 received on BGP2 ###\n")
+        switch = self.net.switches[1]
+        network = self.bgpConfig1.networks[0]
+        next_hop = self.bgpConfig1.routerid
+
+        found = SwitchVtyshUtils.wait_for_route(switch, network, next_hop)
+
+        assert found, "Route %s -> %s was not found on %s" \
+                      % (network, next_hop, switch.name)
+
+        info("### Previously denied network is now present in BGP2 ###\n")
 
 class Test_bgpd_routemap:
     def setup (self):
@@ -443,3 +553,5 @@ class Test_bgpd_routemap:
         self.test_var.verify_bgp_routes()
         self.test_var.verify_metric_value()
         self.test_var.verify_community_value()
+        self.test_var.verify_no_set_metric_and_community_values()
+        self.test_var.verify_no_route_map_match()

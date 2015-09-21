@@ -121,7 +121,9 @@ void bgp_txn_remove(struct hmap_node *txn_node);
 static int
 txn_command_result(enum ovsdb_idl_txn_status status, char *msg, char *pr)
 {
-    if ((status != TXN_SUCCESS) && (status != TXN_INCOMPLETE)) {
+    if ((status != TXN_SUCCESS)
+        && (status != TXN_INCOMPLETE)
+        && (status != TXN_UNCHANGED)) {
         VLOG_ERR("%s: Route table txn failure: %s, status %d\n",
                  __FUNCTION__, msg, status);
         return -1;

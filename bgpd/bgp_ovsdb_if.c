@@ -1090,9 +1090,13 @@ get_bgp_neighbor_db_row (struct peer *peer)
     char ip_addr_string [64];
 
     ipaddr = sockunion2str(&peer->su, ip_addr_string, 63);
-    return
-	get_bgp_neighbor_with_VrfName_BgpRouterAsn_Ipaddr
-	    (idl, NULL, peer->bgp->as, ipaddr);
+
+    if (ipaddr) {
+        return get_bgp_neighbor_with_VrfName_BgpRouterAsn_Ipaddr(idl, NULL,
+                        peer->bgp->as, ipaddr);
+    }
+
+    return NULL;
 }
 
 void
@@ -1175,9 +1179,11 @@ void bgp_daemon_ovsdb_neighbor_update (struct peer *peer,
 
     ovs_bgp_neighbor_ptr = get_bgp_neighbor_db_row(peer);
     if (NULL == ovs_bgp_neighbor_ptr) {
-	VLOG_ERR("%%bgp_daemon_ovsdb_neighbor_update cannot find db row\n");
-	return;
+        VLOG_DBG("bgp_daemon_ovsdb_neighbor_update cannot find db row or "
+                 "returned neighbor was a peer-group");
+        return;
     }
+
     VLOG_DBG("updating bgp neighbor %s remote-as %d in db\n",
            ovsdb_nbr_from_row_to_peer_name(idl, ovs_bgp_neighbor_ptr, NULL),
            *ovs_bgp_neighbor_ptr->remote_as);
@@ -1247,6 +1253,7 @@ bgp_nbr_remote_as_ovsdb_apply_changes (const struct ovsrec_bgp_neighbor *ovs_nbr
 {
     /* remote-as */
     if (COL_CHANGED(ovs_nbr, ovsrec_bgp_neighbor_col_remote_as, idl_seqno)) {
+        VLOG_DBG("Setting remote-as %lld", *ovs_nbr->remote_as);
         daemon_neighbor_remote_as_cmd_execute(bgp_instance,
                                  name, ovs_nbr->remote_as,
                                  AFI_IP, SAFI_UNICAST);
@@ -1254,32 +1261,37 @@ bgp_nbr_remote_as_ovsdb_apply_changes (const struct ovsrec_bgp_neighbor *ovs_nbr
 }
 
 static void
-bgp_nbr_peer_group_ovsdb_apply_changes (const struct ovsrec_bgp_neighbor *ovs_nbr,
-                              const struct ovsrec_bgp_router *ovs_bgp,
-                              char * name,
-                              struct bgp *bgp_instance)
+bgp_nbr_peer_group_ovsdb_apply_changes(
+        const struct ovsrec_bgp_neighbor *ovs_nbr,
+        const struct ovsrec_bgp_router *ovs_bgp,
+        char * name,
+        struct bgp *bgp_instance)
 {
     int j;
 
-	/* peer group */
-	if (COL_CHANGED(ovs_nbr, ovsrec_bgp_neighbor_col_bgp_peer_group,
-	    idl_seqno)) {
-		const struct ovsrec_bgp_neighbor *peer_group =
-		    ovs_nbr->bgp_peer_group;
-                for (j = 0; j < ovs_bgp->n_bgp_neighbors; j ++) {
-                    if (ovs_bgp->value_bgp_neighbors[j] == peer_group) {
-                        break;
-                    }
-                }
+    /* peer group */
+    if (COL_CHANGED(ovs_nbr, ovsrec_bgp_neighbor_col_bgp_peer_group,
+                    idl_seqno)) {
+        VLOG_DBG("Setting for peer: %s", name);
+        const struct ovsrec_bgp_neighbor *peer_group = ovs_nbr->bgp_peer_group;
 
-		if (peer_group) {
-		    daemon_neighbor_set_peer_group_cmd_execute(bgp_instance,
-			name, ovs_bgp->key_bgp_neighbors[j], AFI_IP, SAFI_UNICAST);
-		} else {
-		    daemon_no_neighbor_set_peer_group_cmd_execute(bgp_instance,
-			name, AFI_IP, SAFI_UNICAST);
-		}
-	}
+        for (j = 0; j < ovs_bgp->n_bgp_neighbors; j++) {
+            if (ovs_bgp->value_bgp_neighbors[j] == peer_group) {
+                break;
+            }
+        }
+
+        if (peer_group) {
+            VLOG_DBG("Binding to peergroup: %s", ovs_bgp->key_bgp_neighbors[j]);
+            daemon_neighbor_set_peer_group_cmd_execute(bgp_instance,
+                    name, ovs_bgp->key_bgp_neighbors[j], AFI_IP, SAFI_UNICAST);
+        } else {
+            VLOG_DBG("Unbinding peer from peergroup");
+            daemon_no_neighbor_set_peer_group_cmd_execute(bgp_instance,
+                                                          name, AFI_IP,
+                                                          SAFI_UNICAST);
+        }
+    }
 }
 
 static void

@@ -1021,7 +1021,7 @@ bgp_txn_complete_processing(void)
         /* If incomplete but no timeout allow more time to complete */
         if ((status == TXN_INCOMPLETE) &&
             ((time(NULL) - txn->update_time) < BGP_TXN_TIMEOUT)) {
-            VLOG_DBG("Route transaction incomplete as=%d prefix=%s time=%ll",
+            VLOG_DBG("Route transaction incomplete as=%d prefix=%s time=%lld",
                      txn->as_no, prefix_str, txn->update_time);
             continue;
         }

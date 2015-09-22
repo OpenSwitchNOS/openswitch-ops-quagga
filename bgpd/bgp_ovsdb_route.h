@@ -63,6 +63,9 @@ enum
   PREFIX_LIST_MAX,
 } prefix_list;
 
+
+extern struct ovsdb_idl *idl;
+
 extern int policy_ovsdb_prefix_list_get (struct ovsdb_idl *idl);
 extern int policy_ovsdb_rt_map(struct ovsdb_idl *idl);
 
@@ -72,8 +75,9 @@ bgp_ovsdb_get_vrf(struct bgp *bgp);
 extern const struct ovsrec_route*
 bgp_ovsdb_lookup_rib_entry(struct prefix *p, struct bgp_info *info,
                            struct bgp *bgp, safi_t safi);
+
 extern int
-bgp_ovsdb_add_rib_entry(struct prefix *p, struct bgp_info *info,
+bgp_ovsdb_add_local_rib_entry(struct prefix *p, struct bgp_info *info,
                         struct bgp *bgp, safi_t safi);
 extern int
 bgp_ovsdb_withdraw_rib_entry(struct prefix *p, struct bgp_info *info,
@@ -82,15 +86,16 @@ extern int
 bgp_ovsdb_announce_rib_entry(struct prefix *p, struct bgp_info *info,
                              struct bgp *bgp, safi_t safi);
 extern int
-bgp_ovsdb_delete_rib_entry(struct prefix *p, struct bgp_info *info,
-                           struct bgp *bgp, safi_t safi);
+bgp_ovsdb_delete_local_rib_entry(struct prefix *p, struct bgp_info *info,
+                                 struct bgp *bgp, safi_t safi);
 extern int
-bgp_ovsdb_update_flags(struct prefix *p, struct bgp_info *info,
-                       struct bgp *bgp, safi_t safi);
+bgp_ovsdb_update_local_rib_entry_attributes(struct prefix *p, struct bgp_info *info,
+                                            struct bgp *bgp, safi_t safi);
+extern const struct ovsrec_bgp_route*
+bgp_ovsdb_lookup_local_rib_entry(struct prefix *p,
+                                 struct bgp_info *info,
+                                 struct bgp *bgp,
+                                 safi_t safi);
 extern void
-bgp_ovsdb_rib_txn_create(void);
-
-extern int
-bgp_ovsdb_rib_txn_commit(void);
-
+bgp_txn_complete_processing(void);
 #endif /* BGP_OVSDB_RIB_H */

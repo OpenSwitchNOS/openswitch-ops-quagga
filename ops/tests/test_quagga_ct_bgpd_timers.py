@@ -29,31 +29,32 @@ from vtyshutils import *
 from bgpconfig import *
 
 #
-# Only one switch emulated for testing simple BGP configurations through vtysh.
-# This test checks the following commands:
-#   * router bgp <asn> # This is required, for testing the primary case;
-#   * bgp router-id <router-id-value>
-#   * network <network>
-# Topology:
-#   S1 [interface 1]
+# The following commands are tested:
+#   * router bgp <asn>
+#   * timers bgp <keepalive> <holdtime>
+#   * no timers bgp
 #
-
+# S1 [interface 1]
+#
 BGP_ASN = "1"
-BGP_ROUTER_ID = "9.0.0.1"
-BGP_NETWORK = "11.0.0.0"
-BGP_PL = "8"
+TIMERS_BGP_KEEPALIVE = 5
+TIMERS_BGP_HOLDTIME = 10
+
+BGP_CONFIG = ["router bgp %s" % BGP_ASN,
+              "timers bgp %d %d" % (TIMERS_BGP_KEEPALIVE, TIMERS_BGP_HOLDTIME)]
+
 NUM_OF_SWITCHES = 1
 NUM_HOSTS_PER_SWITCH = 0
+
 SWITCH_PREFIX = "s"
 
 class myTopo(Topo):
-    def build (self, hsts=0, sws=2, **_opts):
+    def build (self, hsts=0, sws=1, **_opts):
 
         self.hsts = hsts
         self.sws = sws
 
-        for i in irange(1, sws):
-            switch = self.addSwitch("%s%s" % (SWITCH_PREFIX, i))
+        switch = self.addSwitch("%s1" % SWITCH_PREFIX)
 
 class bgpTest (HalonTest):
     def setupNet (self):
@@ -68,62 +69,54 @@ class bgpTest (HalonTest):
                                        build = True)
 
     def verify_bgp_running (self):
-        info("\n########## Verifying bgp process.. ##########\n")
+        info("\n########## Verifying bgp processes.. ##########\n")
 
         switch = self.net.switches[0]
-        pid = switch.cmd("pgrep -f bgpd").strip()
-        assert (pid != ""), "bgpd process not running on switch %s" % \
-                            switch.name
 
-        info("### bgpd process exists on switch %s ###\n" % switch.name)
+        pid = switch.cmd("pgrep -f bgpd").strip()
+        assert (pid != ""), "bgpd process not running on switch"
+
+        info("### bgpd process exists on switch ###\n")
 
     def configure_bgp (self):
         info("\n########## Applying BGP configurations... ##########\n")
 
         switch = self.net.switches[0]
 
+        info("### Applying BGP config ###\n")
+        SwitchVtyshUtils.vtysh_cfg_cmd(switch, BGP_CONFIG)
+
+    def verify_configs (self):
+        info("\n########## Verifying all configurations.. ##########\n")
+
+        bgp_cfg = BGP_CONFIG
+        switch = self.net.switches[0]
+
+        for cfg in bgp_cfg:
+            res = SwitchVtyshUtils.verify_cfg_exist(switch, [cfg])
+            assert res, "Config \"%s\" was not correctly configured!" % cfg
+
+        info("### All configurations were verified ###\n")
+
+    def verify_no_timers (self):
+        info("\n########## Verifying no timers bgp ##########\n")
+
+        switch = self.net.switches[0]
+
+        info("### Unconfiguring timers ###\n")
         cfg_array = []
         cfg_array.append("router bgp %s" % BGP_ASN)
-        cfg_array.append("bgp router-id %s" % BGP_ROUTER_ID)
-        cfg_array.append("network %s/%s" % (BGP_NETWORK, BGP_PL))
-
+        cfg_array.append("no timers bgp")
         SwitchVtyshUtils.vtysh_cfg_cmd(switch, cfg_array)
 
-    def verify_bgp_router_id (self):
-        info("\n########## Verifying BGP Router-ID... ##########\n")
+        info("### Verifying timers unconfigured ###\n")
+        exists = SwitchVtyshUtils.verify_cfg_exist(switch, ["timers bgp"])
 
-        switch = self.net.switches[0]
-        results = SwitchVtyshUtils.vtysh_cmd(switch, "sh ip bgp")
+        assert not exists, "Timers were not unconfigured"
 
-        found = BGP_ROUTER_ID in results
-        assert found, "BGP Router-ID %s not found" % BGP_ROUTER_ID
+        info("### Timers unconfigured successfully ###\n")
 
-        info("### BGP Router-ID %s found ###\n" % BGP_ROUTER_ID)
-
-    def unconfigure_bgp (self):
-        info("\n########## Applying BGP configurations... ##########\n")
-
-        switch = self.net.switches[0]
-
-        cfg_array = []
-        cfg_array.append("router bgp %s" % BGP_ASN)
-        cfg_array.append("no bgp router-id %s" % BGP_ROUTER_ID)
-
-        SwitchVtyshUtils.vtysh_cfg_cmd(switch, cfg_array)
-
-    def verify_no_bgp_router_id (self):
-        info("\n########## Verifying BGP Router-ID... ##########\n")
-
-        switch = self.net.switches[0]
-        results = SwitchVtyshUtils.vtysh_cmd(switch, "sh ip bgp")
-
-        found = BGP_ROUTER_ID in results
-        assert not found, "BGP Router-ID %s was found" % BGP_ROUTER_ID
-
-        info("### BGP Router-ID %s not found ###\n" % BGP_ROUTER_ID)
-
-
-class Test_bgpd_router_id:
+class Test_bgpd_timers:
     def setup (self):
         pass
 
@@ -131,10 +124,10 @@ class Test_bgpd_router_id:
         pass
 
     def setup_class (cls):
-        Test_bgpd_router_id.test_var = bgpTest()
+        Test_bgpd_timers.test_var = bgpTest()
 
     def teardown_class (cls):
-        Test_bgpd_router_id.test_var.net.stop()
+        Test_bgpd_timers.test_var.net.stop()
 
     def setup_method (self, method):
         pass
@@ -148,6 +141,5 @@ class Test_bgpd_router_id:
     def test_bgp_full (self):
         self.test_var.verify_bgp_running()
         self.test_var.configure_bgp()
-        self.test_var.verify_bgp_router_id()
-        self.test_var.unconfigure_bgp()
-        self.test_var.verify_no_bgp_router_id()
+        self.test_var.verify_configs()
+        self.test_var.verify_no_timers()

@@ -188,6 +188,18 @@ bgp_router_id_set (struct bgp *bgp, struct in_addr *id)
   return 0;
 }
 
+/* Unset BGP Router identifier */
+int
+bgp_router_id_unset (struct bgp *bgp, struct in_addr *id)
+{
+  int ret;
+
+  bgp->router_id_static.s_addr = 0;
+  bgp_router_id_set (bgp, &router_id_zebra);
+
+  return CMD_SUCCESS;
+}
+
 /* BGP's cluster-id control. */
 int
 bgp_cluster_id_set (struct bgp *bgp, struct in_addr *cluster_id)

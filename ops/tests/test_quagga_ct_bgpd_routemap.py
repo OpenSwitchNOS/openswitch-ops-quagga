@@ -345,15 +345,76 @@ class bgpTest (HalonTest):
         info("\n########## Verifying route-map description ##########\n")
 
         switch = self.net.switches[0]
-        route_map_dump = switch.cmd("ovsdb-client dump")
+        exists = SwitchVtyshUtils.verify_cfg_exist(switch, [RM_DESCRIPTION])
+        assert exists, "Route map description was not configured successfully."
 
-        found = False
-        if route_map_dump.find(RM_DESCRIPTION) >= 0:
-            found = True
+        info("### Route-map description was successfully configured ###\n")
 
-        assert found, "Route-map description not found."
+    def verify_no_routemap_description(self):
+        info("\n########## Verifying no route-map description ##########\n")
+        info("### Configuring \"no route-map description\" ###\n")
+        cfg_array = []
+        cfg_array.append("router bgp %s" % self.bgpConfig1.routerid)
 
-        info("### Matching description found ###\n")
+        for routeMap in self.bgpConfig1.routeMaps:
+            prefixList = routeMap[1]
+            action = routeMap[3]
+
+            cfg_array.append("route-map %s %s %d" %
+                             (prefixList.name, action,
+                              prefixList.seq_num))
+
+            cfg_array.append("no description")
+
+        switch = self.net.switches[0]
+        SwitchVtyshUtils.vtysh_cfg_cmd(switch, cfg_array)
+
+        exists = SwitchVtyshUtils.verify_cfg_exist(switch, [RM_DESCRIPTION])
+        assert not exists, "Route-map description was not removed"
+
+        info("### Route-map description was successfully removed ###\n")
+
+
+    def verify_no_routemap(self):
+        info("\n########## Verifying no route-map ##########\n")
+        switch = self.net.switches[0]
+        routeMap = self.bgpConfig1.routeMaps[0]
+        prefixList = routeMap[1]
+        action = routeMap[3]
+
+        info("### Unconfiguring route-map ###\n")
+        cfg = "route-map %s %s %d" % (prefixList.name, action,
+                                      prefixList.seq_num)
+        cmd = "no %s" % cfg
+
+        SwitchVtyshUtils.vtysh_cfg_cmd(switch, [cmd])
+
+        info("### Checking route-map config ###\n")
+
+        exists = SwitchVtyshUtils.verify_cfg_exist(switch, [cfg])
+        assert not exists, "Config \"%s\" was not removed" % cfg
+
+        info("### Route-map config was successfully removed ###\n")
+
+    def verify_no_ip_prefix_list(self):
+        info("\n########## Verifying no ip prefix-list ##########\n")
+        switch = self.net.switches[0]
+        for prefixList in self.bgpConfig1.prefixLists:
+            cfg = "ip prefix-list %s seq %d %s %s/%s" % (prefixList.name,
+                                                         prefixList.seq_num,
+                                                         prefixList.action,
+                                                         prefixList.network,
+                                                         prefixList.prefixLen)
+            cmd = "no %s" % cfg
+
+            info("### Unconfiguring ip prefix-list %s ###\n" % prefixList.name)
+            SwitchVtyshUtils.vtysh_cfg_cmd(switch, [cmd])
+
+            info("### Checking ip prefix-list config ###\n")
+            exists = SwitchVtyshUtils.verify_cfg_exist(switch, [cfg])
+            assert not exists, "Config \"%s\" was not removed" % cfg
+
+        info("### ip prefix-list configs were successfully removed ###\n")
 
 class Test_bgpd_routemap:
     def setup (self):
@@ -385,3 +446,6 @@ class Test_bgpd_routemap:
         self.test_var.verify_bgp_configs()
         self.test_var.verify_bgp_routes()
         self.test_var.verify_routemap_description()
+        self.test_var.verify_no_routemap_description()
+        self.test_var.verify_no_routemap()
+        self.test_var.verify_no_ip_prefix_list()

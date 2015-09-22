@@ -49,7 +49,7 @@ BGP_CONFIG = ["router bgp %s" % BGP_ASN,
               "bgp router-id %s" % BGP_ROUTER_ID,
               "network %s/%s" % (BGP_NETWORK, BGP_NETWORK_PL)]
 
-NUM_OF_SWITCHES = 2
+NUM_OF_SWITCHES = 1
 NUM_HOSTS_PER_SWITCH = 0
 
 SWITCH_PREFIX = "s"
@@ -150,7 +150,7 @@ class bgpTest (HalonTest):
         assert not found, "Route still exists (%s -> %s) on %s" % \
                           (network, next_hop, switch.name)
 
-@pytest.mark.skipif(True, reason="Disabled until no router bgp works")
+#@pytest.mark.skipif(True, reason="Disabled until no router bgp works")
 class Test_bgpd_router_bgp:
     def setup (self):
         pass
@@ -183,4 +183,5 @@ class Test_bgpd_router_bgp:
         self.test_var.configure_bgp()
         self.test_var.configure_neighbor()
         self.test_var.verify_bgp_route()
+        self.test_var.unconfigure_bgp()
         self.test_var.verify_bgp_route_removed()

@@ -200,7 +200,7 @@ class bgpTest (HalonTest):
             # Configure the IPs between the switches
             j = 1;
             for ip_addr in BGP_INTF_IP_ARR[i]:
-                info("### Setting IP Adddress: %s###\n" % ip_addr)
+                info("### Setting IP Adddress: %s ###\n" % ip_addr)
                 if isinstance(switch, HalonSwitch):
                     switch.cmdCLI("configure terminal")
                     switch.cmdCLI("interface %d" % j)
@@ -234,16 +234,14 @@ class bgpTest (HalonTest):
             SwitchVtyshUtils.vtysh_cfg_cmd(switch, cfg_array)
 
     def verify_bgp_routes (self):
-        info("\n########## Verifying routes... ##########\n")
+        info("### Verifying routes exist... ###\n")
 
         self.verify_bgp_route(self.net.switches[0], BGP2_NETWORK,
-                              BGP2_ROUTER_ID)
+                              BGP1_NEIGHBOR1)
         self.verify_bgp_route(self.net.switches[0], BGP3_NETWORK,
-                              BGP3_ROUTER_ID)
+                              BGP1_NEIGHBOR2)
         self.verify_bgp_route(self.net.switches[0], BGP4_NETWORK,
-                              BGP4_ROUTER_ID)
-        self.verify_bgp_route(self.net.switches[0], BGP5_NETWORK,
-                              BGP5_ROUTER_ID)
+                              BGP1_NEIGHBOR3)
 
     def verify_configs (self):
         info("\n########## Verifying all configurations.. ##########\n")
@@ -262,7 +260,107 @@ class bgpTest (HalonTest):
         assert found, "Could not find route (%s -> %s) on %s" % \
                       (network, next_hop, switch.name)
 
-@pytest.mark.skipif(True, reason="Script is failing. Disabled until issue is fixed.")
+    def verify_route_removed(self, switch, network, next_hop):
+        route_should_exist = False
+        info("### Checking route to neighbor %s ###\n" % next_hop)
+        found = SwitchVtyshUtils.wait_for_route(switch, network, next_hop,
+                                                route_should_exist)
+        assert not found, "Route %s -> %s exists on %s" \
+                          % (network, next_hop, switch.name)
+        info("### Route to neighbor removed ###\n")
+
+    def verify_all_routes_removed(self):
+        info("### Waiting for routes to be removed ###\n")
+        switch = self.net.switches[0]
+        network = BGP2_NETWORK
+        next_hop = BGP1_NEIGHBOR1
+        self.verify_route_removed(switch, network, next_hop)
+
+        network = BGP3_NETWORK
+        next_hop = BGP1_NEIGHBOR2
+        self.verify_route_removed(switch, network, next_hop)
+
+        network = BGP4_NETWORK
+        next_hop = BGP1_NEIGHBOR3
+        self.verify_route_removed(switch, network, next_hop)
+
+    def reconfigure_neighbors(self):
+        info("### Reset connection to all peers from s1 ###\n")
+        switch = self.net.switches[0]
+
+        cfg_array = []
+        cfg_array.append("router bgp %s" % BGP1_ASN)
+        cfg_array.append("no neighbor %s" % BGP1_NEIGHBOR1)
+        cfg_array.append("no neighbor %s" % BGP1_NEIGHBOR2)
+        cfg_array.append("no neighbor %s" % BGP1_NEIGHBOR3)
+
+        SwitchVtyshUtils.vtysh_cfg_cmd(switch, cfg_array)
+
+        self.verify_all_routes_removed()
+
+        info("### Reconfiguring neighbors on BGP1 ###\n")
+        cfg_array = []
+        cfg_array.append("router bgp %s" % BGP1_ASN)
+        cfg_array.append("neighbor %s remote-as %s" % (BGP1_NEIGHBOR1,
+                                                       BGP1_NEIGHBOR1_ASN))
+        cfg_array.append("neighbor %s remote-as %s" % (BGP1_NEIGHBOR2,
+                                                       BGP1_NEIGHBOR2_ASN))
+        cfg_array.append("neighbor %s remote-as %s" % (BGP1_NEIGHBOR3,
+                                                       BGP1_NEIGHBOR3_ASN))
+        SwitchVtyshUtils.vtysh_cfg_cmd(switch, cfg_array)
+
+        self.verify_bgp_routes()
+
+    def get_number_of_paths_for_bgp1(self):
+        switch = self.net.switches[0]
+        route_info = SwitchVtyshUtils.vtysh_cmd(switch, "sh ip route")
+
+        multipath_count = 0
+        if BGP1_NEIGHBOR1 in route_info:
+            multipath_count += 1
+
+        if BGP1_NEIGHBOR2 in route_info:
+            multipath_count +=1
+
+        if BGP1_NEIGHBOR3 in route_info:
+            multipath_count +=1
+
+        return multipath_count
+
+    def verify_max_paths(self):
+        info("\n########## Verifying maximum-paths ##########\n")
+        self.verify_bgp_routes()
+
+        info("### Verifying that there are 3 multipaths ###\n")
+        multipath_count = self.get_number_of_paths_for_bgp1()
+        assert multipath_count == 3, "Not all paths were detected."
+
+        info("### All paths were detected ###\n")
+
+    def verify_no_max_paths(self):
+        info("\n########## Verifying no maximum-paths ##########\n")
+        info("### Setting no maximum-paths ###\n")
+        switch = self.net.switches[0]
+        cfg_array = []
+        cfg_array.append("router bgp %s" % BGP1_ASN)
+        cfg_array.append("no maximum-paths")
+
+        SwitchVtyshUtils.vtysh_cfg_cmd(switch, cfg_array)
+
+        info("### Verifying maximum-paths config removed ###\n")
+        exists = SwitchVtyshUtils.verify_cfg_exist(switch, ["maximum-paths"])
+        assert not exists, "Maximum-paths was not unconfigured"
+
+        info("### Maximum-paths removed successfully from config ###\n")
+
+        self.reconfigure_neighbors()
+
+        info("### Verifying that there is only 1 path ###\n")
+        multipath_count = self.get_number_of_paths_for_bgp1()
+        assert multipath_count == 1, "More than one paths are present."
+
+        info("### Only 1 path detected after unsetting max-paths ###\n")
+
 class Test_bgpd_maximum_paths:
     def setup (self):
         pass
@@ -290,4 +388,5 @@ class Test_bgpd_maximum_paths:
         self.test_var.verify_bgp_running()
         self.test_var.configure_bgp()
         self.test_var.verify_configs()
-        self.test_var.verify_bgp_routes()
+        self.test_var.verify_max_paths()
+        self.test_var.verify_no_max_paths()

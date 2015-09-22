@@ -11,6 +11,9 @@ endif
 AM_LDFLAGS = $(PILDFLAGS)
 
 noinst_LIBRARIES = libbgp.a
+if ENABLE_OVSDB
+noinst_LIBRARIES += libbgp_ovsdb.a
+endif
 sbin_PROGRAMS = bgpd
 
 libbgp_a_SOURCES = \
@@ -19,8 +22,13 @@ libbgp_a_SOURCES = \
 	bgp_packet.c bgp_network.c bgp_filter.c bgp_regex.c bgp_clist.c \
 	bgp_dump.c bgp_snmp.c bgp_ecommunity.c bgp_mplsvpn.c bgp_nexthop.c \
 	bgp_damp.c bgp_table.c bgp_advertise.c bgp_backend_functions.c bgp_mpath.c
+
+#
+# enable extra error checking (-Werror) for ovsdb files
+#
 if ENABLE_OVSDB
-libbgp_a_SOURCES += bgp_ovsdb_if.c bgp_ovsdb_route.c
+libbgp_ovsdb_a_SOURCES = bgp_ovsdb_if.c bgp_ovsdb_route.c
+libbgp_ovsdb_a_CFLAGS = $(AM_CFLAGS) -Werror
 endif
 
 noinst_HEADERS = \
@@ -36,7 +44,7 @@ endif
 bgpd_SOURCES = bgp_main.c
 bgpd_LDADD = libbgp.a ../lib/libzebra.la @LIBCAP@ @LIBM@
 if ENABLE_OVSDB
-bgpd_LDADD += -lovscommon -lovsdb -lpthread
+bgpd_LDADD += libbgp_ovsdb.a -lovscommon -lovsdb -lpthread
 endif
 
 examplesdir = $(exampledir)

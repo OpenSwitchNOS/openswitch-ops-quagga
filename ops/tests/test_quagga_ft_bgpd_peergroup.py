@@ -206,6 +206,26 @@ class bgpTest (HalonTest):
         assert found == False, "Route still exists! (%s -> %s) on %s" % \
                                (network, next_hop, switch.name)
 
+    def verify_no_peer_group (self):
+        info("\n########### Verifying no peer-group ##########\n")
+        info("### Removing peer-group ###\n")
+
+        switch = self.net.switches[0]
+        cfg_array = []
+        cfg_array.append("router bgp %s" % BGP1_ASN)
+        peer_group_cfg = "neighbor %s" % BGP_PEER_GROUP
+        cfg_array.append("no %s" % peer_group_cfg)
+
+        SwitchVtyshUtils.vtysh_cfg_cmd(switch, cfg_array)
+
+        info("### Verifying peer-group config removed ###\n")
+
+        exists = SwitchVtyshUtils.verify_cfg_exist(switch, [peer_group_cfg])
+
+        assert not exists, "Peer-group was not unconfigured"
+
+        info("### Peer-group unconfigured successfully ###\n")
+
 class Test_bgpd_peergroup:
     def setup (self):
         pass
@@ -236,3 +256,4 @@ class Test_bgpd_peergroup:
         self.test_var.verify_bgp_routes()
         self.test_var.unconfigure_peer_group()
         self.test_var.verify_bgp_route_removed()
+        self.test_var.verify_no_peer_group()

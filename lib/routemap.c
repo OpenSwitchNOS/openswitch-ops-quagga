@@ -66,6 +66,8 @@ struct route_map_list
 
 /* Master list of route map. */
 static struct route_map_list route_map_master = { NULL, NULL, NULL, NULL };
+static void route_map_index_delete (struct route_map_index *, int);
+
 #else
 struct route_map_list route_map_master = { NULL, NULL, NULL, NULL };
 #endif

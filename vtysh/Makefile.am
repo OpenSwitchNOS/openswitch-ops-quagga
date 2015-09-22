@@ -38,10 +38,11 @@ dist_examples_DATA = vtysh.conf.sample
 
 EXTRA_DIST = extract.pl
 
+vtysh_cmd_FILES = $(top_srcdir)/bgpd/bgp_vtysh_sources.c
 if ENABLE_OVSDB
 vtysh_cmd_FILES =
 else
-vtysh_cmd_FILES = $(top_srcdir)/bgpd/*.c $(top_srcdir)/isisd/*.c \
+vtysh_cmd_FILES += $(top_srcdir)/isisd/*.c \
                   $(top_srcdir)/ospfd/*.c $(top_srcdir)/ospf6d/*.c \
                   $(top_srcdir)/ripd/*.c $(top_srcdir)/ripngd/*.c \
                   $(top_srcdir)/babeld/*.c \

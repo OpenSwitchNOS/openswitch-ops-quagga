@@ -16,3 +16,4 @@ TAGS
 .arch-ids
 *~
 *.loT
+bgp_vtysh_sources.c

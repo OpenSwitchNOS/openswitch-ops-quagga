@@ -1971,7 +1971,7 @@ DEFUN (no_neighbor_set_peer_group,
 #endif
 
 static int
-peer_flag_modify_vty (struct vty *vty, const char *ip_str,
+peer_flag_modify_vty (struct *bgp, const char *ip_str,
                       u_int16_t flag, int set)
 {
   int ret;
@@ -1990,15 +1990,15 @@ peer_flag_modify_vty (struct vty *vty, const char *ip_str,
 }
 
 static int
-peer_flag_set_vty (struct vty *vty, const char *ip_str, u_int16_t flag)
+peer_flag_set_vty (struct bgp *bgp, const char *ip_str, u_int16_t flag)
 {
-  return peer_flag_modify_vty (vty, ip_str, flag, 1);
+  return peer_flag_modify_vty (bgp, ip_str, flag, 1);
 }
 
 static int
-peer_flag_unset_vty (struct vty *vty, const char *ip_str, u_int16_t flag)
+peer_flag_unset_vty (struct bgp *bgp, const char *ip_str, u_int16_t flag)
 {
-  return peer_flag_modify_vty (vty, ip_str, flag, 0);
+  return peer_flag_modify_vty (bgp, ip_str, flag, 0);
 }
 
 /* neighbor passive. */
@@ -2009,7 +2009,7 @@ DEFUN (neighbor_passive,
        NEIGHBOR_ADDR_STR2
        "Don't send open messages to this neighbor\n")
 {
-  return peer_flag_set_vty (vty, argv[0], PEER_FLAG_PASSIVE);
+  return peer_flag_set_vty (vty->index, argv[0], PEER_FLAG_PASSIVE);
 }
 
 DEFUN (no_neighbor_passive,
@@ -2020,7 +2020,7 @@ DEFUN (no_neighbor_passive,
        NEIGHBOR_ADDR_STR2
        "Don't send open messages to this neighbor\n")
 {
-  return peer_flag_unset_vty (vty, argv[0], PEER_FLAG_PASSIVE);
+  return peer_flag_unset_vty (vty->index, argv[0], PEER_FLAG_PASSIVE);
 }
 
 static struct peer *
@@ -2160,7 +2160,7 @@ DEFUN (neighbor_shutdown,
        NEIGHBOR_ADDR_STR2
        "Administratively shut down this neighbor\n")
 {
-  return peer_flag_set_vty (vty, argv[0], PEER_FLAG_SHUTDOWN);
+  return peer_flag_set_vty (vty->index, argv[0], PEER_FLAG_SHUTDOWN);
 }
 #endif
 
@@ -2197,7 +2197,7 @@ DEFUN (neighbor_capability_dynamic,
        "Advertise capability to the peer\n"
        "Advertise dynamic capability to this neighbor\n")
 {
-  return peer_flag_set_vty (vty, argv[0], PEER_FLAG_DYNAMIC_CAPABILITY);
+  return peer_flag_set_vty (vty->index, argv[0], PEER_FLAG_DYNAMIC_CAPABILITY);
 }
 
 DEFUN (no_neighbor_capability_dynamic,
@@ -2209,7 +2209,7 @@ DEFUN (no_neighbor_capability_dynamic,
        "Advertise capability to the peer\n"
        "Advertise dynamic capability to this neighbor\n")
 {
-  return peer_flag_unset_vty (vty, argv[0], PEER_FLAG_DYNAMIC_CAPABILITY);
+  return peer_flag_unset_vty (vty->index, argv[0], PEER_FLAG_DYNAMIC_CAPABILITY);
 }
 
 /* neighbor dont-capability-negotiate */
@@ -2220,7 +2220,7 @@ DEFUN (neighbor_dont_capability_negotiate,
        NEIGHBOR_ADDR_STR2
        "Do not perform capability negotiation\n")
 {
-  return peer_flag_set_vty (vty, argv[0], PEER_FLAG_DONT_CAPABILITY);
+  return peer_flag_set_vty (vty->index, argv[0], PEER_FLAG_DONT_CAPABILITY);
 }
 
 DEFUN (no_neighbor_dont_capability_negotiate,
@@ -2231,7 +2231,7 @@ DEFUN (no_neighbor_dont_capability_negotiate,
        NEIGHBOR_ADDR_STR2
        "Do not perform capability negotiation\n")
 {
-  return peer_flag_unset_vty (vty, argv[0], PEER_FLAG_DONT_CAPABILITY);
+  return peer_flag_unset_vty (vty->index, argv[0], PEER_FLAG_DONT_CAPABILITY);
 }
 
 static int
@@ -3178,7 +3178,7 @@ DEFUN (neighbor_disable_connected_check,
        NEIGHBOR_ADDR_STR2
        "one-hop away EBGP peer using loopback address\n")
 {
-  return peer_flag_set_vty (vty, argv[0], PEER_FLAG_DISABLE_CONNECTED_CHECK);
+  return peer_flag_set_vty (vty->index, argv[0], PEER_FLAG_DISABLE_CONNECTED_CHECK);
 }
 
 DEFUN (no_neighbor_disable_connected_check,
@@ -3189,7 +3189,7 @@ DEFUN (no_neighbor_disable_connected_check,
        NEIGHBOR_ADDR_STR2
        "one-hop away EBGP peer using loopback address\n")
 {
-  return peer_flag_unset_vty (vty, argv[0], PEER_FLAG_DISABLE_CONNECTED_CHECK);
+  return peer_flag_unset_vty (vty->index, argv[0], PEER_FLAG_DISABLE_CONNECTED_CHECK);
 }
 
 /* Enforce multihop.  */
@@ -3518,7 +3518,7 @@ DEFUN (neighbor_override_capability,
        NEIGHBOR_ADDR_STR2
        "Override capability negotiation result\n")
 {
-  return peer_flag_set_vty (vty, argv[0], PEER_FLAG_OVERRIDE_CAPABILITY);
+  return peer_flag_set_vty (vty->index, argv[0], PEER_FLAG_OVERRIDE_CAPABILITY);
 }
 
 DEFUN (no_neighbor_override_capability,
@@ -3529,7 +3529,7 @@ DEFUN (no_neighbor_override_capability,
        NEIGHBOR_ADDR_STR2
        "Override capability negotiation result\n")
 {
-  return peer_flag_unset_vty (vty, argv[0], PEER_FLAG_OVERRIDE_CAPABILITY);
+  return peer_flag_unset_vty (vty->index, argv[0], PEER_FLAG_OVERRIDE_CAPABILITY);
 }
 
 DEFUN (neighbor_strict_capability,
@@ -3539,7 +3539,7 @@ DEFUN (neighbor_strict_capability,
        NEIGHBOR_ADDR_STR
        "Strict capability negotiation match\n")
 {
-  return peer_flag_set_vty (vty, argv[0], PEER_FLAG_STRICT_CAP_MATCH);
+  return peer_flag_set_vty (vty->index, argv[0], PEER_FLAG_STRICT_CAP_MATCH);
 }
 
 DEFUN (no_neighbor_strict_capability,
@@ -3550,7 +3550,7 @@ DEFUN (no_neighbor_strict_capability,
        NEIGHBOR_ADDR_STR
        "Strict capability negotiation match\n")
 {
-  return peer_flag_unset_vty (vty, argv[0], PEER_FLAG_STRICT_CAP_MATCH);
+  return peer_flag_unset_vty (vty->index, argv[0], PEER_FLAG_STRICT_CAP_MATCH);
 }
 
 static int

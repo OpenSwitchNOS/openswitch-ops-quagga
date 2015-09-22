@@ -36,7 +36,6 @@ Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 #include "plist.h"
 #include "linklist.h"
 #include "workqueue.h"
-#include "openvswitch/vlog.h"
 
 #include "bgpd/bgpd.h"
 #include "bgpd/bgp_table.h"
@@ -64,7 +63,6 @@ Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 #include "bgpd/bgp_snmp.h"
 #endif /* HAVE_SNMP */
 
-VLOG_DEFINE_THIS_MODULE(bgpd);
 
 /* BGP process wide configuration.  */
 static struct bgp_master bgp_master;
@@ -2020,7 +2018,6 @@ bgp_create (as_t *as, const char *name)
   bgp->stalepath_time = BGP_DEFAULT_STALEPATH_TIME;
 
   bgp->as = *as;
-  VLOG_INFO("bgp->as : %d",(int)(bgp->as));
   if (name)
     bgp->name = strdup (name);
 

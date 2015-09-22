@@ -56,12 +56,16 @@ Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 #include "bgpd/bgp_zebra.h"
 #include "bgpd/bgp_vty.h"
 #include "bgpd/bgp_mpath.h"
+
+#ifdef ENABLE_OVSDB
 #include "bgpd/bgp_ovsdb_route.h"
 #include "openvswitch/vlog.h"
+VLOG_DEFINE_THIS_MODULE(bgp_route);
+#endif
+
 /* Extern from bgp_dump.c */
 extern const char *bgp_origin_str[];
 extern const char *bgp_origin_long_str[];
-VLOG_DEFINE_THIS_MODULE(bgp_route);
 
 static struct bgp_node *
 bgp_afi_node_get (struct bgp_table *table, afi_t afi, safi_t safi, struct prefix *p,

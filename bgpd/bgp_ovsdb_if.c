@@ -564,8 +564,9 @@ bgp_apply_global_changes (void)
 void
 delete_bgp_router_config(struct ovsdb_idl *idl)
 {
-    const struct ovsrec_bgp_router *bgp_del_row;
+    struct ovsrec_bgp_router *bgp_del_row;
     const struct ovsrec_vrf *ovs_vrf;
+    int64_t asn;
     struct bgp *bgp_cfg;
     int i;
 
@@ -653,7 +654,10 @@ modify_bgp_router_id_config(struct bgp *bgp_cfg, const struct ovsrec_bgp_router 
     struct in_addr addr;
 
     addr.s_addr = inet_addr(bgp_mod_row->router_id);
-    return bgp_router_id_set(bgp_cfg, &addr);
+    if (addr.s_addr != 0)
+        return bgp_router_id_set(bgp_cfg, &addr);
+    else
+        return bgp_router_id_unset(bgp_cfg, &addr);
 }
 
 void

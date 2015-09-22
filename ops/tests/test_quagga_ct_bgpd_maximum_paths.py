@@ -237,13 +237,11 @@ class bgpTest (HalonTest):
         info("\n########## Verifying routes... ##########\n")
 
         self.verify_bgp_route(self.net.switches[0], BGP2_NETWORK,
-                              BGP2_ROUTER_ID)
+                              BGP1_NEIGHBOR1)
         self.verify_bgp_route(self.net.switches[0], BGP3_NETWORK,
-                              BGP3_ROUTER_ID)
+                              BGP1_NEIGHBOR2)
         self.verify_bgp_route(self.net.switches[0], BGP4_NETWORK,
-                              BGP4_ROUTER_ID)
-        self.verify_bgp_route(self.net.switches[0], BGP5_NETWORK,
-                              BGP5_ROUTER_ID)
+                              BGP1_NEIGHBOR3)
 
     def verify_configs (self):
         info("\n########## Verifying all configurations.. ##########\n")
@@ -262,7 +260,7 @@ class bgpTest (HalonTest):
         assert found, "Could not find route (%s -> %s) on %s" % \
                       (network, next_hop, switch.name)
 
-@pytest.mark.skipif(True, reason="Script is failing. Disabled until issue is fixed.")
+#@pytest.mark.skipif(True, reason="Script is failing. Disabled until issue is fixed.")
 class Test_bgpd_maximum_paths:
     def setup (self):
         pass

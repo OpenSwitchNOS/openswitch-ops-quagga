@@ -150,7 +150,7 @@ class bgpTest (HalonTest):
         assert not found, "Route still exists (%s -> %s) on %s" % \
                           (network, next_hop, switch.name)
 
-@pytest.mark.skipif(True, reason="Disabled until no router bgp works")
+#@pytest.mark.skipif(True, reason="Disabled until no router bgp works")
 class Test_bgpd_router_bgp:
     def setup (self):
         pass
@@ -183,4 +183,5 @@ class Test_bgpd_router_bgp:
         self.test_var.configure_bgp()
         self.test_var.configure_neighbor()
         self.test_var.verify_bgp_route()
+        self.test_var.unconfigure_bgp()
         self.test_var.verify_bgp_route_removed()

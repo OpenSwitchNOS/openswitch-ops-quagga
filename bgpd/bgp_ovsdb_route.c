@@ -220,7 +220,7 @@ bgp_ovsdb_get_vrf(struct bgp *bgp)
 {
     int j;
     const struct ovsrec_vrf *ovs_vrf;
-
+    /* ops_TODO: Add support for multiple-vrf instance
     OVSREC_VRF_FOR_EACH (ovs_vrf, idl) {
         for (j = 0; j < ovs_vrf->n_bgp_routers; j ++) {
             if (ovs_vrf->key_bgp_routers[j] == (int64_t)bgp->as) {
@@ -229,6 +229,10 @@ bgp_ovsdb_get_vrf(struct bgp *bgp)
         }
     }
     return NULL;
+    */
+
+    ovs_vrf = ovsrec_vrf_first(idl);
+    return ovs_vrf;
 }
 
 static int

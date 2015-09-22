@@ -100,6 +100,29 @@ class bgpTest (HalonTest):
 
         info("### BGP Router-ID %s found ###\n" % BGP_ROUTER_ID)
 
+    def unconfigure_bgp (self):
+        info("\n########## Applying BGP configurations... ##########\n")
+
+        switch = self.net.switches[0]
+
+        cfg_array = []
+        cfg_array.append("router bgp %s" % BGP_ASN)
+        cfg_array.append("no bgp router-id %s" % BGP_ROUTER_ID)
+
+        SwitchVtyshUtils.vtysh_cfg_cmd(switch, cfg_array)
+
+    def verify_no_bgp_router_id (self):
+        info("\n########## Verifying BGP Router-ID... ##########\n")
+
+        switch = self.net.switches[0]
+        results = SwitchVtyshUtils.vtysh_cmd(switch, "sh ip bgp")
+
+        found = BGP_ROUTER_ID in results
+        assert not found, "BGP Router-ID %s was found" % BGP_ROUTER_ID
+
+        info("### BGP Router-ID %s not found ###\n" % BGP_ROUTER_ID)
+
+
 class Test_bgpd_router_id:
     def setup (self):
         pass
@@ -126,3 +149,5 @@ class Test_bgpd_router_id:
         self.test_var.verify_bgp_running()
         self.test_var.configure_bgp()
         self.test_var.verify_bgp_router_id()
+        self.test_var.unconfigure_bgp()
+        self.test_var.verify_no_bgp_router_id()

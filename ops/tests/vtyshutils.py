@@ -1,18 +1,30 @@
-from halonvsi.halon import *
+#!/usr/bin/python
+
+# Copyright (C) 2015 Hewlett Packard Enterprise Development LP
+# All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+from opsvsi.opsvsitest import *
 
 VTYSH_CR = '\r\n'
-
-# Sometimes ARP is not responded to and needs to be retried. To mitigate that
-# for the time being the max wait time is set to 300, which should never
-# be reached. Only in some cases the time to wait for a route might be long;
-# otherwise, it will only take about 10 seconds to establish the route.
-# This is set so that tests are not triggering false alarms in CIT.
 ROUTE_MAX_WAIT_TIME = 300
+
 
 class SwitchVtyshUtils(object):
     @staticmethod
     def vtysh_cmd(switch, cmd):
-        if isinstance(switch, HalonSwitch):
+        if isinstance(switch, VsiOpenSwitch):
             return switch.cmdCLI(cmd)
         else:
             return switch.cmd("vtysh -c \"%s\"" % cmd)
@@ -31,9 +43,8 @@ class SwitchVtyshUtils(object):
     @staticmethod
     def vtysh_cfg_cmd(switch, cfg_array, show_running_cfg=False,
                       show_results=False):
-        if isinstance(switch, HalonSwitch):
-            SwitchVtyshUtils.vtysh_cfg_cmd_halon(switch, cfg_array,
-                                                 show_results)
+        if isinstance(switch, VsiOpenSwitch):
+            SwitchVtyshUtils.vtysh_cfg_cmd_ops(switch, cfg_array, show_results)
         else:
             SwitchVtyshUtils.vtysh_cfg_cmd_quagga(switch, cfg_array,
                                                   show_results)
@@ -53,7 +64,7 @@ class SwitchVtyshUtils(object):
             info("### Config results: %s ###\n" % result)
 
     @staticmethod
-    def vtysh_cfg_cmd_halon(switch, cfg_array, show_results):
+    def vtysh_cfg_cmd_ops(switch, cfg_array, show_results):
         switch.cmdCLI('configure term')
 
         for cfg in cfg_array:
@@ -63,8 +74,9 @@ class SwitchVtyshUtils(object):
 
         switch.cmdCLI('end')
 
-    # This method takes in an array of the config that we're verifying the value
-    # for. For example, if we are trying to verify the remote-as of neighbor:
+    # This method takes in an array of the config that we're verifying the
+    # value for. For example, if we are trying to verify the remote-as of
+    # neighbor:
     #    neighbor <router-id> remote-as <value>
     #
     # The input array should be ["neighbor", "remote-as"]. This will allow the
@@ -74,7 +86,8 @@ class SwitchVtyshUtils(object):
     #   ["neighbor", <router-id>, "remote-as"]
     @staticmethod
     def verify_cfg_value(switch, cfg_array, value):
-        running_cfg = SwitchVtyshUtils.vtysh_get_running_cfg(switch).split(VTYSH_CR)
+        running_cfg = SwitchVtyshUtils.vtysh_get_running_cfg(switch)
+        running_cfg = running_cfg.split(VTYSH_CR)
 
         for rc in running_cfg:
 
@@ -109,8 +122,9 @@ class SwitchVtyshUtils(object):
                        print_routes=False):
         for i in range(ROUTE_MAX_WAIT_TIME):
             attempt = i + 1
-            found = SwitchVtyshUtils.verify_bgp_route(switch, network, next_hop,
-                                                      attempt, print_routes)
+            found = SwitchVtyshUtils.verify_bgp_route(switch, network,
+                                                      next_hop, attempt,
+                                                      print_routes)
 
             if found == condition:
                 if condition:
@@ -128,8 +142,8 @@ class SwitchVtyshUtils(object):
         return found
 
     @staticmethod
-    def verify_bgp_route (switch, network, next_hop, attempt=1,
-                          print_routes=False):
+    def verify_bgp_route(switch, network, next_hop, attempt=1,
+                         print_routes=False):
         info("### Verifying route on switch %s [attempt #%d] - Network: %s, "
              "Next-Hop: %s ###\n" %
              (switch.name, attempt, network, next_hop))
@@ -149,7 +163,7 @@ class SwitchVtyshUtils(object):
         return False
 
     @staticmethod
-    def verify_show_ip_bgp_route (switch, network, next_hop):
+    def verify_show_ip_bgp_route(switch, network, next_hop):
         info("### Verifying - show ip bgp route - Network: %s, "
              "Next-Hop: %s ###\n" % (network, next_hop))
 

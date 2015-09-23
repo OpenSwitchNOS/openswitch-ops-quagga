@@ -1,6 +1,5 @@
-#
-# !/usr/bin/python
-#
+#!/usr/bin/python
+
 # Copyright (C) 2015 Hewlett Packard Enterprise Development LP
 # All Rights Reserved.
 #
@@ -16,15 +15,7 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-import os
-import sys
-import time
 import pytest
-import subprocess
-from halonvsi.docker import *
-from halonvsi.halon import *
-from halonutils.halonutil import *
-from halonvsi.quagga import *
 from vtyshutils import *
 from bgpconfig import *
 
@@ -43,29 +34,30 @@ from bgpconfig import *
 #   |                                  |
 #   H1                                 H2
 #
-BGP1_ASN            = "1"
-BGP1_ROUTER_ID      = "9.0.0.1"
-BGP1_NETWORK        = "11.0.0.0"
-BGP1_GATEWAY        = "11.0.1.254"
 
-BGP2_ASN            = "2"
-BGP2_ROUTER_ID      = "9.0.0.2"
-BGP2_NETWORK        = "12.0.0.0"
-BGP2_GATEWAY        = "12.0.1.254"
+BGP1_ASN = "1"
+BGP1_ROUTER_ID = "9.0.0.1"
+BGP1_NETWORK = "11.0.0.0"
+BGP1_GATEWAY = "11.0.1.254"
 
-BGP_GATEWAYS        = [BGP1_GATEWAY, BGP2_GATEWAY]
-BGP_GW_PREFIX       = "24"
-BGP_GW_NETMASK      = "255.255.255.0"
+BGP2_ASN = "2"
+BGP2_ROUTER_ID = "9.0.0.2"
+BGP2_NETWORK = "12.0.0.0"
+BGP2_GATEWAY = "12.0.1.254"
 
-BGP1_NEIGHBOR       = BGP2_ROUTER_ID
-BGP1_NEIGHBOR_ASN   = BGP2_ASN
+BGP_GATEWAYS = [BGP1_GATEWAY, BGP2_GATEWAY]
+BGP_GW_PREFIX = "24"
+BGP_GW_NETMASK = "255.255.255.0"
 
-BGP2_NEIGHBOR       = BGP1_ROUTER_ID
-BGP2_NEIGHBOR_ASN   = BGP1_ASN
+BGP1_NEIGHBOR = BGP2_ROUTER_ID
+BGP1_NEIGHBOR_ASN = BGP2_ASN
 
-BGP_NETWORK_PL      = "8"
-BGP_NETWORK_MASK    = "255.0.0.0"
-BGP_ROUTER_IDS      = [BGP1_ROUTER_ID, BGP2_ROUTER_ID]
+BGP2_NEIGHBOR = BGP1_ROUTER_ID
+BGP2_NEIGHBOR_ASN = BGP1_ASN
+
+BGP_NETWORK_PL = "8"
+BGP_NETWORK_MASK = "255.0.0.0"
+BGP_ROUTER_IDS = [BGP1_ROUTER_ID, BGP2_ROUTER_ID]
 
 BGP1_CONFIG = ["router bgp %s" % BGP1_ASN,
                "bgp router-id %s" % BGP1_ROUTER_ID,
@@ -90,14 +82,15 @@ NUM_HOSTS = 2
 SWITCH_PREFIX = "s"
 HOST_PREFIX = "h"
 
+
 class myTopo(Topo):
-    def build (self, hsts=0, sws=2, **_opts):
+    def build(self, hsts=0, sws=2, **_opts):
         self.hsts = hsts
         self.sws = sws
 
         switch = self.addSwitch("%s1" % SWITCH_PREFIX)
-        switch = self.addSwitch(name = "%s2" % SWITCH_PREFIX,
-                                cls = PEER_SWITCH_TYPE,
+        switch = self.addSwitch(name="%s2" % SWITCH_PREFIX,
+                                cls=PEER_SWITCH_TYPE,
                                 **self.sopts)
 
         # Add the hosts. One per switch.
@@ -107,44 +100,48 @@ class myTopo(Topo):
 
         # Connect the hosts to the switches
         for i in irange(1, sws):
-            self.addLink("%s%s" % (SWITCH_PREFIX, i), "%s%s" % (HOST_PREFIX, i))
+            self.addLink("%s%s" % (SWITCH_PREFIX, i),
+                         "%s%s" % (HOST_PREFIX, i))
 
         # Connect the switches
         for i in irange(2, sws):
             self.addLink("%s%s" % (SWITCH_PREFIX, i-1),
                          "%s%s" % (SWITCH_PREFIX, i))
 
-class bgpTest (HalonTest):
-    def setupNet (self):
-        self.net = Mininet(topo=myTopo(hsts = NUM_HOSTS,
-                                       sws = NUM_OF_SWITCHES,
-                                       hopts = self.getHostOpts(),
-                                       sopts = self.getSwitchOpts()),
-                                       switch = SWITCH_TYPE,
-                                       host = HalonHost,
-                                       link = HalonLink,
-                                       controller = None,
-                                       build = True)
 
-    def configure_switch_ips (self):
+class bgpTest(OpsVsiTest):
+    def setupNet(self):
+        self.net = Mininet(topo=myTopo(hsts=NUM_HOSTS,
+                                       sws=NUM_OF_SWITCHES,
+                                       hopts=self.getHostOpts(),
+                                       sopts=self.getSwitchOpts()),
+                           switch=SWITCH_TYPE,
+                           host=OpsVsiHost,
+                           link=OpsVsiLink,
+                           controller=None,
+                           build=True)
+
+    def configure_switch_ips(self):
         info("\n########## Configuring switch IPs.. ##########\n")
 
         i = 0
         for switch in self.net.switches:
             # Configure the IPs of the interfaces
-            if isinstance(switch, HalonSwitch):
+            if isinstance(switch, VsiOpenSwitch):
                 # Configure the gateways for the switches
                 switch.cmdCLI("configure terminal")
                 switch.cmdCLI("interface 1")
                 switch.cmdCLI("no shutdown")
-                switch.cmdCLI("ip address %s/%s" % (BGP_GATEWAYS[i], BGP_GW_PREFIX))
+                switch.cmdCLI("ip address %s/%s" % (BGP_GATEWAYS[i],
+                                                    BGP_GW_PREFIX))
                 switch.cmdCLI("exit")
 
                 # Configure the IPs for the interfaces between the switches
                 switch.cmdCLI("configure terminal")
                 switch.cmdCLI("interface 2")
                 switch.cmdCLI("no shutdown")
-                switch.cmdCLI("ip address %s/%s" % (BGP_ROUTER_IDS[i], BGP_NETWORK_PL))
+                switch.cmdCLI("ip address %s/%s" % (BGP_ROUTER_IDS[i],
+                                                    BGP_NETWORK_PL))
                 switch.cmdCLI("exit")
             else:
                 # Configure the gateways for the switches
@@ -152,7 +149,8 @@ class bgpTest (HalonTest):
                              intf="%s-eth1" % switch.name)
 
                 # Configure the IPs for the interfaces between the switches
-                switch.setIP(ip=BGP_ROUTER_IDS[i], intf="%s-eth2" % switch.name)
+                switch.setIP(ip=BGP_ROUTER_IDS[i],
+                             intf="%s-eth2" % switch.name)
             i += 1
 
         # Configure the IPs for the hosts
@@ -162,7 +160,7 @@ class bgpTest (HalonTest):
             host.cmd("route add default gw %s" % BGP_GATEWAYS[i])
             i += 1
 
-    def verify_bgp_running (self):
+    def verify_bgp_running(self):
         info("\n########## Verifying bgp processes.. ##########\n")
 
         for switch in self.net.switches:
@@ -172,7 +170,7 @@ class bgpTest (HalonTest):
 
             info("### bgpd process exists on switch %s ###\n" % switch.name)
 
-    def configure_bgp (self):
+    def configure_bgp(self):
         info("\n########## Applying BGP configurations... ##########\n")
 
         i = 0
@@ -183,7 +181,7 @@ class bgpTest (HalonTest):
 
             SwitchVtyshUtils.vtysh_cfg_cmd(switch, cfg_array)
 
-    def verify_bgp_routes (self):
+    def verify_bgp_routes(self):
         info("\n########## Verifying routes... ##########\n")
 
         self.verify_bgp_route(self.net.switches[0], BGP2_NETWORK,
@@ -191,7 +189,7 @@ class bgpTest (HalonTest):
         self.verify_bgp_route(self.net.switches[1], BGP1_NETWORK,
                               BGP1_ROUTER_ID)
 
-    def verify_configs (self):
+    def verify_configs(self):
         info("\n########## Verifying all configurations.. ##########\n")
 
         for i in range(0, len(BGP_CONFIGS)):
@@ -204,13 +202,13 @@ class bgpTest (HalonTest):
 
         info("### All configurations were verified successfully ###\n")
 
-    def verify_bgp_route (self, switch, network, next_hop):
+    def verify_bgp_route(self, switch, network, next_hop):
         found = SwitchVtyshUtils.wait_for_route(switch, network, next_hop)
 
         assert found, "Could not find route (%s -> %s) on %s" % \
                       (network, next_hop, switch.name)
 
-    def verify_hosts_ping_OK (self):
+    def verify_hosts_ping_OK(self):
         info("\n########## Verifying PING successful.. ##########\n")
         result = self.net.pingAll()
 
@@ -219,36 +217,38 @@ class bgpTest (HalonTest):
 
         info("### Pings successful ###\n")
 
-    def verify_hosts_ping_fail (self):
-        info("\n########## Verifying PING Failure (negative case) ##########\n")
+    def verify_hosts_ping_fail(self):
+        info("\n########## Verifying PING Failure "
+             "(negative case) ##########\n")
         result = self.net.pingAll()
 
         assert result != 0.0, "PING did not fail when it was supposed to."
 
+
 @pytest.mark.skipif(True, reason="Pinging does not work yet")
 class Test_bgpd_route_advertise_with_hosts_ping:
-    def setup (self):
+    def setup(self):
         pass
 
-    def teardown (self):
+    def teardown(self):
         pass
 
-    def setup_class (cls):
+    def setup_class(cls):
         Test_bgpd_route_advertise_with_hosts_ping.test_var = bgpTest()
 
-    def teardown_class (cls):
+    def teardown_class(cls):
         Test_bgpd_route_advertise_with_hosts_ping.test_var.net.stop()
 
-    def setup_method (self, method):
+    def setup_method(self, method):
         pass
 
-    def teardown_method (self, method):
+    def teardown_method(self, method):
         pass
 
-    def __del__ (self):
+    def __del__(self):
         del self.test_var
 
-    def test_bgp_full (self):
+    def test_bgp_full(self):
         self.test_var.configure_switch_ips()
         self.test_var.verify_bgp_running()
         self.test_var.verify_hosts_ping_fail()

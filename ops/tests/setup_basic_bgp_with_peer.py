@@ -16,15 +16,7 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-import os
-import sys
-import time
 import pytest
-import subprocess
-from halonvsi.docker import *
-from halonvsi.halon import *
-from halonutils.halonutil import *
-from halonvsi.quagga import *
 from vtyshutils import *
 from bgpconfig import *
 
@@ -41,23 +33,24 @@ from bgpconfig import *
 #
 # S1 [interface 1]<--->[interface 1] S2
 #
-BGP1_ASN            = "6001"
-BGP1_ROUTER_ID      = "9.0.0.1"
-BGP1_NETWORK        = "11.0.0.0"
 
-BGP2_ASN            = "6002"
-BGP2_ROUTER_ID      = "9.0.0.2"
-BGP2_NETWORK        = "12.0.0.0"
+BGP1_ASN = "6001"
+BGP1_ROUTER_ID = "9.0.0.1"
+BGP1_NETWORK = "11.0.0.0"
 
-BGP1_NEIGHBOR       = BGP2_ROUTER_ID
-BGP1_NEIGHBOR_ASN   = BGP2_ASN
+BGP2_ASN = "6002"
+BGP2_ROUTER_ID = "9.0.0.2"
+BGP2_NETWORK = "12.0.0.0"
 
-BGP2_NEIGHBOR       = BGP1_ROUTER_ID
-BGP2_NEIGHBOR_ASN   = BGP1_ASN
+BGP1_NEIGHBOR = BGP2_ROUTER_ID
+BGP1_NEIGHBOR_ASN = BGP2_ASN
 
-BGP_NETWORK_PL      = "8"
-BGP_NETWORK_MASK    = "255.0.0.0"
-BGP_ROUTER_IDS      = [BGP1_ROUTER_ID, BGP2_ROUTER_ID]
+BGP2_NEIGHBOR = BGP1_ROUTER_ID
+BGP2_NEIGHBOR_ASN = BGP1_ASN
+
+BGP_NETWORK_PL = "8"
+BGP_NETWORK_MASK = "255.0.0.0"
+BGP_ROUTER_IDS = [BGP1_ROUTER_ID, BGP2_ROUTER_ID]
 
 BGP1_CONFIG = ["router bgp %s" % BGP1_ASN,
                "bgp router-id %s" % BGP1_ROUTER_ID,
@@ -76,15 +69,15 @@ NUM_HOSTS_PER_SWITCH = 0
 
 SWITCH_PREFIX = "s"
 
-class myTopo(Topo):
-    def build (self, hsts=0, sws=2, **_opts):
 
+class myTopo(Topo):
+    def build(self, hsts=0, sws=2, **_opts):
         self.hsts = hsts
         self.sws = sws
 
         switch = self.addSwitch("%s1" % SWITCH_PREFIX)
-        switch = self.addSwitch(name = "%s2" % SWITCH_PREFIX,
-                                cls = PEER_SWITCH_TYPE,
+        switch = self.addSwitch(name="%s2" % SWITCH_PREFIX,
+                                cls=PEER_SWITCH_TYPE,
                                 **self.sopts)
 
         # Connect the switches
@@ -92,25 +85,26 @@ class myTopo(Topo):
             self.addLink("%s%s" % (SWITCH_PREFIX, i-1),
                          "%s%s" % (SWITCH_PREFIX, i))
 
-class bgpTest (HalonTest):
-    def setupNet (self):
-        self.net = Mininet(topo=myTopo(hsts = NUM_HOSTS_PER_SWITCH,
-                                       sws = NUM_OF_SWITCHES,
-                                       hopts = self.getHostOpts(),
-                                       sopts = self.getSwitchOpts()),
-                                       switch = SWITCH_TYPE,
-                                       host = HalonHost,
-                                       link = HalonLink,
-                                       controller = None,
-                                       build = True)
 
-    def configure_switch_ips (self):
+class bgpTest(OpsVsiTest):
+    def setupNet(self):
+        self.net = Mininet(topo=myTopo(hsts=NUM_HOSTS_PER_SWITCH,
+                                       sws=NUM_OF_SWITCHES,
+                                       hopts=self.getHostOpts(),
+                                       sopts=self.getSwitchOpts()),
+                           switch=SWITCH_TYPE,
+                           host=OpsVsiHost,
+                           link=OpsVsiLink,
+                           controller=None,
+                           build=True)
+
+    def configure_switch_ips(self):
         info("\n########## Configuring switch IPs.. ##########\n")
 
         i = 0
         for switch in self.net.switches:
             # Configure the IPs between the switches
-            if isinstance(switch, HalonSwitch):
+            if isinstance(switch, VsiOpenSwitch):
                 switch.cmdCLI("configure terminal")
                 switch.cmdCLI("interface 1")
                 switch.cmdCLI("no shutdown")
@@ -118,10 +112,11 @@ class bgpTest (HalonTest):
                                                     BGP_NETWORK_PL))
                 switch.cmdCLI("exit")
             else:
-                switch.setIP(ip=BGP_ROUTER_IDS[i], intf="%s-eth1" % switch.name)
+                switch.setIP(ip=BGP_ROUTER_IDS[i],
+                             intf="%s-eth1" % switch.name)
             i += 1
 
-    def verify_bgp_running (self):
+    def verify_bgp_running(self):
         info("\n########## Verifying bgp processes.. ##########\n")
 
         for switch in self.net.switches:
@@ -131,7 +126,7 @@ class bgpTest (HalonTest):
 
             info("### bgpd process exists on switch %s ###\n" % switch.name)
 
-    def configure_bgp (self):
+    def configure_bgp(self):
         info("\n########## Configuring bgp on all switches.. ##########\n")
 
         i = 0
@@ -141,32 +136,33 @@ class bgpTest (HalonTest):
 
             SwitchVtyshUtils.vtysh_cfg_cmd(switch, cfg_array)
 
+
 # Mark zero timeout so that commands can be entered manually indefinitely.
 # This script is not picked up by CIT.
 @pytest.mark.timeout(0)
 class Test_bgp_basic_setup:
-    def setup (self):
+    def setup(self):
         pass
 
-    def teardown (self):
+    def teardown(self):
         pass
 
-    def setup_class (cls):
+    def setup_class(cls):
         Test_bgp_basic_setup.test_var = bgpTest()
 
-    def teardown_class (cls):
+    def teardown_class(cls):
         Test_bgp_basic_setup.test_var.net.stop()
 
-    def setup_method (self, method):
+    def setup_method(self, method):
         pass
 
-    def teardown_method (self, method):
+    def teardown_method(self, method):
         pass
 
-    def __del__ (self):
+    def __del__(self):
         del self.test_var
 
-    def test_run (self):
+    def test_run(self):
         self.test_var.configure_switch_ips()
         self.test_var.verify_bgp_running()
         self.test_var.configure_bgp()

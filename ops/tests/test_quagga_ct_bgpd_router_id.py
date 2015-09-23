@@ -1,6 +1,5 @@
-#
-# !/usr/bin/python
-#
+#!/usr/bin/python
+
 # Copyright (C) 2015 Hewlett Packard Enterprise Development LP
 # All Rights Reserved.
 #
@@ -16,15 +15,7 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-import os
-import sys
-import time
 import pytest
-import subprocess
-from halonvsi.docker import *
-from halonvsi.halon import *
-from halonutils.halonutil import *
-from halonvsi.quagga import *
 from vtyshutils import *
 from bgpconfig import *
 
@@ -46,28 +37,29 @@ NUM_OF_SWITCHES = 1
 NUM_HOSTS_PER_SWITCH = 0
 SWITCH_PREFIX = "s"
 
-class myTopo(Topo):
-    def build (self, hsts=0, sws=2, **_opts):
 
+class myTopo(Topo):
+    def build(self, hsts=0, sws=2, **_opts):
         self.hsts = hsts
         self.sws = sws
 
         for i in irange(1, sws):
             switch = self.addSwitch("%s%s" % (SWITCH_PREFIX, i))
 
-class bgpTest (HalonTest):
-    def setupNet (self):
-        self.net = Mininet(topo=myTopo(hsts = NUM_HOSTS_PER_SWITCH,
-                                       sws = NUM_OF_SWITCHES,
-                                       hopts = self.getHostOpts(),
-                                       sopts = self.getSwitchOpts()),
-                                       switch = SWITCH_TYPE,
-                                       host = HalonHost,
-                                       link = HalonLink,
-                                       controller = None,
-                                       build = True)
 
-    def verify_bgp_running (self):
+class bgpTest(OpsVsiTest):
+    def setupNet(self):
+        self.net = Mininet(topo=myTopo(hsts=NUM_HOSTS_PER_SWITCH,
+                                       sws=NUM_OF_SWITCHES,
+                                       hopts=self.getHostOpts(),
+                                       sopts=self.getSwitchOpts()),
+                           switch=SWITCH_TYPE,
+                           host=OpsVsiHost,
+                           link=OpsVsiLink,
+                           controller=None,
+                           build=True)
+
+    def verify_bgp_running(self):
         info("\n########## Verifying bgp process.. ##########\n")
 
         switch = self.net.switches[0]
@@ -77,7 +69,7 @@ class bgpTest (HalonTest):
 
         info("### bgpd process exists on switch %s ###\n" % switch.name)
 
-    def configure_bgp (self):
+    def configure_bgp(self):
         info("\n########## Applying BGP configurations... ##########\n")
 
         switch = self.net.switches[0]
@@ -89,7 +81,7 @@ class bgpTest (HalonTest):
 
         SwitchVtyshUtils.vtysh_cfg_cmd(switch, cfg_array)
 
-    def verify_bgp_router_id (self):
+    def verify_bgp_router_id(self):
         info("\n########## Verifying BGP Router-ID... ##########\n")
 
         switch = self.net.switches[0]
@@ -100,7 +92,7 @@ class bgpTest (HalonTest):
 
         info("### BGP Router-ID %s found ###\n" % BGP_ROUTER_ID)
 
-    def unconfigure_bgp (self):
+    def unconfigure_bgp(self):
         info("\n########## Applying BGP configurations... ##########\n")
 
         switch = self.net.switches[0]
@@ -111,7 +103,7 @@ class bgpTest (HalonTest):
 
         SwitchVtyshUtils.vtysh_cfg_cmd(switch, cfg_array)
 
-    def verify_no_bgp_router_id (self):
+    def verify_no_bgp_router_id(self):
         info("\n########## Verifying BGP Router-ID... ##########\n")
 
         switch = self.net.switches[0]
@@ -124,28 +116,28 @@ class bgpTest (HalonTest):
 
 
 class Test_bgpd_router_id:
-    def setup (self):
+    def setup(self):
         pass
 
-    def teardown (self):
+    def teardown(self):
         pass
 
-    def setup_class (cls):
+    def setup_class(cls):
         Test_bgpd_router_id.test_var = bgpTest()
 
-    def teardown_class (cls):
+    def teardown_class(cls):
         Test_bgpd_router_id.test_var.net.stop()
 
-    def setup_method (self, method):
+    def setup_method(self, method):
         pass
 
-    def teardown_method (self, method):
+    def teardown_method(self, method):
         pass
 
-    def __del__ (self):
+    def __del__(self):
         del self.test_var
 
-    def test_bgp_full (self):
+    def test_bgp_full(self):
         self.test_var.verify_bgp_running()
         self.test_var.configure_bgp()
         self.test_var.verify_bgp_router_id()

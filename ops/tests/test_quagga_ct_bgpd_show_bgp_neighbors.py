@@ -1,7 +1,5 @@
+#!/usr/bin/python
 
-#
-# !/usr/bin/python
-#
 # Copyright (C) 2015 Hewlett Packard Enterprise Development LP
 # All Rights Reserved.
 #
@@ -17,15 +15,7 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-import os
-import sys
-import time
 import pytest
-import subprocess
-from halonvsi.docker import *
-from halonvsi.halon import *
-from halonutils.halonutil import *
-from halonvsi.quagga import *
 from vtyshutils import *
 from bgpconfig import *
 
@@ -41,48 +31,49 @@ from bgpconfig import *
 # We need only one switch for this test.
 #
 
-BGP_ROUTER_ASN =                "1"
-BGP_NEIGHBOR_IPADDR =           "1.1.1.1"
-BGP_NEIGHBOR_REMOTE_AS =        "1111"
+BGP_ROUTER_ASN = "1"
+BGP_NEIGHBOR_IPADDR = "1.1.1.1"
+BGP_NEIGHBOR_REMOTE_AS = "1111"
 
 BGP_NEIGHBOR_CONFIG = ["router bgp %s" % BGP_ROUTER_ASN,
-                       "neighbor %s remote-as %s" \
-                            % (BGP_NEIGHBOR_IPADDR, BGP_NEIGHBOR_REMOTE_AS)]
+                       "neighbor %s remote-as %s" % (BGP_NEIGHBOR_IPADDR,
+                                                     BGP_NEIGHBOR_REMOTE_AS)]
 
 NO_BGP_NEIGHBOR_CONFIG = ["router bgp %s" % BGP_ROUTER_ASN,
                           "no neighbor %s" % BGP_NEIGHBOR_IPADDR]
 
 SHOW_BGP_NEIGHBORS = "show bgp neighbors"
 
-class myTopo(Topo):
 
-    def build (self, hsts=0, sws=1, **_opts):
+class myTopo(Topo):
+    def build(self, hsts=0, sws=1, **_opts):
         self.hsts = hsts
         self.sws = sws
         self.switch = self.addSwitch("s1")
 
-class showBgpNeighborTest (HalonTest):
 
-    def setupNet (self):
-        self.net = Mininet(topo=myTopo(hsts = 0, sws = 1,
-                                       hopts = self.getHostOpts(),
-                                       sopts = self.getSwitchOpts()),
-                                       switch = SWITCH_TYPE,
-                                       host = HalonHost,
-                                       link = HalonLink,
-                                       controller = None,
-                                       build = True)
+class showBgpNeighborTest(OpsVsiTest):
+    def setupNet(self):
+        self.net = Mininet(topo=myTopo(hsts=0, sws=1,
+                                       hopts=self.getHostOpts(),
+                                       sopts=self.getSwitchOpts()),
+                           switch=SWITCH_TYPE,
+                           host=OpsVsiHost,
+                           link=OpsVsiLink,
+                           controller=None,
+                           build=True)
+
         self.switch = self.net.switches[0]
 
-    def bgp_neighbor_exists (self, show_output):
-        if ((BGP_NEIGHBOR_IPADDR in show_output) and
-            (BGP_NEIGHBOR_REMOTE_AS in show_output) and
-            ("tcp_port_number" in show_output) and
-            ("bgp-peer-keepalive_in-count" in show_output)):
-                return True
+    def bgp_neighbor_exists(self, show_output):
+        if ((BGP_NEIGHBOR_IPADDR in show_output and
+             BGP_NEIGHBOR_REMOTE_AS in show_output and
+             "tcp_port_number" in show_output and
+             "bgp_peer_keepalive_in_count" in show_output)):
+            return True
         return False
 
-    def add_bgp_neighbor_to_switch (self):
+    def add_bgp_neighbor_to_switch(self):
         info("\n########## Setting up switch with very basic "
              "BGP configuration ##########\n")
 
@@ -90,7 +81,7 @@ class showBgpNeighborTest (HalonTest):
 
         info("### Switch configuration complete ###\n")
 
-    def verify_bgp_neighbor_exists (self):
+    def verify_bgp_neighbor_exists(self):
         info("\n########## Verifying that the configured bgp "
              "neighbor DOES exist ##########\n")
 
@@ -101,11 +92,11 @@ class showBgpNeighborTest (HalonTest):
 
         info("### Verified neighbor does exist ###\n")
 
-    def delete_bgp_neighbor_from_switch (self):
+    def delete_bgp_neighbor_from_switch(self):
         info("### Deleting bgp neighbor from the switch ###\n")
         SwitchVtyshUtils.vtysh_cfg_cmd(self.switch, NO_BGP_NEIGHBOR_CONFIG)
 
-    def verify_bgp_neighbor_deleted (self):
+    def verify_bgp_neighbor_deleted(self):
         info("\n########## Verifying that the previously configured bgp "
              "neighbor does NOT exist ##########\n")
 
@@ -118,30 +109,30 @@ class showBgpNeighborTest (HalonTest):
 
         info("### Verified neighbor does not exist ###\n")
 
+
 class Test_bgpd_show_bgp_neighbor:
-
-    def setup (self):
+    def setup(self):
         pass
 
-    def teardown (self):
+    def teardown(self):
         pass
 
-    def setup_class (cls):
+    def setup_class(cls):
         Test_bgpd_show_bgp_neighbor.test_var = showBgpNeighborTest()
 
-    def teardown_class (cls):
+    def teardown_class(cls):
         Test_bgpd_show_bgp_neighbor.test_var.net.stop()
 
-    def setup_method (self, method):
+    def setup_method(self, method):
         pass
 
-    def teardown_method (self, method):
+    def teardown_method(self, method):
         pass
 
-    def __del__ (self):
+    def __del__(self):
         del self.test_var
 
-    def test_show_bgp_neighbor (self):
+    def test_show_bgp_neighbor(self):
         self.test_var.add_bgp_neighbor_to_switch()
         self.test_var.verify_bgp_neighbor_exists()
         self.test_var.verify_bgp_neighbor_deleted()

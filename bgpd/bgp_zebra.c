@@ -1,6 +1,6 @@
 /* zebra client
    Copyright (C) 1997, 98, 99 Kunihiro Ishiguro
-
+   Copyright (C) 2015 Hewlett Packard Enterprise Development LP
 This file is part of GNU Zebra.
 
 GNU Zebra is free software; you can redistribute it and/or modify it

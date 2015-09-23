@@ -158,8 +158,8 @@ txn_command_result(enum ovsdb_idl_txn_status status, char *msg, char *pr)
         txn_rec->update_time = time (NULL);                             \
         bgp_txn_insert(&txn_rec->hmap_node);                            \
         prefix2str(p, p_str, sizeof(p_str));                            \
-        VLOG_INFO("Inserted txn prefix %s", p_str);                     \
-        VLOG_INFO("Inserted txn at time %d", (int)txn_rec->update_time);\
+        VLOG_DBG("Inserted txn prefix %s", p_str);                      \
+        VLOG_DBG("Inserted txn at time %d", (int)txn_rec->update_time); \
     } while (0)
 
 #define START_DB_TXN(txn, msg, req, p, info, asn, safi)                 \
@@ -958,7 +958,7 @@ bgp_txn_log(struct bgp_ovsdb_txn *txn, int status)
     char prefix_str[PREFIX_MAXLEN];
 
     prefix2str(&txn->prefix, prefix_str, sizeof(prefix_str));
-    VLOG_DBG("Active Transaction for route %s at time %d status=%d",
+    VLOG_DBG("Active Transaction for route %s at time %lld status=%d",
               prefix_str, txn->update_time, status);
 }
 

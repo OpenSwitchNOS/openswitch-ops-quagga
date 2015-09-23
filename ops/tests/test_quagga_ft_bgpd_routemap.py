@@ -1,6 +1,5 @@
-#
-# !/usr/bin/python
-#
+#!/usr/bin/python
+
 # Copyright (C) 2015 Hewlett Packard Enterprise Development LP
 # All Rights Reserved.
 #
@@ -16,15 +15,7 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-import os
-import sys
-import time
 import pytest
-import subprocess
-from halonvsi.docker import *
-from halonvsi.halon import *
-from halonutils.halonutil import *
-from halonvsi.quagga import *
 from vtyshutils import *
 from bgpconfig import *
 
@@ -71,8 +62,6 @@ from bgpconfig import *
 # Expected routes of BGP1:
 # ----------------------------------------------------------------------------
 # BGP table version is 0, local router ID is 8.0.0.1
-# Status codes: s suppressed, d damped, h history, * valid, > best, i - internal,
-#               r RIB-failure, S Stale, R Removed
 # Origin codes: i - IGP, e - EGP, ? - incomplete
 #
 #    Network          Next Hop            Metric LocPrf Weight Path
@@ -83,8 +72,6 @@ from bgpconfig import *
 # Expected routes of BGP2:
 # ----------------------------------------------------------------------------
 # BGP table version is 0, local router ID is 8.0.0.2
-# Status codes: s suppressed, d damped, h history, * valid, > best, i - internal,
-#               r RIB-failure, S Stale, R Removed
 # Origin codes: i - IGP, e - EGP, ? - incomplete
 #
 #    Network          Next Hop            Metric LocPrf Weight Path
@@ -101,14 +88,15 @@ DEFAULT_NETMASK = "255.0.0.0"
 RM_METRIC = "1000"
 RM_COMMUNITY = "1:5003"
 
+
 class myTopo(Topo):
-    def build (self, hsts=0, sws=2, **_opts):
+    def build(self, hsts=0, sws=2, **_opts):
         self.hsts = hsts
         self.sws = sws
 
         switch = self.addSwitch("%s1" % SWITCH_PREFIX)
-        switch = self.addSwitch(name = "%s2" % SWITCH_PREFIX,
-                                cls = PEER_SWITCH_TYPE,
+        switch = self.addSwitch(name="%s2" % SWITCH_PREFIX,
+                                cls=PEER_SWITCH_TYPE,
                                 **self.sopts)
 
         # Link the switches
@@ -116,19 +104,20 @@ class myTopo(Topo):
             self.addLink("%s%s" % (SWITCH_PREFIX, i),
                          "%s%s" % (SWITCH_PREFIX, i+1))
 
-class bgpTest (HalonTest):
-    def setupNet (self):
-        self.net = Mininet(topo=myTopo(hsts = NUM_HOSTS_PER_SWITCH,
-                                       sws = NUM_OF_SWITCHES,
-                                       hopts = self.getHostOpts(),
-                                       sopts = self.getSwitchOpts()),
-                                       switch = SWITCH_TYPE,
-                                       host = HalonHost,
-                                       link = HalonLink,
-                                       controller = None,
-                                       build = True)
 
-    def configure_switch_ips (self):
+class bgpTest(OpsVsiTest):
+    def setupNet(self):
+        self.net = Mininet(topo=myTopo(hsts=NUM_HOSTS_PER_SWITCH,
+                                       sws=NUM_OF_SWITCHES,
+                                       hopts=self.getHostOpts(),
+                                       sopts=self.getSwitchOpts()),
+                           switch=SWITCH_TYPE,
+                           host=OpsVsiHost,
+                           link=OpsVsiLink,
+                           controller=None,
+                           build=True)
+
+    def configure_switch_ips(self):
         info("\n########## Configuring switch IPs.. ##########\n")
 
         i = 0
@@ -139,18 +128,19 @@ class bgpTest (HalonTest):
                  (bgp_cfg.routerid, DEFAULT_PL, switch.name))
 
             # Configure the IPs between the switches
-            if isinstance(switch, HalonSwitch):
+            if isinstance(switch, VsiOpenSwitch):
                 switch.cmdCLI("configure terminal")
                 switch.cmdCLI("interface 1")
                 switch.cmdCLI("no shutdown")
-                switch.cmdCLI("ip address %s/%s" % (bgp_cfg.routerid, DEFAULT_PL))
+                switch.cmdCLI("ip address %s/%s" % (bgp_cfg.routerid,
+                                                    DEFAULT_PL))
                 switch.cmdCLI("exit")
             else:
                 switch.setIP(ip=bgp_cfg.routerid, intf="%s-eth1" % switch.name)
 
             i += 1
 
-    def setup_bgp_config (self):
+    def setup_bgp_config(self):
         info("\n########## Setup of BGP configurations... ##########\n")
 
         # Create BGP configurations
@@ -178,12 +168,12 @@ class bgpTest (HalonTest):
 
         # Configure so that the second route from BGP1 is permitted
         network = self.bgpConfig1.networks[1]
-        prefixList = PrefixList("BGP%s_OUT" % self.bgpConfig1.asn, 10, "permit",
-                                network, DEFAULT_PL)
+        prefixList = PrefixList("BGP%s_OUT" % self.bgpConfig1.asn, 10,
+                                "permit", network, DEFAULT_PL)
 
         self.bgpConfig1.prefixLists.append(prefixList)
 
-    def apply_bgp_config (self):
+    def apply_bgp_config(self):
         info("\n########## Applying BGP configurations... ##########\n")
         self.all_cfg_array = []
 
@@ -265,7 +255,7 @@ class bgpTest (HalonTest):
             cfg_array.append("neighbor %s route-map %s %s" %
                              (neighbor.routerid, prefixList.name, dir))
 
-    def verify_bgp_running (self):
+    def verify_bgp_running(self):
         info("\n########## Verifying bgp processes.. ##########\n")
 
         for switch in self.net.switches:
@@ -275,7 +265,7 @@ class bgpTest (HalonTest):
 
             info("### bgpd process exists on switch %s ###\n" % switch.name)
 
-    def verify_bgp_configs (self):
+    def verify_bgp_configs(self):
         info("\n########## Verifying all configurations.. ##########\n")
 
         i = 0
@@ -290,7 +280,7 @@ class bgpTest (HalonTest):
 
         info("### All configurations were verified successfully ###\n")
 
-    def verify_bgp_routes (self):
+    def verify_bgp_routes(self):
         info("\n########## Verifying routes... ##########\n")
 
         # For each bgp, verify that it is indeed advertising itself
@@ -379,12 +369,13 @@ class bgpTest (HalonTest):
 
         matching = False
 
-        routes = SwitchVtyshUtils.vtysh_cmd(switch, "sh ip bgp").split(VTYSH_CR)
+        cmd = "sh ip bgp"
+        routes = SwitchVtyshUtils.vtysh_cmd(switch, cmd).split(VTYSH_CR)
 
         for rte in routes:
             if (network in rte) and (next_hop in rte) and (metric in rte):
                 matching = True
-                break;
+                break
 
         assert matching, "Metric not matching for %s" % switch.name
 
@@ -402,8 +393,7 @@ class bgpTest (HalonTest):
         cmd = "sh ip bgp %s" % network
         network_info = SwitchVtyshUtils.vtysh_cmd(switch, cmd)
 
-        assert RM_COMMUNITY in network_info, \
-               "Community value not matching for network %s" % network
+        assert RM_COMMUNITY in network_info, "Community value not matching"
 
         info("### Community value %s matching for network %s ###\n" %
              (community, network))
@@ -472,13 +462,14 @@ class bgpTest (HalonTest):
 
         info("### Verifying no set metric. Metric should not exist ###\n")
         switch = self.net.switches[1]
-        routes = SwitchVtyshUtils.vtysh_cmd(switch, "sh ip bgp").split(VTYSH_CR)
+        cmd = "sh ip bgp"
+        routes = SwitchVtyshUtils.vtysh_cmd(switch, cmd).split(VTYSH_CR)
 
         metric_found = False
         for rte in routes:
             if (network in rte) and (next_hop in rte) and (metric in rte):
                 metric_found = True
-                break;
+                break
 
         assert not metric_found, "Metric was found"
 
@@ -504,7 +495,8 @@ class bgpTest (HalonTest):
         cfg_array.append("route-map %s %s %d" %
                          (prefixList.name, action,
                           prefixList.seq_num))
-        cfg_array.append("no match ip address prefix-list %s" % prefixList.name)
+        cfg_array.append("no match ip address prefix-list %s" %
+                         prefixList.name)
 
         SwitchVtyshUtils.vtysh_cfg_cmd(switch, cfg_array)
 
@@ -517,34 +509,35 @@ class bgpTest (HalonTest):
 
         found = SwitchVtyshUtils.wait_for_route(switch, network, next_hop)
 
-        assert found, "Route %s -> %s was not found on %s" \
-                      % (network, next_hop, switch.name)
+        assert found, "Route %s -> %s was not found on %s" % \
+                      (network, next_hop, switch.name)
 
         info("### Previously denied network is now present in BGP2 ###\n")
 
+
 class Test_bgpd_routemap:
-    def setup (self):
+    def setup(self):
         pass
 
-    def teardown (self):
+    def teardown(self):
         pass
 
-    def setup_class (cls):
+    def setup_class(cls):
         Test_bgpd_routemap.test_var = bgpTest()
 
-    def teardown_class (cls):
+    def teardown_class(cls):
         Test_bgpd_routemap.test_var.net.stop()
 
-    def setup_method (self, method):
+    def setup_method(self, method):
         pass
 
-    def teardown_method (self, method):
+    def teardown_method(self, method):
         pass
 
-    def __del__ (self):
+    def __del__(self):
         del self.test_var
 
-    def test_bgp_full (self):
+    def test_bgp_full(self):
         self.test_var.setup_bgp_config()
         self.test_var.configure_switch_ips()
         self.test_var.verify_bgp_running()

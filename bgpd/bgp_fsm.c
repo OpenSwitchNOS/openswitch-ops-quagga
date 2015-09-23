@@ -1,6 +1,7 @@
 /* BGP-4 Finite State Machine   
    From RFC1771 [A Border Gateway Protocol 4 (BGP-4)]
    Copyright (C) 1996, 97, 98 Kunihiro Ishiguro
+   Copyright (C) 2015 Hewlett Packard Enterprise Development LP
 
 This file is part of GNU Zebra.
 

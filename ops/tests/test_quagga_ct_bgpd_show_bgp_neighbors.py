@@ -78,7 +78,7 @@ class showBgpNeighborTest (HalonTest):
         if ((BGP_NEIGHBOR_IPADDR in show_output) and
             (BGP_NEIGHBOR_REMOTE_AS in show_output) and
             ("tcp_port_number" in show_output) and
-            ("bgp-peer-keepalive_in-count" in show_output)):
+            ("bgp_peer_keepalive_in_count" in show_output)):
                 return True
         return False
 

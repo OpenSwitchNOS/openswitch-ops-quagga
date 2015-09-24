@@ -25,6 +25,9 @@
 #define ZEBRA_RT_UNINSTALL  0
 #define ZEBRA_RT_INSTALL    1
 
+#define ZEBRA_NH_UNINSTALL  ZEBRA_RT_UNINSTALL
+#define ZEBRA_NH_INSTALL    ZEBRA_RT_INSTALL
+
 struct ipv4v6_addr
 {
   union {
@@ -66,7 +69,18 @@ void zebra_ovsdb_init_poll_loop (struct zebra_t *zebrad);
 int zebra_update_selected_route_to_db (struct route_node *rn,
                                        struct rib *route,
                                        int action);
-
+void zebra_delete_route_nexthop_port_from_db (struct rib *route,
+                                              char* port_name);
+void zebra_delete_route_nexthop_addr_from_db (struct rib *route,
+                                              char* port_name);
+void zebra_route_list_add_data (struct route_node *rnode,
+                                struct rib *rib_p,
+                                struct nexthop *nhop);
+void zebra_update_selected_nh_port_or_addr (struct route_node *rn,
+                                            struct rib *route,
+                                            char* port_name,
+                                            char* nh_addr,
+                                            int if_selected);
 extern int zebra_create_txn (void);
 extern int zebra_finish_txn (void);
 

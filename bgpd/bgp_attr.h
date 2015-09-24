@@ -1,5 +1,8 @@
-/* BGP attributes. 
-   Copyright (C) 1996, 97, 98 Kunihiro Ishiguro
+/*
+
+BGP attributes.
+Copyright (C) 1996, 97, 98 Kunihiro Ishiguro
+Copyright (C) 2015 Hewlett Packard Enterprise Development LP
 
 This file is part of GNU Zebra.
 

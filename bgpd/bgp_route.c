@@ -1,5 +1,6 @@
 /* BGP routing information
    Copyright (C) 1996, 97, 98, 99 Kunihiro Ishiguro
+   Copyright (C) 2015 Hewlett Packard Enterprise Development LP
 
 This file is part of GNU Zebra.
 
@@ -513,7 +514,7 @@ bgp_info_cmp (struct bgp *bgp, struct bgp_info *new, struct bgp_info *exist,
   else
     {
       /*
-       * TODO: If unequal cost ibgp multipath is enabled we can
+       * OPS_TODO: If unequal cost ibgp multipath is enabled we can
        * mark the paths as equal here instead of returning
        */
       return ret;
@@ -2874,7 +2875,7 @@ bgp_clear_route_table (struct peer *peer, afi_t afi, safi_t safi,
       struct bgp_adj_in *ain;
       struct bgp_adj_out *aout;
 
-      /* XXX:TODO: This is suboptimal, every non-empty route_node is
+      /* OPS_TODO: This is suboptimal, every non-empty route_node is
        * queued for every clearing peer, regardless of whether it is
        * relevant to the peer at hand.
        *

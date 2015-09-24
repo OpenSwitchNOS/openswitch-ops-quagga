@@ -1,5 +1,6 @@
 /* Main routine of bgpd.
    Copyright (C) 1996, 97, 98, 1999 Kunihiro Ishiguro
+   Copyright (C) 2015 Hewlett Packard Enterprise Development LP
 
 This file is part of GNU Zebra.
 
@@ -52,12 +53,9 @@ Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 
 #ifdef ENABLE_OVSDB
 #include "bgpd/bgp_ovsdb_if.h"
-#endif
-
-#ifdef ENABLE_OVSDB
 extern boolean exiting;
-#define HALON_BGP_DBG   1
-#endif
+#define OPS_BGP_DBG   1
+#endif /* ENABLE_OVSDB */
 
 /* bgpd options, we use GNU getopt library. */
 static const struct option longopts[] = 
@@ -339,7 +337,7 @@ main (int argc, char **argv)
 
 #ifdef ENABLE_OVSDB
   bgp_ovsdb_init(argc, argv);
-#endif
+#endif /* ENABLE_OVSDB */
 
   /* Set umask before anything for security */
   umask (0027);
@@ -347,7 +345,7 @@ main (int argc, char **argv)
   /* Preserve name of myself. */
   progname = ((p = strrchr (argv[0], '/')) ? ++p : argv[0]);
 
-  /* HALON_TODO: bpg_ovsdb_init internally calls openlog.
+  /* OPS_TODO: bpg_ovsdb_init internally calls openlog.
    * In this case, we should make sure we don't call openzlog again.
    */
   zlog_default = openzlog (progname, ZLOG_BGP,
@@ -355,7 +353,7 @@ main (int argc, char **argv)
   zlog_set_level(NULL, ZLOG_DEST_SYSLOG, LOG_DEBUG);
   zlog_set_level (NULL, ZLOG_DEST_STDOUT, LOG_DEBUG);
 
-#ifdef HALON_BGP_DBG
+#ifdef OPS_BGP_DBG
   conf_bgp_debug_fsm = -1UL;
   conf_bgp_debug_events = -1UL;
   conf_bgp_debug_packet = -1UL;
@@ -463,12 +461,12 @@ main (int argc, char **argv)
 
 #ifdef ENABLE_OVSDB
   bgp_ovsdb_init_poll_loop(bm);
-#endif
+#endif /* ENABLE_OVSDB */
 
 #ifndef ENABLE_OVSDB
   /* Parse config file. */
   vty_read_config (config_file, config_default);
-#endif
+#endif /* ENABLE_OVSDB */
 
   /* Start execution only if not in dry-run mode */
   if(dryrun)
@@ -484,7 +482,7 @@ main (int argc, char **argv)
 
   /* Process ID file creation. */
   pid_output (pid_file);
-#endif
+#endif /* ENABLE_OVSDB */
 
   /* Make bgp vty socket. */
   vty_serv_sock (vty_addr, vty_port, BGP_VTYSH_PATH);
@@ -500,12 +498,12 @@ main (int argc, char **argv)
   while (!exiting && thread_fetch (master, &thread))
 #else
   while (thread_fetch (master, &thread))
-#endif
+#endif /* ENABLE_OVSDB */
     thread_call (&thread);
 
 #ifdef ENABLE_OVSDB
   bgp_ovsdb_exit();
-#endif
+#endif /* ENABLE_OVSDB */
 
   /* Not reached. */
   return (0);

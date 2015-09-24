@@ -1,6 +1,10 @@
 
-/* BGP VTY interface.
-   Copyright (C) 1996, 97, 98, 99, 2000 Kunihiro Ishiguro
+/*
+
+BGP VTY interface.
+
+Copyright (C) 1996, 97, 98, 99, 2000 Kunihiro Ishiguro
+Copyright (C) 2015 Hewlett Packard Enterprise Development LP
 
 This file is part of GNU Zebra.
 
@@ -17,7 +21,9 @@ General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with GNU Zebra; see the file COPYING.  If not, write to the Free
 Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
-02111-1307, USA.  */
+02111-1307, USA.
+
+*/
 
 /*
 **		        IMPORTANT
@@ -4445,7 +4451,7 @@ DEFUN (no_neighbor_allowas_in,
   return log_bgp_error(ret);
 }
 
-#endif  /* !ENABLE_OVSDB */
+#endif /* !ENABLE_OVSDB */
 
 DEFUN (neighbor_ttl_security,
        neighbor_ttl_security_cmd,
@@ -9489,7 +9495,7 @@ bgp_vty_init (void)
   /* "neighbor password" commands. */
   install_element (BGP_NODE, &neighbor_password_cmd);
   install_element (BGP_NODE, &no_neighbor_password_cmd);
-#endif  /* !ENABLE_OVSDB */
+#endif /* !ENABLE_OVSDB */
 
   /* "neighbor activate" commands. */
   install_element (BGP_NODE, &neighbor_activate_cmd);
@@ -9515,7 +9521,7 @@ bgp_vty_init (void)
   install_element (BGP_IPV6_NODE, &neighbor_set_peer_group_cmd);
   install_element (BGP_IPV6M_NODE, &neighbor_set_peer_group_cmd);
   install_element (BGP_VPNV4_NODE, &neighbor_set_peer_group_cmd);
-#endif  /* !ENABLE_OVSDB */
+#endif /* !ENABLE_OVSDB */
 
   /* "no neighbor peer-group unset" commands. */
 #if 0
@@ -10036,7 +10042,7 @@ bgp_vty_init (void)
   install_element (BGP_VPNV4_NODE, &neighbor_allowas_in_cmd);
   install_element (BGP_VPNV4_NODE, &neighbor_allowas_in_arg_cmd);
   install_element (BGP_VPNV4_NODE, &no_neighbor_allowas_in_cmd);
-#endif
+#endif /* ENABLE_OVSDB */
   /* address-family commands. */
   install_element (BGP_NODE, &address_family_ipv4_cmd);
   install_element (BGP_NODE, &address_family_ipv4_safi_cmd);

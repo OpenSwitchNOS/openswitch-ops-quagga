@@ -16,8 +16,8 @@
 # under the License.
 
 import pytest
-from vtyshutils import *
-from bgpconfig import *
+from opsvsiutils.vtyshutils import *
+from opsvsiutils.bgpconfig import *
 
 #
 #

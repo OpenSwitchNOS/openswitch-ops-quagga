@@ -10,11 +10,13 @@ AM_CFLAGS += -I $(LOCAL_SYSROOT_DIR)/usr/local/include/ovs
 endif
 AM_LDFLAGS = $(PILDFLAGS)
 
-noinst_LIBRARIES = libbgp.a
 if ENABLE_OVSDB
-noinst_LIBRARIES += libbgp_ovsdb.a
-endif
+noinst_LIBRARIES = libbgp.a libbgp_ovsdb.a
+sbin_PROGRAMS = ops-bgpd
+else
+noinst_LIBRARIES = libbgp.a
 sbin_PROGRAMS = bgpd
+endif
 
 libbgp_a_SOURCES = \
 	bgpd.c bgp_fsm.c bgp_aspath.c bgp_community.c bgp_attr.c \
@@ -41,10 +43,12 @@ if ENABLE_OVSDB
 noinst_HEADERS += bgp_ovsdb_if.h bgp_ovsdb_route.h
 endif
 
+if ENABLE_OVSDB
+ops_bgpd_SOURCES = bgp_main.c
+ops_bgpd_LDADD = libbgp.a ../lib/libzebra.la @LIBCAP@ @LIBM@ libbgp_ovsdb.a -lovscommon -lovsdb -lpthread
+else
 bgpd_SOURCES = bgp_main.c
 bgpd_LDADD = libbgp.a ../lib/libzebra.la @LIBCAP@ @LIBM@
-if ENABLE_OVSDB
-bgpd_LDADD += libbgp_ovsdb.a -lovscommon -lovsdb -lpthread
 endif
 
 examplesdir = $(exampledir)

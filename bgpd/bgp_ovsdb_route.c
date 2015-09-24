@@ -158,8 +158,6 @@ txn_command_result(enum ovsdb_idl_txn_status status, char *msg, char *pr)
         txn_rec->update_time = time (NULL);                             \
         bgp_txn_insert(&txn_rec->hmap_node);                            \
         prefix2str(p, p_str, sizeof(p_str));                            \
-        VLOG_INFO("Inserted txn prefix %s", p_str);                     \
-        VLOG_INFO("Inserted txn at time %d", (int)txn_rec->update_time);\
     } while (0)
 
 #define START_DB_TXN(txn, msg, req, p, info, asn, safi)                 \
@@ -220,7 +218,7 @@ bgp_ovsdb_get_vrf(struct bgp *bgp)
 {
     int j;
     const struct ovsrec_vrf *ovs_vrf;
-    /* ops_TODO: Add support for multiple-vrf instance
+    /* OPS_TODO: Add support for multiple-vrf instance
     OVSREC_VRF_FOR_EACH (ovs_vrf, idl) {
         for (j = 0; j < ovs_vrf->n_bgp_routers; j ++) {
             if (ovs_vrf->key_bgp_routers[j] == (int64_t)bgp->as) {
@@ -261,7 +259,7 @@ bgp_ovsdb_set_rib_path_attributes(struct smap *smap,
                     OVSDB_BGP_ROUTE_PATH_ATTRIBUTES_LOC_PREF,
                     "%d",
                     attr->local_pref);
-    // HALON_TODO: Check for confed flag later
+    /* OPS_TODO: Check for confed flag later */
     if (peer->sort == BGP_PEER_IBGP) {
         smap_add(smap,
                  OVSDB_BGP_ROUTE_PATH_ATTRIBUTES_INTERNAL,
@@ -365,7 +363,7 @@ bgp_ovsdb_set_rib_nexthop(struct ovsdb_idl_txn *txn,
         return -1;
     }
     nexthop_list = xmalloc(sizeof *rib->nexthops * nexthop_num);
-    // Set first nexthop
+    /* Set first nexthop */
     inet_ntop(p->family, nexthop, nexthop_buf, sizeof(nexthop_buf));
     pnexthop = bgp_ovsdb_lookup_nexthop(nexthop_buf);
     if (!pnexthop) {
@@ -380,11 +378,11 @@ bgp_ovsdb_set_rib_nexthop(struct ovsdb_idl_txn *txn,
     nexthop_list[0]->ip_address = xstrdup(nexthop_buf);
 
     int ii = 1;
-    // Set multipath nexthops
+    /* Set multipath nexthops */
     for(mpinfo = bgp_info_mpath_first (info); mpinfo;
         mpinfo = bgp_info_mpath_next (mpinfo))
         {
-            // Update the nexthop table.
+            /* Update the nexthop table. */
             nexthop = &mpinfo->attr->nexthop;
             inet_ntop(p->family, nexthop, nexthop_buf, sizeof(nexthop_buf));
             pnexthop = bgp_ovsdb_lookup_nexthop(nexthop_buf);
@@ -441,7 +439,7 @@ bgp_ovsdb_set_local_rib_nexthop(struct ovsdb_idl_txn *txn,
         return -1;
     }
     nexthop_list = xmalloc(sizeof *rib->bgp_nexthops * nexthop_num);
-    // Set first nexthop
+    /* Set first nexthop */
     inet_ntop(p->family, nexthop, nexthop_buf, sizeof(nexthop_buf));
     pnexthop = bgp_ovsdb_lookup_local_nexthop(nexthop_buf);
     if (!pnexthop) {
@@ -454,11 +452,11 @@ bgp_ovsdb_set_local_rib_nexthop(struct ovsdb_idl_txn *txn,
     nexthop_list[0]->ip_address = xstrdup(nexthop_buf);
 
     int ii = 1;
-    // Set multipath nexthops
+    /* Set multipath nexthops */
     for(mpinfo = bgp_info_mpath_first (info); mpinfo;
         mpinfo = bgp_info_mpath_next (mpinfo))
         {
-            // Update the nexthop table.
+            /* Update the nexthop table. */
             nexthop = &mpinfo->attr->nexthop;
             inet_ntop(p->family, nexthop, nexthop_buf, sizeof(nexthop_buf));
             pnexthop = bgp_ovsdb_lookup_local_nexthop(nexthop_buf);
@@ -621,7 +619,7 @@ bgp_ovsdb_withdraw_rib_entry(struct prefix *p,
     }
     START_DB_TXN(txn, "Failed to create route table txn",
                  TXN_BGP_UPD_WITHDRAW, p, info, bgp->as, safi);
-    // Clear route
+    /* Clear route */
     ovsrec_route_delete(rib_row);
     END_DB_TXN(txn, "withdraw route", pr);
 }
@@ -648,16 +646,19 @@ bgp_ovsdb_delete_local_rib_entry(struct prefix *p,
                  __FUNCTION__, pr);
         return -1;
     }
-// Disable check to allow route to be deleted regardless of flag.
-//     if (CHECK_FLAG(info->flags, BGP_INFO_SELECTED)) {
-//         VLOG_ERR("%s:BGP info flag is set to selected, cannot \
-// remove route %s",
-//                  __FUNCTION__, pr);
-//         return -1;
-//     }
+
+    /*
+     *
+     * Disable check to allow route to be deleted regardless of flag.
+     * if (CHECK_FLAG(info->flags, BGP_INFO_SELECTED)) {
+     *   VLOG_ERR("%s:BGP info flag is set to selected, cannot \
+     *       remove route %s", __FUNCTION__, pr);
+     *   return -1;
+     * }
+     */
     START_DB_TXN(txn, "Failed to create route table txn",
                  TXN_BGP_DEL, p, info, bgp->as, safi);
-    // Delete route from RIB
+    /* Delete route from RIB */
     ovsrec_bgp_route_delete(rib_row);
     END_DB_TXN(txn, "delete route", pr);
 }
@@ -691,7 +692,7 @@ bgp_ovsdb_announce_rib_entry(struct prefix *p,
         VLOG_ERR ("Invalid sub-address family for route %s\n", pr);
         return -1;
     }
-    // Lookup VRF
+    /* Lookup VRF */
     vrf = bgp_ovsdb_get_vrf(bgp);
     if (!vrf) {
         VLOG_ERR("VRF entry not found for this route %s, BGP router ASN %d\n",
@@ -710,7 +711,7 @@ bgp_ovsdb_announce_rib_entry(struct prefix *p,
         ovsrec_route_set_address_family(rib, afi);
         ovsrec_route_set_sub_address_family(rib, safi_str);
         ovsrec_route_set_from(rib, "BGP");
-        // Set VRF
+        /* Set VRF */
         ovsrec_route_set_vrf(rib, vrf);
         distance = bgp_distance_apply (p, info, bgp);
         VLOG_DBG("distance %d\n", distance);
@@ -721,7 +722,7 @@ bgp_ovsdb_announce_rib_entry(struct prefix *p,
     } else {
         VLOG_DBG("Found route %s, updating ...\n", pr);
     }
-    // Nexthops
+    /* Nexthops */
     struct in_addr *nexthop = &info->attr->nexthop;
     if (nexthop->s_addr == 0) {
         VLOG_INFO("%s: Nexthop address is 0 for route %s\n",
@@ -730,7 +731,7 @@ bgp_ovsdb_announce_rib_entry(struct prefix *p,
         nexthop_num = 1 + bgp_info_mpath_count (info);
         VLOG_DBG("Setting nexthop num %d, metric %d, bgp_info_flags 0x%x\n",
                  nexthop_num, info->attr->med, info->flags);
-        // Nexthop list
+        /* Nexthop list */
         bgp_ovsdb_set_rib_nexthop(txn, rib, p, info, nexthop_num, safi);
     }
 
@@ -770,7 +771,7 @@ bgp_ovsdb_add_local_rib_entry(struct prefix *p,
         VLOG_ERR ("Invalid sub-address family for route %s\n", pr);
         return -1;
     }
-    // Lookup VRF
+    /* Lookup VRF */
     vrf = bgp_ovsdb_get_vrf(bgp);
     if (!vrf) {
         VLOG_ERR("VRF entry not found for this route %s, BGP router ASN %d\n",
@@ -786,7 +787,7 @@ bgp_ovsdb_add_local_rib_entry(struct prefix *p,
     VLOG_INFO("%s: setting prefix %s\n", __FUNCTION__, pr);
     ovsrec_bgp_route_set_address_family(rib, afi);
     ovsrec_bgp_route_set_sub_address_family(rib, safi_str);
-    // Set Peer
+    /* Set Peer */
     ovsrec_bgp_route_set_peer(rib, info->peer->host);
 
     distance = bgp_distance_apply (p, info, bgp);
@@ -795,7 +796,7 @@ bgp_ovsdb_add_local_rib_entry(struct prefix *p,
         ovsrec_bgp_route_set_distance(rib, (const int64_t *)&distance, 1);
     }
     ovsrec_bgp_route_set_metric(rib, (const int64_t *)&info->attr->med, 1);
-    // Nexthops
+    /* Nexthops */
     struct in_addr *nexthop = &info->attr->nexthop;
     if (nexthop->s_addr == 0) {
         VLOG_INFO("%s: Nexthop address is 0 for route %s\n",
@@ -804,12 +805,12 @@ bgp_ovsdb_add_local_rib_entry(struct prefix *p,
         nexthop_num = 1 + bgp_info_mpath_count (info);
         VLOG_DBG("Setting nexthop num %d, metric %d, bgp_info_flags 0x%x\n",
                  nexthop_num, info->attr->med, info->flags);
-        // Nexthop list
+        /* Nexthop list */
         bgp_ovsdb_set_local_rib_nexthop(txn, rib, p, info, nexthop_num, safi);
     }
-    // Set VRF
+    /* Set VRF */
     ovsrec_bgp_route_set_vrf(rib, vrf);
-    // Set path attributes
+    /* Set path attributes */
     smap_init(&smap);
     bgp_ovsdb_set_rib_path_attributes(&smap, info, bgp);
     ovsrec_bgp_route_set_path_attributes(rib, &smap);
@@ -958,7 +959,7 @@ bgp_txn_log(struct bgp_ovsdb_txn *txn, int status)
     char prefix_str[PREFIX_MAXLEN];
 
     prefix2str(&txn->prefix, prefix_str, sizeof(prefix_str));
-    VLOG_DBG("Active Transaction for route %s at time %d status=%d",
+    VLOG_DBG("Active Transaction for route %s at time %lld status=%d",
               prefix_str, txn->update_time, status);
 }
 
@@ -1751,9 +1752,9 @@ prefix_list_entry_read_ovsdb_delete_from_master(struct prefix_list *plist_head)
                  plist_entry = plist_entry->next) {
                 bool matched = false;
 
-                // Search against entries in prefix list stored in OVSDB
+                /* Search against entries in prefix list stored in OVSDB */
                 for (i = 0; i < ovs_plist->n_prefix_list_entries; i++) {
-                    // The key of the prefix list entry is the seq number
+                    /* The key of the prefix list entry is the seq number */
                     int64_t ovs_seqnum = ovs_plist->key_prefix_list_entries[i];
                     ovs_plist_entry = ovs_plist->value_prefix_list_entries[i];
 
@@ -1792,10 +1793,10 @@ policy_prefix_list_read_ovsdb_apply_deletion(struct ovsdb_idl *idl)
         return;
     }
 
-    // Check number based name list
+    /* Check number based name list */
     prefix_list_read_ovsdb_delete_from_master(master->num.head);
 
-    // Check string based name list
+    /* Check string based name list */
     prefix_list_read_ovsdb_delete_from_master(master->str.head);
 }
 
@@ -1819,10 +1820,10 @@ policy_prefix_list_entry_read_ovsdb_apply_deletion (struct ovsdb_idl *idl)
         return;
     }
 
-    // Check number based name list
+    /* Check number based name list */
     prefix_list_entry_read_ovsdb_delete_from_master(master->num.head);
 
-    // Check string based name list
+    /* Check string based name list */
     prefix_list_entry_read_ovsdb_delete_from_master(master->str.head);
 }
 

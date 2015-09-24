@@ -1,6 +1,5 @@
-#
-# !/usr/bin/python
-#
+#!/usr/bin/python
+
 # Copyright (C) 2015 Hewlett Packard Enterprise Development LP
 # All Rights Reserved.
 #
@@ -16,15 +15,7 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-import os
-import sys
-import time
 import pytest
-import subprocess
-from halonvsi.docker import *
-from halonvsi.halon import *
-from halonutils.halonutil import *
-from halonvsi.quagga import *
 from vtyshutils import *
 from bgpconfig import *
 
@@ -70,10 +61,6 @@ from bgpconfig import *
 # Expected routes of BGP1:
 # ----------------------------------------------------------------------------
 # BGP table version is 0, local router ID is 8.0.0.1
-# Status codes: s suppressed, d damped, h history, * valid, > best, i - internal,
-#               r RIB-failure, S Stale, R Removed
-# Origin codes: i - IGP, e - EGP, ? - incomplete
-#
 #    Network          Next Hop            Metric LocPrf Weight Path
 # *> 9.0.0.0          0.0.0.0                  0         32768 i
 # *> 10.0.0.0         8.0.0.2                  0             0 2 i
@@ -81,15 +68,12 @@ from bgpconfig import *
 # Expected routes of BGP2:
 # ----------------------------------------------------------------------------
 # BGP table version is 0, local router ID is 8.0.0.2
-# Status codes: s suppressed, d damped, h history, * valid, > best, i - internal,
-#               r RIB-failure, S Stale, R Removed
 # Origin codes: i - IGP, e - EGP, ? - incomplete
 #
 #    Network          Next Hop            Metric LocPrf Weight Path
 # *> 9.0.0.0          8.0.0.1                  0             0 1 i
 # *> 10.0.0.0         0.0.0.0                  0         32768 i
 # *> 11.0.0.0         0.0.0.0                  0         32768 i
-
 
 NUM_OF_SWITCHES = 2
 NUM_HOSTS_PER_SWITCH = 0
@@ -99,14 +83,15 @@ DEFAULT_PL = "8"
 DEFAULT_NETMASK = "255.0.0.0"
 RM_DESCRIPTION = "A route-map description for testing."
 
+
 class myTopo(Topo):
-    def build (self, hsts=0, sws=2, **_opts):
+    def build(self, hsts=0, sws=2, **_opts):
         self.hsts = hsts
         self.sws = sws
 
         switch = self.addSwitch("%s1" % SWITCH_PREFIX)
-        switch = self.addSwitch(name = "%s2" % SWITCH_PREFIX,
-                                cls = PEER_SWITCH_TYPE,
+        switch = self.addSwitch(name="%s2" % SWITCH_PREFIX,
+                                cls=PEER_SWITCH_TYPE,
                                 **self.sopts)
 
         # Link the switches
@@ -114,19 +99,20 @@ class myTopo(Topo):
             self.addLink("%s%s" % (SWITCH_PREFIX, i),
                          "%s%s" % (SWITCH_PREFIX, i+1))
 
-class bgpTest (HalonTest):
-    def setupNet (self):
-        self.net = Mininet(topo=myTopo(hsts = NUM_HOSTS_PER_SWITCH,
-                                       sws = NUM_OF_SWITCHES,
-                                       hopts = self.getHostOpts(),
-                                       sopts = self.getSwitchOpts()),
-                                       switch = SWITCH_TYPE,
-                                       host = HalonHost,
-                                       link = HalonLink,
-                                       controller = None,
-                                       build = True)
 
-    def configure_switch_ips (self):
+class bgpTest(OpsVsiTest):
+    def setupNet(self):
+        self.net = Mininet(topo=myTopo(hsts=NUM_HOSTS_PER_SWITCH,
+                                       sws=NUM_OF_SWITCHES,
+                                       hopts=self.getHostOpts(),
+                                       sopts=self.getSwitchOpts()),
+                           switch=SWITCH_TYPE,
+                           host=OpsVsiHost,
+                           link=OpsVsiLink,
+                           controller=None,
+                           build=True)
+
+    def configure_switch_ips(self):
         info("\n########## Configuring switch IPs.. ##########\n")
 
         i = 0
@@ -137,18 +123,19 @@ class bgpTest (HalonTest):
                  (bgp_cfg.routerid, DEFAULT_PL, switch.name))
 
             # Configure the IPs between the switches
-            if isinstance(switch, HalonSwitch):
+            if isinstance(switch, VsiOpenSwitch):
                 switch.cmdCLI("configure terminal")
                 switch.cmdCLI("interface 1")
                 switch.cmdCLI("no shutdown")
-                switch.cmdCLI("ip address %s/%s" % (bgp_cfg.routerid, DEFAULT_PL))
+                switch.cmdCLI("ip address %s/%s" % (bgp_cfg.routerid,
+                                                    DEFAULT_PL))
                 switch.cmdCLI("exit")
             else:
                 switch.setIP(ip=bgp_cfg.routerid, intf="%s-eth1" % switch.name)
 
             i += 1
 
-    def setup_bgp_config (self):
+    def setup_bgp_config(self):
         info("\n########## Setup of BGP configurations... ##########\n")
 
         # Create BGP configurations
@@ -180,7 +167,7 @@ class bgpTest (HalonTest):
 
         self.bgpConfig1.prefixLists.append(prefixList)
 
-    def apply_bgp_config (self):
+    def apply_bgp_config(self):
         info("\n########## Applying BGP configurations... ##########\n")
         self.all_cfg_array = []
 
@@ -256,7 +243,7 @@ class bgpTest (HalonTest):
             cfg_array.append("neighbor %s route-map %s %s" %
                              (neighbor.routerid, prefixList.name, dir))
 
-    def verify_bgp_running (self):
+    def verify_bgp_running(self):
         info("\n########## Verifying bgp processes.. ##########\n")
 
         for switch in self.net.switches:
@@ -266,7 +253,7 @@ class bgpTest (HalonTest):
 
             info("### bgpd process exists on switch %s ###\n" % switch.name)
 
-    def verify_bgp_configs (self):
+    def verify_bgp_configs(self):
         info("\n########## Verifying all configurations.. ##########\n")
 
         i = 0
@@ -281,7 +268,7 @@ class bgpTest (HalonTest):
 
         info("### All configurations were verified successfully ###\n")
 
-    def verify_bgp_routes (self):
+    def verify_bgp_routes(self):
         info("\n########## Verifying routes... ##########\n")
 
         # For each bgp, verify that it is indeed advertising itself
@@ -324,8 +311,8 @@ class bgpTest (HalonTest):
 
         found = SwitchVtyshUtils.wait_for_route(switch, network, next_hop)
 
-        assert found, "Route %s -> %s exists on %s" \
-                       % (network, next_hop, switch.name)
+        assert found, "Route %s -> %s exists on %s" % \
+                      (network, next_hop, switch.name)
 
         # Second network of BGP2 should NOT be permitted
         network = neighbor.networks[1]
@@ -338,8 +325,8 @@ class bgpTest (HalonTest):
         found = SwitchVtyshUtils.wait_for_route(switch, network, next_hop,
                                                 verify_route_exists)
 
-        assert not found, "Route %s -> %s does not exist on %s" \
-                           % (network, next_hop, switch.name)
+        assert not found, "Route %s -> %s does not exist on %s" % \
+                          (network, next_hop, switch.name)
 
     def verify_routemap_description(self):
         info("\n########## Verifying route-map description ##########\n")
@@ -373,7 +360,6 @@ class bgpTest (HalonTest):
         assert not exists, "Route-map description was not removed"
 
         info("### Route-map description was successfully removed ###\n")
-
 
     def verify_no_routemap(self):
         info("\n########## Verifying no route-map ##########\n")
@@ -416,29 +402,30 @@ class bgpTest (HalonTest):
 
         info("### ip prefix-list configs were successfully removed ###\n")
 
+
 class Test_bgpd_routemap:
-    def setup (self):
+    def setup(self):
         pass
 
-    def teardown (self):
+    def teardown(self):
         pass
 
-    def setup_class (cls):
+    def setup_class(cls):
         Test_bgpd_routemap.test_var = bgpTest()
 
-    def teardown_class (cls):
+    def teardown_class(cls):
         Test_bgpd_routemap.test_var.net.stop()
 
-    def setup_method (self, method):
+    def setup_method(self, method):
         pass
 
-    def teardown_method (self, method):
+    def teardown_method(self, method):
         pass
 
-    def __del__ (self):
+    def __del__(self):
         del self.test_var
 
-    def test_bgp_full (self):
+    def test_bgp_full(self):
         self.test_var.setup_bgp_config()
         self.test_var.configure_switch_ips()
         self.test_var.verify_bgp_running()

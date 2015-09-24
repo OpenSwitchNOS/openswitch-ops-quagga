@@ -15,9 +15,9 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-from halonvsi.docker import *
-from halonvsi.halon import *
-from halonutils.halonutil import *
+from opsvsi.docker import *
+from opsvsi.opsvsitest import *
+from opsvsiutils.systemutil import *
 
 class myTopo( Topo ):
     """Custom Topology Example
@@ -47,16 +47,15 @@ class myTopo( Topo ):
         self.addLink('s1', 's2')
         self.addLink('s2', 'h3')
 
-class ecmpStaticRouteTest( HalonTest ):
+class ecmpStaticRouteTest( OpsVsiTest ):
 
     def setupNet(self):
-        self.net = Mininet(topo=myTopo(hsts=3, sws=2,
-                                       hopts=self.getHostOpts(),
-                                       sopts=self.getSwitchOpts()),
-                                       switch=HalonSwitch,
-                                       host=HalonHost,
-                                       link=HalonLink, controller=None,
-                                       build=True)
+        host_opts = self.getHostOpts()
+        switch_opts = self.getSwitchOpts()
+        ecmp_topo = myTopo(hsts=3, sws=2, hopts=host_opts, sopts=switch_opts)
+        self.net = Mininet(ecmp_topo, switch=VsiOpenSwitch,
+                           host=Host, link=OpsVsiLink,
+                           controller=None, build=True)
 
         info('\n########## Configuring the topology ##########\n')
 
@@ -68,20 +67,20 @@ class ecmpStaticRouteTest( HalonTest ):
         h2 = self.net.hosts[ 1 ]
         h3 = self.net.hosts[ 2 ]
 
-        s1.cmd("/usr/bin/ovs-vsctl set interface 1 user_config:admin=up")
+        s1.ovscmd("/usr/bin/ovs-vsctl set interface 1 user_config:admin=up")
         time.sleep(1);
-        s1.cmd("/usr/bin/ovs-vsctl set interface 2 user_config:admin=up")
+        s1.ovscmd("/usr/bin/ovs-vsctl set interface 2 user_config:admin=up")
         time.sleep(1);
-        s1.cmd("/usr/bin/ovs-vsctl set interface 3 user_config:admin=up")
+        s1.ovscmd("/usr/bin/ovs-vsctl set interface 3 user_config:admin=up")
         time.sleep(1);
-        s1.cmd("/usr/bin/ovs-vsctl set interface 4 user_config:admin=up")
+        s1.ovscmd("/usr/bin/ovs-vsctl set interface 4 user_config:admin=up")
 
         time.sleep(1);
-        s2.cmd("/usr/bin/ovs-vsctl set interface 1 user_config:admin=up")
+        s2.ovscmd("/usr/bin/ovs-vsctl set interface 1 user_config:admin=up")
         time.sleep(1);
-        s2.cmd("/usr/bin/ovs-vsctl set interface 2 user_config:admin=up")
+        s2.ovscmd("/usr/bin/ovs-vsctl set interface 2 user_config:admin=up")
         time.sleep(1);
-        s2.cmd("/usr/bin/ovs-vsctl set interface 3 user_config:admin=up")
+        s2.ovscmd("/usr/bin/ovs-vsctl set interface 3 user_config:admin=up")
 
         info('admin up configured on switches\n')
 

@@ -19,12 +19,7 @@
  * 02111-1307, USA.  
  */
 
-#ifdef ENABLE_OVSDB
-#include <stdio.h>
-#include <unistd.h>
-#else
 #include <zebra.h>
-#endif
 #include <lib/version.h>
 
 #include <pwd.h>

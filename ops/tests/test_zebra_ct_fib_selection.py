@@ -15,9 +15,9 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-from halonvsi.docker import *
-from halonvsi.halon import *
-from halonutils.halonutil import *
+from opsvsi.docker import *
+from opsvsi.opsvsitest import *
+from opsvsiutils.systemutil import *
 
 class myTopo( Topo ):
     """Custom Topology Example
@@ -34,16 +34,15 @@ class myTopo( Topo ):
         #Add links between nodes based on custom topo
         self.addLink('s1', 's2')
 
-class fibSelectionCTTest( HalonTest ):
+class fibSelectionCTTest( OpsVsiTest ):
 
     def setupNet(self):
-        self.net = Mininet(topo=myTopo(hsts=0, sws=2,
-                                       hopts=self.getHostOpts(),
-                                       sopts=self.getSwitchOpts()),
-                                       switch=HalonSwitch,
-                                       host=HalonHost,
-                                       link=HalonLink, controller=None,
-                                       build=True)
+        host_opts = self.getHostOpts()
+        switch_opts = self.getSwitchOpts()
+        fib_topo = myTopo(hsts=0, sws=2, hopts=host_opts, sopts=switch_opts)
+        self.net = Mininet(fib_topo, switch=VsiOpenSwitch,
+                           host=Host, link=OpsVsiLink,
+                           controller=None, build=True)
 
     def testConfigure(self):
         info('\n########## Test zebra selection of fib routes ##########\n')
@@ -95,11 +94,11 @@ class fibSelectionCTTest( HalonTest ):
 
         info('### Static routes configured on s1 and s2 ###\n')
 
-        s1.cmd("/usr/bin/ovs-vsctl set interface 1 user_config:admin=up")
-        s1.cmd("/usr/bin/ovs-vsctl set interface 2 user_config:admin=up")
+        s1.ovscmd("/usr/bin/ovs-vsctl set interface 1 user_config:admin=up")
+        s1.ovscmd("/usr/bin/ovs-vsctl set interface 2 user_config:admin=up")
 
-        s2.cmd("/usr/bin/ovs-vsctl set interface 1 user_config:admin=up")
-        s2.cmd("/usr/bin/ovs-vsctl set interface 2 user_config:admin=up")
+        s2.ovscmd("/usr/bin/ovs-vsctl set interface 1 user_config:admin=up")
+        s2.ovscmd("/usr/bin/ovs-vsctl set interface 2 user_config:admin=up")
 
         info('### Configuration on s1 and s2 complete ###\n')
 

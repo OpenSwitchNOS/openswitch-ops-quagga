@@ -32,9 +32,6 @@ Boston, MA 02111-1307, USA.  */
 #include "vty.h"
 #include "command.h"
 #include "workqueue.h"
-#ifdef ENABLE_OVSDB
-#include "lib_vtysh_ovsdb_if.h"
-#endif
 
 /* Command vector which includes some level of command lists. Normally
    each daemon maintains each own cmdvec. */
@@ -794,11 +791,6 @@ enum match_type
   ipv4_match,
   ipv6_prefix_match,
   ipv6_match,
-#ifdef ENABLE_OVSDB
-  ifname_match,
-  port_match,
-  vlan_match,
-#endif
   range_match,
   vararg_match,
   partly_match,
@@ -1115,44 +1107,6 @@ cmd_ipv6_prefix_match (const char *str)
 
 #endif /* HAVE_IPV6  */
 
-#ifdef ENABLE_OVSDB
-static int
-cmd_ifname_match (const char *str)
-{
-  if(NULL == lib_vtysh_ovsdb_interface_match)
-    return 1;
-
-  if(((*lib_vtysh_ovsdb_interface_match)(str)) == 0)
-    return 0;
-
-  return 1;
-}
-
-static int
-cmd_port_match (const char *str)
-{
-  if(NULL == lib_vtysh_ovsdb_port_match)
-    return 1;
-
-  if(((*lib_vtysh_ovsdb_port_match)(str)) == 0)
-    return 0;
-
-  return 1;
-}
-
-static int
-cmd_vlan_match (const char *str)
-{
-  if(NULL == lib_vtysh_ovsdb_vlan_match)
-    return 1;
-
-  if(((*lib_vtysh_ovsdb_vlan_match)(str)) == 0)
-    return 0;
-
-  return 1;
-}
-#endif /* ENABLE_OVSDB */
-
 #define DECIMAL_STRLEN_MAX 10
 
 static int
@@ -1256,23 +1210,6 @@ cmd_word_match(struct cmd_token *token,
           || (filter == FILTER_STRICT && match_type == exact_match))
         return ipv4_prefix_match;
     }
-#ifdef ENABLE_OVSDB
-  else if (CMD_IFNAME(str))
-    {
-      if(cmd_ifname_match(word) == 0)
-        return ifname_match;
-    }
-  else if (CMD_PORT(str))
-    {
-      if(cmd_port_match(word) == 0)
-        return port_match;
-    }
-  else if (CMD_VLAN(str))
-    {
-      if(cmd_vlan_match(word) == 0)
-        return vlan_match;
-    }
-#endif
   else if (CMD_OPTION(str) || CMD_VARIABLE(str))
     {
       return extend_match;
@@ -1968,20 +1905,6 @@ is_cmd_ambiguous (vector cmd_vector,
 		      match++;
 		    }
 		  break;
-#ifdef ENABLE_OVSDB
-                case ifname_match:
-                  if (CMD_IFNAME(str))
-                    match++;
-                  break;
-		case port_match:
-		  if (CMD_PORT(str))
-		    match++;
-		  break;
-		case vlan_match:
-		  if (CMD_VLAN(str))
-		    match++;
-		  break;
-#endif
 		case extend_match:
 		  if (CMD_OPTION (str) || CMD_VARIABLE (str))
 		    match++;
@@ -2067,17 +1990,6 @@ cmd_entry_function_desc (const char *src, const char *dst)
       else
 	return NULL;
     }
-
-#ifdef ENABLE_OVSDB
-  if (CMD_IFNAME(dst))
-    return dst;
-
-  if (CMD_PORT(dst))
-    return dst;
-
-  if (CMD_VLAN(dst))
-    return dst;
-#endif
 
   /* Optional or variable commands always match on '?' */
   if (CMD_OPTION (dst) || CMD_VARIABLE (dst))

@@ -15,6 +15,9 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+import os
+import sys
+import time
 import pytest
 from opsvsiutils.vtyshutils import *
 from opsvsiutils.bgpconfig import *
@@ -317,6 +320,7 @@ class bgpTest(OpsVsiTest):
         self.verify_bgp_routes()
 
     def get_number_of_paths_for_bgp1(self):
+
         switch = self.net.switches[0]
         route_info = SwitchVtyshUtils.vtysh_cmd(switch, "sh ip route")
 
@@ -332,14 +336,24 @@ class bgpTest(OpsVsiTest):
 
         return multipath_count
 
+    def verify_num_ip_route_exist_in_bgp1(self, no_route):
+
+        info("\n#### Verify ip route shows %d routes ###\n" % no_route)
+        for i in range(30):
+            multipath_count = self.get_number_of_paths_for_bgp1()
+            info("\n#### Have tried show ip route %d times ####\n" % i)
+            if multipath_count == no_route:
+                break
+            time.sleep(1)
+        return (multipath_count == no_route)
+
     def verify_max_paths(self):
         info("\n########## Verifying maximum-paths ##########\n")
         self.verify_bgp_routes()
 
         info("### Verifying that there are 3 multipaths ###\n")
-        multipath_count = self.get_number_of_paths_for_bgp1()
-        assert multipath_count == 3, "Not all paths were detected."
-
+        ret = self.verify_num_ip_route_exist_in_bgp1(3)
+        assert ret, "Not all paths were detected."
         info("### All paths were detected ###\n")
 
     def verify_no_max_paths(self):
@@ -361,10 +375,67 @@ class bgpTest(OpsVsiTest):
         self.reconfigure_neighbors()
 
         info("### Verifying that there is only 1 path ###\n")
-        multipath_count = self.get_number_of_paths_for_bgp1()
-        assert multipath_count == 1, "More than one paths are present."
-
+        ret = self.verify_num_ip_route_exist_in_bgp1(1)
+        assert ret, "More than one paths are present."
         info("### Only 1 path detected after unsetting max-paths ###\n")
+
+    def verify_maxpaths_ecmp_disabled(self):
+        '''
+        When ecmp is disabled, maximum-paths will be unset
+        1. Disable ecmp_config status
+        2. Set maximum-paths to 3
+        2. Check if ecmp_config status is disabled and maximum-paths is set
+        3. Reconfigure route to get updated route table
+        3. Check if no maximum-paths configured in 'show ip route'
+        '''
+        info("\n##### Verifying max-paths disabled when ecmp disabled #####\n")
+        s1 = self.net.switches[0]
+        s1.cmdCLI("configure terminal")
+        s1.cmdCLI("ip ecmp disable")
+        s1.cmdCLI("router bgp 1")
+        s1.cmdCLI("maximum-paths 3")
+        s1.cmdCLI("exit")
+        s1.cmdCLI("exit")
+
+        ret = s1.cmdCLI("show running-config")
+        assert 'ip ecmp disable' in ret, "Fail to disable ip ecmp\n"
+        assert 'maximum-paths 3' in ret, "Fail to set maximum-paths to 3\n"
+
+        self.reconfigure_neighbors()
+        info("\n#### Verify if ip route show 1 paths ###\n")
+        ret = self.verify_num_ip_route_exist_in_bgp1(1)
+        assert ret, "Maximum-paths was not unset\n"
+        info("### Successfully unsetting maximum paths to 1 ###\n")
+
+    def verify_maxpaths_ecmp_enabled(self):
+        '''
+        when ecmp is enabled (default), maximum-paths will be set as is.
+        1. Enable ecmp_config
+        2. Check if ecmp_config status enable
+        2. configure maximum-paths from cli for switches[0]
+        3. verify new maximum-paths value is set
+        4. Check route in 'show ip route' if it has 3 routes (>1 route)
+        '''
+        info("\n####### Verifying max-paths enabled when ecmp enabled #####\n")
+        s1 = self.net.switches[0]
+        s1.cmdCLI("configure terminal")
+        s1.cmdCLI("no ip ecmp disable")
+        s1.cmdCLI("router bgp 1")
+        s1.cmdCLI("maximum-paths 3")
+        s1.cmdCLI("exit")
+        s1.cmdCLI("exit")
+        ret = s1.cmdCLI("show running-config")
+        assert 'ip ecmp disable' not in ret, "Fail to enable ip ecmp\n"
+        assert 'maximum-paths 3' in ret, "Fail to set maximum-paths to 3\n"
+
+        self.reconfigure_neighbors()
+        info("\n#### Verify if ip route show 3 paths ###\n")
+        ret = self.verify_num_ip_route_exist_in_bgp1(3)
+        assert ret, "Maximum-paths was not set to 3\n"
+        info("\n### Maximum paths set to 3 when ecmp enabled ###\n")
+
+
+@pytest.mark.timeout(0)
 
 
 class Test_bgpd_maximum_paths:
@@ -396,3 +467,6 @@ class Test_bgpd_maximum_paths:
         self.test_var.verify_configs()
         self.test_var.verify_max_paths()
         self.test_var.verify_no_max_paths()
+        self.test_var.verify_maxpaths_ecmp_disabled()
+        self.test_var.verify_maxpaths_ecmp_enabled()
+        CLI(self.test_var.net)

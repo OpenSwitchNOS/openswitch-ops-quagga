@@ -15,6 +15,9 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+import os
+import sys
+import time
 import pytest
 from opsvsiutils.vtyshutils import *
 from opsvsiutils.bgpconfig import *
@@ -366,6 +369,78 @@ class bgpTest(OpsVsiTest):
 
         info("### Only 1 path detected after unsetting max-paths ###\n")
 
+    def verify_maxpaths_ecmp_disabled(self):
+        '''
+        When ecmp is disabled, maximum-paths will be unset
+        1. Disable ecmp_config status
+        2. Set maximum-paths to 3
+        2. Check if ecmp_config status is disabled and maximum-paths is set
+        3. Reconfigure route to get updated route table
+        3. Check if no maximum-paths configured in 'show ip route'
+        '''
+        s1 = self.net.switches[0]
+        s1.cmdCLI("configure terminal")
+        s1.cmdCLI("ip ecmp disable")
+        s1.cmdCLI("router bgp 1")
+        s1.cmdCLI("maximum-paths 3")
+        s1.cmdCLI("exit")
+        s1.cmdCLI("exit")
+
+        ret = s1.cmdCLI("show running-config")
+        assert 'ip ecmp disable' in ret,"Fail to disable ip ecmp\n"
+        assert 'maximum-paths 3' in ret, "Fail to set maximum-paths to 3\n"
+
+        info("#### Verify if ip route show 1 path")
+        self.reconfigure_neighbors()
+        multipath_count = self.get_number_of_paths_for_bgp1()
+        assert multipath_count == 1, "Maximum-paths was not unset"
+        info("#### Successful setting max path to 1 ")
+
+    def verify_maxpaths_ecmp_enabled(self):
+        '''
+        when ecmp is enabled (default), maximum-paths will be set as is.
+        1. Enable ecmp_config
+        2. Check if ecmp_config status enable
+        2. configure maximum-paths from cli for switches[0]
+        3. verify new maximum-paths value is set
+        4. Check route in 'show ip route' if it has 3 routes (>1 route)
+        '''
+        s1 = self.net.switches[0]
+        s1.cmdCLI("configure terminal")
+        s1.cmdCLI("no ip ecmp disable")
+        s1.cmdCLI("router bgp 1")
+        s1.cmdCLI("maximum-paths 3")
+        s1.cmdCLI("exit")
+        s1.cmdCLI("exit")
+
+        ret = s1.cmdCLI("show running-config")
+        assert 'ip ecmp disable' not in ret,"Fail to enable ip ecmp\n"
+        assert 'maximum-paths 3' in ret, "Fail to set maximum-paths to 3\n"
+
+        self.reconfigure_neighbors()
+        multipath_count = self.get_number_of_paths_for_bgp1()
+        assert multipath_count == 3, "Maximum-paths was not set"
+        info("#### Successful setting max path to 3")
+
+    def verify_maxpaths_changed(self):
+        s1 = self.net.switches[0]
+        s1.cmdCLI("configure terminal")
+        s1.cmdCLI("router bgp 1")
+        s1.cmdCLI("no maximum-paths")
+        ret = s1.cmdCLI("do show running-conig")
+        if ('maximum-paths' in ret):
+            info("#### Successful unset max path")
+        s1.cmdCLI("exit")
+        s1.cmdCLI("exit")
+
+        self.reconfigure_neighbors()
+        multipath_count = self.get_number_of_paths_for_bgp1()
+        if (multipath_count == 3):
+            info("#### Successful setting max path to 3")
+        else:
+            info("#### bgp maximum-paths is not set %d",multipath_count )
+        #assert multipath_count == 3, "Maximum-paths was not set"
+
 
 class Test_bgpd_maximum_paths:
     def setup(self):
@@ -396,3 +471,5 @@ class Test_bgpd_maximum_paths:
         self.test_var.verify_configs()
         self.test_var.verify_max_paths()
         self.test_var.verify_no_max_paths()
+        self.test_var.verify_maxpaths_ecmp_disabled()
+        self.test_var.verify_maxpaths_ecmp_enabled()

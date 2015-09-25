@@ -49,6 +49,9 @@ void bgp_ovsdb_exit(void);
 /* row is not used now but may be in the future */
 #define COL_CHANGED(row, col, s)	OVSREC_IDL_IS_COLUMN_MODIFIED(col, s)
 
+#define SYSTEM_ECMP_MASK       1
+#define SYSTEM_ECMP_CHANGE(conf)    (conf&SYSTEM_ECMP_MASK)
+
 /* Initialize and integrate the ovs poll loop with the daemon */
 void bgp_ovsdb_init_poll_loop (struct bgp_master *bm);
 

@@ -140,6 +140,18 @@ ovsdb_nbr_from_row_to_peer_name (struct ovsdb_idl *idl,
     return NULL;
 }
 
+static bool
+object_is_peer (const struct ovsrec_bgp_neighbor *db_bgpn_p)
+{
+    return (db_bgpn_p->n_is_peer_group == 0) || !(db_bgpn_p->is_peer_group[0]);
+}
+
+static bool
+object_is_peer_group (const struct ovsrec_bgp_neighbor *db_bgpn_p)
+{
+    return (db_bgpn_p->n_is_peer_group > 0) && db_bgpn_p->is_peer_group[0];
+}
+
 static void
 bgp_policy_ovsdb_init (struct ovsdb_idl *idl)
 {
@@ -504,18 +516,32 @@ network2afi (const char *network)
 }
 
 static void
-apply_bgp_neighbor_route_map_changes (const struct ovsrec_bgp_neighbor *ovs_bgpn,
-    struct bgp *bgp_instance)
+apply_bgp_neighbor_route_map_changes(const struct ovsrec_bgp_neighbor *ovs_bgpn,
+                                     struct bgp *bgp_instance)
 {
-    afi_t afi = network2afi(ovsdb_nbr_from_row_to_peer_name(idl, ovs_bgpn, NULL));
+    afi_t afi;
     safi_t safi = SAFI_UNICAST;
+
+    /* Attempt to obtain the AFI. If it is a neighbor, then the AFI can be
+     * obtained from the IP address.
+     */
+    if (object_is_peer(ovs_bgpn)) {
+        afi = network2afi(ovsdb_nbr_from_row_to_peer_name(idl, ovs_bgpn, NULL));
+    } else {
+        /* OPS_TODO: For now, until IPv6 is supported, use AFI_IP by default
+         * for peer-groups
+         */
+        afi = AFI_IP;
+    }
 
     if (afi) {
         char *direct;
         direct = OVSREC_BGP_NEIGHBOR_ROUTE_MAPS_IN;
-        modify_bgp_neighbor_route_map(ovs_bgpn, bgp_instance, direct, afi, safi);
+        modify_bgp_neighbor_route_map(ovs_bgpn, bgp_instance, direct,
+                                      afi, safi);
         direct = OVSREC_BGP_NEIGHBOR_ROUTE_MAPS_OUT;
-        modify_bgp_neighbor_route_map(ovs_bgpn, bgp_instance, direct, afi, safi);
+        modify_bgp_neighbor_route_map(ovs_bgpn, bgp_instance, direct,
+                                      afi, safi);
     } else {
         VLOG_ERR("Invalid AFI");
     }
@@ -907,20 +933,6 @@ bgp_apply_bgp_router_changes (struct ovsdb_idl *idl)
 
     /* insert and modify cases */
     bgp_router_read_ovsdb_apply_changes(idl);
-}
-
-static bool
-object_is_peer (const struct ovsrec_bgp_neighbor *db_bgpn_p)
-{
-    return
-	(db_bgpn_p->n_is_peer_group == 0) || !(db_bgpn_p->is_peer_group[0]);
-}
-
-static bool
-object_is_peer_group (const struct ovsrec_bgp_neighbor *db_bgpn_p)
-{
-    return
-	(db_bgpn_p->n_is_peer_group > 0) && db_bgpn_p->is_peer_group[0];
 }
 
 /*
@@ -1331,25 +1343,41 @@ bgp_nbr_route_map_ovsdb_apply_changes (const struct ovsrec_bgp_neighbor *ovs_nbr
 }
 
 static void
-bgp_nbr_timers_ovsdb_apply_changes (const struct ovsrec_bgp_neighbor *ovs_nbr,
-    const struct ovsrec_bgp_router *ovs_bgp,
-    char * name,
-    struct bgp *bgp_instance)
+bgp_nbr_timers_ovsdb_apply_changes(const struct ovsrec_bgp_neighbor *ovs_nbr,
+                                   const struct ovsrec_bgp_router *ovs_bgp,
+                                   char * name,
+                                   struct bgp *bgp_instance)
 {
-    u_int32_t keepalive;
-    u_int32_t holdtimer;
+    int keepalive = 0;
+    int holdtimer = 0;
+    bool set = true;
 
     if (COL_CHANGED(ovs_nbr, ovsrec_bgp_neighbor_col_timers, idl_seqno)) {
-        keepalive = fetch_key_value(ovs_nbr->key_timers,
-                        ovs_nbr->value_timers,
-                        ovs_nbr->n_timers,
-                        OVSDB_BGP_TIMER_KEEPALIVE);
-        holdtimer = fetch_key_value(ovs_nbr->key_timers,
-                        ovs_nbr->value_timers,
-                        ovs_nbr->n_timers,
-                        OVSDB_BGP_TIMER_HOLDTIME);
-        daemon_neighbor_timers_cmd_execute(bgp_instance, name,
-            keepalive, holdtimer);
+        if (ovs_nbr->n_timers) {
+            keepalive = fetch_key_value(ovs_nbr->key_timers,
+                                        ovs_nbr->value_timers,
+                                        ovs_nbr->n_timers,
+                                        OVSDB_BGP_TIMER_KEEPALIVE);
+            holdtimer = fetch_key_value(ovs_nbr->key_timers,
+                                        ovs_nbr->value_timers,
+                                        ovs_nbr->n_timers,
+                                        OVSDB_BGP_TIMER_HOLDTIME);
+        } else {
+            VLOG_DBG("Unsetting neighbor timers");
+            set = false;
+        }
+
+        /* When !set, change is considered as unsetting. Keepalive and hold
+         * timer values are not required/used in unsetting case. Only in
+         * set case do we check for valid keepalive and hold timer values.
+         */
+        if (!set || ((keepalive > 0) && (holdtimer > 0))) {
+            daemon_neighbor_timers_cmd_execute(bgp_instance, name,
+                                               (u_int32_t)keepalive,
+                                               (u_int32_t)holdtimer, set);
+        } else {
+            VLOG_ERR("Invalid neighbor keepalive/holdtimer");
+        }
     }
 }
 
@@ -1366,16 +1394,19 @@ bgp_nbr_allow_as_in_ovsdb_apply_changes (const struct ovsrec_bgp_neighbor *ovs_n
 }
 
 static void
-bgp_nbr_remove_private_as_ovsdb_apply_changes
-    (const struct ovsrec_bgp_neighbor *ovs_nbr,
-     const struct ovsrec_bgp_router *ovs_bgp,
-     char * name,
-     struct bgp *bgp_instance)
+bgp_nbr_remove_private_as_ovsdb_apply_changes(
+    const struct ovsrec_bgp_neighbor *ovs_nbr,
+    const struct ovsrec_bgp_router *ovs_bgp,
+    char *name,
+    struct bgp *bgp_instance)
 {
-    if (COL_CHANGED(ovs_nbr, ovsrec_bgp_neighbor_col_remove_private_as, idl_seqno)) {
-        bool doit = (ovs_nbr->n_remove_private_as && ovs_nbr->remove_private_as[0]);
+    if (COL_CHANGED(ovs_nbr, ovsrec_bgp_neighbor_col_remove_private_as,
+                    idl_seqno)) {
+        bool doit = (ovs_nbr->n_remove_private_as &&
+                     ovs_nbr->remove_private_as[0]);
         daemon_neighbor_remove_private_as_cmd_execute(bgp_instance,
-            name, AFI_IP, SAFI_UNICAST, doit);
+                                                      name, AFI_IP,
+                                                      SAFI_UNICAST, doit);
     }
 }
 
@@ -1411,29 +1442,35 @@ bgp_nbr_read_ovsdb_apply_changes (struct ovsdb_idl *idl)
                     continue;
             }
 
-           /*
-	     * If this is a new row, call the appropriate
-	     * daemon function depending on whether the
-	     * created object is a bgp peer or a bgp peer
-	     * group and if remote-as has been specified.
-	    */
-	    if (NEW_ROW(ovs_nbr, idl_seqno)) {
-	        if (ovs_nbr->n_remote_as) {
-		    VLOG_DBG("creating a peer%s object %s with remote-as %d\n",
-		         object_is_peer(ovs_nbr) ? "" : "-group",
-		         ovs_bgp->key_bgp_neighbors[j],
-		         *ovs_nbr->remote_as);
-		    daemon_neighbor_remote_as_cmd_execute(bgp_instance,
-                               ovs_bgp->key_bgp_neighbors[j], ovs_nbr->remote_as,
-		               AFI_IP, SAFI_UNICAST);
-	        } else {
-		    VLOG_DBG("creating a peer%s object %s without remote-as\n",
-		        object_is_peer(ovs_nbr) ? "" : "-group",
-		        ovs_bgp->key_bgp_neighbors[j]);
-		    daemon_neighbor_peer_group_cmd_execute(bgp_instance,
-                                      ovs_bgp->key_bgp_neighbors[j]);
-	        }
-	    }
+            /* If this is a new row, call the appropriate
+             * daemon function depending on whether the
+             * created object is a bgp peer or a bgp peer
+             * group and if remote-as has been specified.
+             */
+            if (NEW_ROW(ovs_nbr, idl_seqno)) {
+                /* Creating a peer requires that the AS be set. Only permit
+                 * creating a peer if the AS is valid; otherwise, if it's
+                 * a peer-group, then proceed with invoking the peer-group
+                 * creation function. Once created, subsequent checks
+                 * will occur for setting the AS if, in the same OVSDB
+                 * transaction, the remote-as was also set.
+                 */
+                if (object_is_peer(ovs_nbr)) {
+                    if (ovs_nbr->n_remote_as) {
+                        VLOG_DBG("Creating a peer with remote-as %d",
+                                 *ovs_nbr->remote_as);
+                        daemon_neighbor_remote_as_cmd_execute(bgp_instance,
+                            ovs_bgp->key_bgp_neighbors[j], ovs_nbr->remote_as,
+                            AFI_IP, SAFI_UNICAST);
+                    } else {
+                        VLOG_ERR("Invalid remote-as for peer creation.");
+                    }
+                } else {
+                    VLOG_DBG("Creating a peer-group");
+                    daemon_neighbor_peer_group_cmd_execute(bgp_instance,
+                        ovs_bgp->key_bgp_neighbors[j]);
+                }
+            }
 
 	    /* remote-as */
             bgp_nbr_remote_as_ovsdb_apply_changes(ovs_nbr,

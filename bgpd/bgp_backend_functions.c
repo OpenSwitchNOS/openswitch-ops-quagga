@@ -162,6 +162,33 @@ peer_lookup_vty (struct vty *vty, const char *ip_str)
   return peer;
 }
 
+
+static struct peer *
+bgp_peer_and_group_lookup (struct bgp *bgp, const char *peer_str)
+{
+  int ret;
+  union sockunion su;
+  struct peer *peer;
+  struct peer_group *group;
+
+
+  ret = str2sockunion (peer_str, &su);
+  if (ret == 0)
+    {
+      peer = peer_lookup (bgp, &su);
+      if (peer)
+        return peer;
+    }
+  else
+    {
+      group = peer_group_lookup (bgp, peer_str);
+      if (group)
+        return group->conf;
+    }
+
+  return NULL;
+}
+
 /* Utility function for looking up peer or peer group.  */
 static struct peer *
 peer_and_group_lookup_vty (struct vty *vty, const char *peer_str)
@@ -266,7 +293,7 @@ log_bgp_error (int ret)
     }
   if (str)
     {
-      LOG_ERROR("%% %s", str);
+      VLOG_ERR(str);
       return CMD_WARNING;
     }
   return CMD_SUCCESS;
@@ -1996,6 +2023,27 @@ peer_flag_modify_vty (struct vty *vty, const char *ip_str,
 }
 
 static int
+peer_flag_modify_bgp(struct bgp *bgp, const char *name, u_int16_t flag, int set)
+{
+    int ret;
+    struct peer *peer;
+
+    peer = bgp_peer_and_group_lookup(bgp, name);
+    if (!peer)
+    {
+        VLOG_ERR("Peer not found");
+        return CMD_WARNING;
+    }
+
+    if (set)
+        ret = peer_flag_set(peer, flag);
+    else
+        ret = peer_flag_unset(peer, flag);
+
+    return log_bgp_error(ret);
+}
+
+static int
 peer_flag_set_vty (struct vty *vty, const char *ip_str, u_int16_t flag)
 {
   return peer_flag_modify_vty (vty, ip_str, flag, 1);
@@ -2027,32 +2075,6 @@ DEFUN (no_neighbor_passive,
        "Don't send open messages to this neighbor\n")
 {
   return peer_flag_unset_vty (vty, argv[0], PEER_FLAG_PASSIVE);
-}
-
-static struct peer *
-bgp_peer_and_group_lookup (struct bgp *bgp, const char *peer_str)
-{
-  int ret;
-  union sockunion su;
-  struct peer *peer;
-  struct peer_group *group;
-
-
-  ret = str2sockunion (peer_str, &su);
-  if (ret == 0)
-    {
-      peer = peer_lookup (bgp, &su);
-      if (peer)
-        return peer;
-    }
-  else
-    {
-      group = peer_group_lookup (bgp, peer_str);
-      if (group)
-        return group->conf;
-    }
-
-  return NULL;
 }
 
 /*
@@ -2096,30 +2118,32 @@ daemon_neighbor_password_cmd_execute (struct bgp *bgp, char *peer_str, char *pas
  *
  */
 int
-daemon_neighbor_timers_cmd_execute (struct bgp *bgp, const char *peer_str,
-                                    const u_int32_t keepalive, const u_int32_t holdtime)
+daemon_neighbor_timers_cmd_execute(struct bgp *bgp, const char *peer_str,
+                                   const u_int32_t keepalive,
+                                   const u_int32_t holdtime,
+                                   bool set)
 {
     struct peer *peer;
 
+    peer = bgp_peer_and_group_lookup(bgp, peer_str);
 
-    peer= bgp_peer_and_group_lookup (bgp, peer_str);
+    if (!peer) {
+        VLOG_ERR("Peer/peer-group not found");
+        return CMD_WARNING;
+    }
 
-    if (! peer) return 1;
-
-    return peer_timers_set (peer, keepalive, holdtime);
+    if (set)
+        return peer_timers_set(peer, keepalive, holdtime);
+    else
+        return peer_timers_unset(peer);
 }
 
 int
 daemon_neighbor_shutdown_cmd_execute (struct bgp *bgp, char *peer_str,
     bool shut)
 {
-    if (shut) {
-        VLOG_DBG("neighbor %s is shutdown down\n", peer_str);
-        return peer_flag_set_vty (bgp, peer_str, PEER_FLAG_SHUTDOWN);
-    } else {
-        VLOG_DBG("neighbor %s is coming up\n", peer_str);
-        return peer_flag_unset_vty (bgp, peer_str, PEER_FLAG_SHUTDOWN);
-    }
+    VLOG_DBG("Modifying neighbor %s is shutdown", peer_str);
+    return peer_flag_modify_bgp(bgp, peer_str, PEER_FLAG_SHUTDOWN, shut);
 }
 
 int
@@ -2260,6 +2284,28 @@ peer_af_flag_modify_vty (struct vty *vty, const char *peer_str, afi_t afi,
 }
 
 static int
+peer_af_flag_modify_bgp(struct bgp *bgp, const char **peer_str, afi_t afi,
+                        safi_t safi, u_int32_t flag, int set)
+{
+    int ret;
+    struct peer *peer;
+
+    peer = bgp_peer_and_group_lookup(bgp, peer_str);
+    if (!peer)
+    {
+        VLOG_ERR("Peer not found");
+        return CMD_WARNING;
+    }
+
+    if (set)
+        ret = peer_af_flag_set(peer, afi, safi, flag);
+    else
+        ret = peer_af_flag_unset(peer, afi, safi, flag);
+
+    return log_bgp_error(ret);
+}
+
+static int
 peer_af_flag_set_vty (struct vty *vty, const char *peer_str, afi_t afi,
 		      safi_t safi, u_int32_t flag)
 {
@@ -2274,18 +2320,13 @@ peer_af_flag_unset_vty (struct vty *vty, const char *peer_str, afi_t afi,
 }
 
 int
-daemon_neighbor_remove_private_as_cmd_execute (struct bgp *bgp, char *peer_str,
-                                                afi_t afi, safi_t safi, bool private_as)
+daemon_neighbor_remove_private_as_cmd_execute(struct bgp *bgp, char *peer_str,
+                                              afi_t afi, safi_t safi,
+                                              bool private_as)
 {
-    if (private_as) {
-        VLOG_DBG("neighbor %s remove private AS \n", peer_str);
-        return peer_af_flag_set_vty (bgp, peer_str, afi, safi,
-                               PEER_FLAG_REMOVE_PRIVATE_AS);
-    } else {
-        VLOG_DBG("no neighbor %s remove private AS \n", peer_str);
-        return peer_af_flag_unset_vty (bgp, peer_str, afi, safi,
-                               PEER_FLAG_REMOVE_PRIVATE_AS);
-    }
+    VLOG_DBG("Modifying neighbor %s remove private AS", peer_str);
+    return peer_af_flag_modify_bgp(bgp, peer_str, afi, safi,
+                                   PEER_FLAG_REMOVE_PRIVATE_AS, private_as);
 }
 
 

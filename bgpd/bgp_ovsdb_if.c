@@ -78,7 +78,7 @@ unsigned int idl_seqno;
 static char *appctl_path = NULL;
 static struct unixctl_server *appctl;
 static int system_configured = false;
-
+static int system_changed = 0;
 boolean exiting = false;
 static int bgp_ovspoll_enqueue (bgp_ovsdb_t *bovs_g);
 static int bovs_read_cb (struct thread *thread);
@@ -290,6 +290,7 @@ ovsdb_init (const char *db_path)
 
     ovsdb_idl_add_column(idl, &ovsrec_system_col_cur_cfg);
     ovsdb_idl_add_column(idl, &ovsrec_system_col_hostname);
+    ovsdb_idl_add_column(idl, &ovsrec_system_col_ecmp_config);
 
     /* BGP tables */
     bgp_ovsdb_tables_init(idl);
@@ -562,7 +563,9 @@ bgp_apply_global_changes (void)
         VLOG_DBG("No System cfg changes");
         return;
     }
-
+    if(OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_system_col_ecmp_config, idl_seqno) ) {
+        system_changed |=  SYSTEM_ECMP_MASK;
+    }
     if (sys) {
         /* Update the hostname */
         bgp_set_hostname(sys->hostname);
@@ -620,6 +623,12 @@ modify_bgp_router_config (struct ovsdb_idl *idl,
     as_t as;
     int ret_status;
 
+    const struct ovsrec_system *ovs_row = ovsrec_system_first(idl);
+
+    if (!ovs_row) {
+        VLOG_ERR("Unable to access system table in db from %s", __FUNCTION__);
+        return;
+    }
     bgp_cfg = bgp_lookup((as_t)asn, NULL);
 
     /* Check if router_id is modified */
@@ -637,14 +646,29 @@ modify_bgp_router_config (struct ovsdb_idl *idl,
              VLOG_DBG("Static route added/deleted to bgp routing table");
         }
     }
-
-    /* Check if maximum_paths is modified */
-    if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_bgp_router_col_maximum_paths, idl_seqno)) {
-        ret_status = modify_bgp_maxpaths_config(bgp_cfg,bgp_mod_row);
-        if (!ret_status) {
-            VLOG_DBG("Maximum paths for BGP is set to %d",
-                bgp_cfg->maxpaths[AFI_IP][SAFI_UNICAST].maxpaths_ebgp);
+    /* If ecmp_config is changed or maxpaths is changed */
+    if(OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_bgp_router_col_maximum_paths, idl_seqno) ||
+        (SYSTEM_ECMP_CHANGE(system_changed) )) {
+        /*If ecmp_config status is enabled, continue to modify bgp, else unset maximumpaths */
+        if(!smap_get_bool(&ovs_row->ecmp_config, SYSTEM_ECMP_CONFIG_STATUS,
+                SYSTEM_ECMP_CONFIG_ENABLE_DEFAULT)) {
+            VLOG_DBG("ecmp is disabled");
+            bgp_flag_unset(bgp_cfg, BGP_FLAG_ASPATH_MULTIPATH_RELAX);
+            ret_status= bgp_maximum_paths_unset(bgp_cfg, AFI_IP, SAFI_UNICAST,
+                                           BGP_PEER_EBGP);
+            if(!ret_status){
+                VLOG_DBG("Maximum path unset");
+            }
+        } else {
+            VLOG_DBG("ecmp is enabled");
+            /*modify bgp according to the bgp setting */
+            ret_status = modify_bgp_maxpaths_config(bgp_cfg,bgp_mod_row);
+            if (!ret_status){
+                VLOG_DBG("Maximum paths for BGP is set to %d",
+                    bgp_cfg->maxpaths[AFI_IP][SAFI_UNICAST].maxpaths_ebgp);
+            }
         }
+        system_changed &= ~SYSTEM_ECMP_MASK;
     }
 
     /* Check if bgp timers are modified */
@@ -911,9 +935,10 @@ bgp_apply_bgp_router_changes (struct ovsdb_idl *idl)
      */
     if (bgp_first && !OVSREC_IDL_ANY_TABLE_ROWS_INSERTED(bgp_first, idl_seqno)
         && !OVSREC_IDL_ANY_TABLE_ROWS_DELETED(bgp_first, idl_seqno)
-        && !OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED(bgp_first, idl_seqno)) {
-            VLOG_DBG("No BGP_Router changes");
-            return;
+        && !OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED(bgp_first, idl_seqno)
+        && !system_changed) {
+        VLOG_DBG("No BGP_Router changes");
+        return;
     }
 
     if (bgp_first == NULL) {

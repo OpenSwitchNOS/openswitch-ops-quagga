@@ -44,7 +44,7 @@
 #include "hash.h"
 #include "jhash.h"
 
-#include "openhalon-idl.h"
+#include "openswitch-idl.h"
 
 #include "zebra/zebra_ovsdb_if.h"
 

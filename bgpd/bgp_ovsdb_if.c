@@ -49,7 +49,7 @@
 #include "openvswitch/vlog.h"
 #include "vswitch-idl.h"
 #include "coverage.h"
-#include "openhalon-idl.h"
+#include "openswitch-idl.h"
 #include "prefix.h"
 
 #include "bgpd/bgp_ovsdb_if.h"

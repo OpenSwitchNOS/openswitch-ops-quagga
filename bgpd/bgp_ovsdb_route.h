@@ -25,7 +25,7 @@
 #define BGP_OVSDB_RIB_H 1
 
 #include "vswitch-idl.h"
-#include "openhalon-idl.h"
+#include "openswitch-idl.h"
 #include "ovsdb-idl.h"
 #include "smap.h"
 

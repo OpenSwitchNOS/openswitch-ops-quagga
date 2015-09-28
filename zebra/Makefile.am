@@ -26,6 +26,16 @@ AM_CFLAGS += -I $(LOCAL_SYSROOT_DIR)/usr/local/include/ovs
 endif
 AM_LDFLAGS = $(PILDFLAGS)
 
+#
+# ovsdb related files must have extra error checks (-Werror)
+#
+if ENABLE_OVSDB
+zebra_ovsdb_if_LDADD = libzebra_ovsdb_if.a
+noinst_LIBRARIES = libzebra_ovsdb_if.a
+libzebra_ovsdb_if_a_SOURCES = zebra_ovsdb_if.c zebra_ovsdb_if.h
+libzebra_ovsdb_if_a_CFLAGS = $(AM_CFLAGS) -Werror
+endif
+
 if ENABLE_OVSDB
 sbin_PROGRAMS = ops-zebra
 else
@@ -34,26 +44,19 @@ endif
 
 noinst_PROGRAMS = testzebra
 
-if ENABLE_OVSDB
-ops_zebra_SOURCES = \
-	zserv.c main.c interface.c connected.c zebra_rib.c zebra_routemap.c \
-	redistribute.c debug.c rtadv.c zebra_snmp.c zebra_vty.c \
-	irdp_main.c irdp_interface.c irdp_packet.c router-id.c zebra_fpm.c \
-	zebra_ovsdb_if.c $(othersrc)
-else
 zebra_SOURCES = \
 	zserv.c main.c interface.c connected.c zebra_rib.c zebra_routemap.c \
 	redistribute.c debug.c rtadv.c zebra_snmp.c zebra_vty.c \
 	irdp_main.c irdp_interface.c irdp_packet.c router-id.c zebra_fpm.c \
 	$(othersrc)
+
+if ENABLE_OVSDB
+ops_zebra_SOURCES = $(zebra_SOURCES)
 endif
 
 testzebra_SOURCES = test_main.c zebra_rib.c interface.c connected.c debug.c \
 	zebra_vty.c \
 	kernel_null.c  redistribute_null.c ioctl_null.c misc_null.c
-if ENABLE_OVSDB
-testzebra_SOURCES += zebra_ovsdb_if.c
-endif
 
 noinst_HEADERS = \
 	connected.h ioctl.h rib.h rt.h zserv.h redistribute.h debug.h rtadv.h \
@@ -64,15 +67,15 @@ noinst_HEADERS += zebra_ovsdb_if.h
 endif
 
 if ENABLE_OVSDB
-ops_zebra_LDADD = $(otherobj) ../lib/libzebra.la $(LIBCAP) -lovscommon -lovsdb -lpthread
+ops_zebra_LDADD = $(otherobj) libzebra_ovsdb_if.a ../lib/libzebra.la \
+		  $(LIBCAP) -lovscommon -lovsdb -lpthread
 ops_zebra_DEPENDENCIES = $(otherobj)
 else
-zebra_LDADD = $(otherobj) ../lib/libzebra.la $(LIBCAP)
+zebra_LDADD = $(otherobj) libzebra_ovsdb_if.a ../lib/libzebra.la $(LIBCAP)
 zebra_DEPENDENCIES = $(otherobj)
 endif
 
-testzebra_LDADD = ../lib/libzebra.la $(LIBCAP)
-
+testzebra_LDADD = libzebra_ovsdb_if.a ../lib/libzebra.la $(LIBCAP)
 
 EXTRA_DIST = if_ioctl.c if_ioctl_solaris.c if_netlink.c \
         if_sysctl.c ipforward_proc.c \
@@ -82,8 +85,9 @@ EXTRA_DIST = if_ioctl.c if_ioctl_solaris.c if_netlink.c \
 	ioctl.c ioctl_solaris.c \
 	GNOME-SMI GNOME-PRODUCT-ZEBRA-MIB
 
-client : client_main.o ../lib/libzebra.la
-	$(CC) -g -o client client_main.o ../liblzebra.la $(LIBS) $(LIB_IPV6)
+client : client_main.o ../lib/libzebra.la libzebra_ovsdb_if.a
+	$(CC) -g -o client client_main.o libzebra_ovsdb_if.a \
+	    ../liblzebra.la $(LIBS) $(LIB_IPV6)
 
 quaggaconfdir = $(sysconfdir)
 

@@ -718,7 +718,7 @@ zebra_route_del_process (void)
                                 0,                            /*flags*/
                                 (struct prefix_ipv6 *)pprefix,/*prefix*/
                                 (rdata->nexthop->ifname ?
-                                 NULL : &rdata->nexthop->gate.ipv4),/*gate*/
+                                 NULL : &rdata->nexthop->gate.ipv6),/*gate*/
                                 ifname2ifindex(rdata->nexthop->ifname),
                                                               /* ifindex */
                                 0,                            /*vrf_id*/
@@ -1026,12 +1026,12 @@ zebra_handle_static_route_change (const struct ovsrec_route *route)
 	    {
 #ifdef HAVE_IPV6
               static_add_ipv6(&p, type, &ipv6_gate, ifname, flag, distance, 0,
-                              route);
+                              (void*) route);
 #endif
             }
 	  else
             static_add_ipv4_safi(safi, &p, ifname ? NULL : &gate, ifname,
-                                 flag, distance, 0, route);
+                                 flag, distance, 0, (void*) route);
         }
     }
 }
@@ -1403,7 +1403,7 @@ zebra_ovsdb_exit (void)
 /* Update the selected column in the route row in OVSDB
  */
 static int
-zebra_ovs_update_selected_route (struct ovsrec_route *ovs_route,
+zebra_ovs_update_selected_route (const struct ovsrec_route *ovs_route,
                                  bool *selected)
 {
   if (ovs_route)
@@ -1441,7 +1441,7 @@ zebra_update_selected_route_to_db (struct route_node *rn, struct rib *route,
                                    int action)
 {
   char prefix_str[256];
-  struct ovsrec_route *ovs_route = NULL;
+  const struct ovsrec_route *ovs_route = NULL;
   bool selected = (action == ZEBRA_RT_INSTALL) ? true:false;
   struct prefix *p = NULL;
   rib_table_info_t *info = NULL;
@@ -1584,7 +1584,7 @@ zebra_add_route (bool is_ipv6, struct prefix *p, int type, safi_t safi,
   rib->flags = flags;
   rib->uptime = time (NULL);
   rib->nexthop_num = 0; /* Start with zero */
-  rib->ovsdb_route_row_ptr = route;
+  rib->ovsdb_route_row_ptr = (void*) route;
 
   VLOG_DBG("Going through %d next-hops", route->n_nexthops);
   for (count = 0; count < route->n_nexthops; count++)

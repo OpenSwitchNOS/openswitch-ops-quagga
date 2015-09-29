@@ -1,6 +1,6 @@
 /* bgp daemon ovsdb Route table integration.
  *
- * Hewlett-Packard Company Confidential (C) Copyright 2015 Hewlett-Packard Development Company, L.P.
+ * (c) Copyright 2015 Hewlett Packard Enterprise Development LP
  *
  * GNU Zebra is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -19,7 +19,8 @@
  *
  * File: bgp_ovsdb_route.h
  *
- * Purpose: This file defines all public declarations of OVSDB route table interface
+ * Purpose: This file defines all public declarations of OVSDB route table
+ * interface
  */
 #ifndef BGP_OVSDB_RIB_H
 #define BGP_OVSDB_RIB_H 1

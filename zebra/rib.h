@@ -1,6 +1,7 @@
 /*
  * Routing Information Base header
  * Copyright (C) 1997 Kunihiro Ishiguro
+ * (c) Copyright 2015 Hewlett Packard Enterprise Development LP
  *
  * This file is part of GNU Zebra.
  *

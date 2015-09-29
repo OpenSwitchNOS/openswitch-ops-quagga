@@ -1,6 +1,6 @@
 /* Routing Information Base.
  * Copyright (C) 1997, 98, 99, 2001 Kunihiro Ishiguro
- * Copyright (C) 2015 Hewlett-Packard Enterprise Development Company, L.P.
+ * (c) Copyright 2015 Hewlett Packard Enterprise Development LP
  *
  * This file is part of GNU Zebra.
  *

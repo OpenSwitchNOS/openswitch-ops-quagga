@@ -1,5 +1,6 @@
 /* Kernel routing table updates using netlink over GNU/Linux system.
  * Copyright (C) 1997, 98, 99 Kunihiro Ishiguro
+ * (c) Copyright 2015 Hewlett Packard Enterprise Development LP
  *
  * This file is part of GNU Zebra.
  *
@@ -16,7 +17,7 @@
  * You should have received a copy of the GNU General Public License
  * along with GNU Zebra; see the file COPYING.  If not, write to the Free
  * Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
- * 02111-1307, USA.  
+ * 02111-1307, USA.
  */
 
 #include <zebra.h>

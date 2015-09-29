@@ -1,5 +1,6 @@
 /* Zebra VTY functions
  * Copyright (C) 2002 Kunihiro Ishiguro
+ * (c) Copyright 2015 Hewlett Packard Enterprise Development LP
  *
  * This file is part of GNU Zebra.
  *

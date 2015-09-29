@@ -51,7 +51,7 @@ struct zebra_route_del_data
 
 /* Setup zebra to connect with ovsdb and daemonize. This daemonize is used
  * over the daemonize in the main function to keep the behavior consistent
- * with the other daemons in the HALON system
+ * with the other daemons in the OpenSwitch system
  */
 void zebra_ovsdb_init (int argc, char *argv[]);
 

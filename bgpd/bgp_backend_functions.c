@@ -9797,11 +9797,11 @@ bgp_vty_init (void)
   /* "neighbor passive" commands. */
   install_element (BGP_NODE, &neighbor_passive_cmd);
   install_element (BGP_NODE, &no_neighbor_passive_cmd);
-#ifndef HALON
+#ifndef ENABLE_OVSDB
   /* "neighbor shutdown" commands. */
   install_element (BGP_NODE, &neighbor_shutdown_cmd);
   install_element (BGP_NODE, &no_neighbor_shutdown_cmd);
-#endif
+#endif /* !ENABLE_OVSDB */
   /* Deprecated "neighbor capability route-refresh" commands.*/
   install_element (BGP_NODE, &neighbor_capability_route_refresh_cmd);
   install_element (BGP_NODE, &no_neighbor_capability_route_refresh_cmd);

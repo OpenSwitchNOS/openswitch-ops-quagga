@@ -283,7 +283,7 @@ ovsdb_init (const char *db_path)
     /* Initialize IDL through a new connection to the dB. */
     idl = ovsdb_idl_create(db_path, &ovsrec_idl_class, false, true);
     idl_seqno = ovsdb_idl_get_seqno(idl);
-    ovsdb_idl_set_lock(idl, "halon_bgp");
+    ovsdb_idl_set_lock(idl, "OpenSwitch_bgp");
 
     /* Cache OpenVSwitch table */
     ovsdb_idl_add_table(idl, &ovsrec_table_system);
@@ -299,7 +299,7 @@ ovsdb_init (const char *db_path)
 }
 
 static void
-halon_bgp_exit (struct unixctl_conn *conn, int argc OVS_UNUSED,
+ops_bgp_exit (struct unixctl_conn *conn, int argc OVS_UNUSED,
     const char *argv[] OVS_UNUSED, void *exiting_)
 {
     boolean *exiting = exiting_;
@@ -311,7 +311,7 @@ halon_bgp_exit (struct unixctl_conn *conn, int argc OVS_UNUSED,
 static void
 usage (void)
 {
-    printf("%s: Halon bgp daemon\n"
+    printf("%s: OpenSwitch bgp daemon\n"
            "usage: %s [OPTIONS] [DATABASE]\n"
            "where DATABASE is a socket on which ovsdb-server is listening\n"
            "      (default: \"unix:%s/db.sock\").\n",
@@ -386,7 +386,7 @@ bgp_ovsdb_parse_options (int argc, char *argv[], char **unixctl_pathp)
 /*
  * Setup bgp to connect with ovsdb and daemonize. This daemonize is used
  * over the daemonize in the main function to keep the behavior consistent
- * with the other daemons in the HALON system
+ * with the other daemons in the OpenSwitch system
  */
 void bgp_ovsdb_init (int argc, char *argv[])
 {
@@ -418,7 +418,7 @@ void bgp_ovsdb_init (int argc, char *argv[])
     }
 
     /* Register the ovs-appctl "exit" command for this daemon. */
-    unixctl_command_register("exit", "", 0, 0, halon_bgp_exit, &exiting);
+    unixctl_command_register("exit", "", 0, 0, ops_bgp_exit, &exiting);
 
    /* Create the IDL cache of the dB at ovsdb_sock. */
    ovsdb_init(ovsdb_sock);
@@ -430,7 +430,7 @@ void bgp_ovsdb_init (int argc, char *argv[])
    /* Enable asynch log writes to disk. */
    vlog_enable_async();
 
-   VLOG_INFO_ONCE("%s (Halon Bgpd Daemon) started", program_name);
+   VLOG_INFO_ONCE("%s (OpenSwitch Bgpd Daemon) started", program_name);
 
    glob_bgp_ovs.enabled = 1;
 }
@@ -1623,7 +1623,7 @@ bgp_ovs_run ()
         bgp_reconfigure(idl);
         daemonize_complete();
         vlog_enable_async();
-        VLOG_INFO_ONCE("%s (Halon bgpd) %s", program_name, VERSION);
+        VLOG_INFO_ONCE("%s (OpenSwitch bgpd) %s", program_name, VERSION);
     }
 }
 

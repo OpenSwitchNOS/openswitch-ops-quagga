@@ -617,14 +617,10 @@ zebra_get_port_active_state (
       return(active_state);
     }
 
-  VLOG_DBG("The number of interfaces resolving the port are %d",
-            port->n_interfaces);
+  VLOG_DBG("The number of interfaces resolving the port %s are %d",
+            port->name, port->n_interfaces);
   if (port->n_interfaces)
     {
-      VLOG_DBG("Walking the interface array in port %s",
-                port->name);
-      VLOG_DBG("The number of interface are: %u",
-                port->n_interfaces);
       for (interface_index = 0;
            interface_index < port->n_interfaces;
            ++interface_index)
@@ -1029,7 +1025,7 @@ zebra_cleanup_updated_or_changed_l3_ports_hash (void)
 
   if (!shash_count(&zebra_updated_or_changed_l3_ports))
     {
-      VLOG_ERR("The hash table is empty. Nothing to walk and free");
+      VLOG_DBG("The hash table is empty. Nothing to walk and free");
       return;
     }
 
@@ -3071,7 +3067,6 @@ zebra_handle_static_route_change (const struct ovsrec_route *route)
           else
             static_add_ipv4_safi(safi, &p, ifname ? NULL : &gate, ifname,
                                  flag, distance, 0, (void*) route);
-
           if (ifname)
             {
               /*
@@ -3900,9 +3895,10 @@ void zebra_update_selected_nh (struct route_node *rn, struct rib *route,
       route_row = (struct ovsrec_route *)(route->ovsdb_route_row_ptr);
 
       VLOG_DBG("Cached OVSDB Route Entry: Prefix %s family %s "
-               "from %s priv %p", route_row->prefix,
+               "from %s priv %p for setting %s to %s", route_row->prefix,
                route_row->address_family, route_row->from,
-               route_row->protocol_private);
+               route_row->protocol_private, port_name ? port_name : nh_addr,
+               is_selected ? "true" : "false");
 
 
       cand_nh_row = NULL; /* reference to the candidate next-hop row which
@@ -3951,7 +3947,8 @@ void zebra_update_selected_nh (struct route_node *rn, struct rib *route,
            * If the selected field for the next-hop is set to true
            * increment the counter number_of_selected_nh.
            */
-          if (!(nh_row->selected) || (nh_row->selected[0] == true))
+          if (((!cand_nh_row) || (cand_nh_row != nh_row)) &&
+              (!(nh_row->selected) || (nh_row->selected[0] == true)))
             {
               ++number_of_selected_nh;
             }
@@ -3966,8 +3963,8 @@ void zebra_update_selected_nh (struct route_node *rn, struct rib *route,
                * with the is_selected boolean.
                */
               VLOG_DBG("Changing the next-hop selected flag from %s to %s",
-                        !cand_nh_row->selected ? "true" : "false",
-                        is_selected ? "true" : "false");
+                       !cand_nh_row->selected ? "true" : "false",
+                       is_selected ? "true" : "false");
               ovsrec_nexthop_set_selected(cand_nh_row, &is_selected, 1);
               zebra_txn_updates = true;
             }
@@ -3981,8 +3978,8 @@ void zebra_update_selected_nh (struct route_node *rn, struct rib *route,
               if (cand_nh_row->selected[0] != is_selected)
                 {
                   VLOG_DBG("Changing the next-hop selected flag from %s to %s",
-                            cand_nh_row->selected[0] ? "true" : "false",
-                            is_selected ? "true" : "false");
+                           cand_nh_row->selected[0] ? "true" : "false",
+                           is_selected ? "true" : "false");
                   ovsrec_nexthop_set_selected(cand_nh_row, &is_selected, 1);
                   zebra_txn_updates = true;
                 }
@@ -3998,7 +3995,7 @@ void zebra_update_selected_nh (struct route_node *rn, struct rib *route,
               if (!number_of_selected_nh)
                 {
                   VLOG_DBG("The route has at least one active next-hop. "
-                            "Set the selected bit on the route.");
+                           "Set the selected bit on the route.");
                   zebra_update_selected_route_to_db(rn, route,
                                                     ZEBRA_RT_INSTALL);
                 }
@@ -4014,7 +4011,7 @@ void zebra_update_selected_nh (struct route_node *rn, struct rib *route,
               if (number_of_selected_nh == 1)
                 {
                   VLOG_DBG("The route has no active next-hops. "
-                            "Unset the selected bit on the route.");
+                           "Unset the selected bit on the route.");
                   zebra_update_selected_route_to_db(rn, route,
                                                     ZEBRA_RT_UNINSTALL);
                 }
@@ -4043,7 +4040,9 @@ zebra_ovs_update_selected_route (const struct ovsrec_route *ovs_route,
       if ( (ovs_route->selected != NULL) &&
           (ovs_route->selected[0] == *selected) )
         {
-          VLOG_DBG("No change in selected flag");
+          VLOG_DBG("No change in selected flag previous %s and new %s",
+                    ovs_route->selected[0] ? "true" : "false",
+                    *selected ? "true" : "false");
           return 0;
         }
 
@@ -4084,6 +4083,7 @@ zebra_update_selected_route_to_db (struct route_node *rn, struct rib *route,
    * 'ovsdb_route_row_ptr' pointer. Otherwise iterate through the
    * OVSDB route to find out the relevant 'ovsrec_route' structure.
    */
+#if 0
   if (route && (route->ovsdb_route_row_ptr))
     {
 
@@ -4095,6 +4095,7 @@ zebra_update_selected_route_to_db (struct route_node *rn, struct rib *route,
                selected ? "true":"false");
     }
   else
+#endif
     {
 
       p = &rn->p;

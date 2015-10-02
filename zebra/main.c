@@ -237,7 +237,7 @@ main (int argc, char **argv)
   /* preserve my name */
   progname = ((p = strrchr (argv[0], '/')) ? ++p : argv[0]);
 
-  /* HALON_TODO: zebra_ovsdb_init internally calls openlog.
+  /* TODO: zebra_ovsdb_init internally calls openlog.
    * In this case, we should make sure we don't call openzlog again.
    */
   zlog_default = openzlog (progname, ZLOG_ZEBRA,

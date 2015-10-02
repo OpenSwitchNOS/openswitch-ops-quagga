@@ -21,7 +21,8 @@ from opsvsi.docker import *
 from opsvsi.opsvsitest import *
 from opsvsiutils.systemutil import *
 
-class myTopo( Topo ):
+
+class myTopo(Topo):
     """Custom Topology Example
         [2]S1[1]<--->[1]S2[2]
     """
@@ -29,14 +30,15 @@ class myTopo( Topo ):
     def build(self, hsts=0, sws=2, **_opts):
         self.sws = sws
 
-        #Add list of switches
+        # Add list of switches
         for s in irange(1, sws):
-            switch = self.addSwitch( 's%s' %s)
+            switch = self.addSwitch('s%s' % s)
 
-        #Add links between nodes based on custom topo
+        # Add links between nodes based on custom topo
         self.addLink('s1', 's2')
 
-class fibSelectionCTTest( OpsVsiTest ):
+
+class fibSelectionCTTest(OpsVsiTest):
 
     def setupNet(self):
         host_opts = self.getHostOpts()
@@ -49,8 +51,8 @@ class fibSelectionCTTest( OpsVsiTest ):
     def testConfigure(self):
         info('\n########## Test zebra selection of fib routes ##########\n')
         info('\n### Configuring the topology ###\n')
-        s1 = self.net.switches[ 0 ]
-        s2 = self.net.switches[ 1 ]
+        s1 = self.net.switches[0]
+        s2 = self.net.switches[1]
 
         # Configure switch s1
         s1.cmdCLI("configure terminal")
@@ -86,7 +88,7 @@ class fibSelectionCTTest( OpsVsiTest ):
 
         info('### Switch s2 configured ###\n')
 
-        #Add IPv4 static route on s1 and s2
+        # Add IPv4 static route on s1 and s2
         s1.cmdCLI("ip route 10.0.30.0/24 10.0.10.2")
         s2.cmdCLI("ip route 10.0.20.0/24 10.0.10.1")
 
@@ -106,8 +108,8 @@ class fibSelectionCTTest( OpsVsiTest ):
 
     def testFibSelection(self):
         info('\n\n### Verify static routes are selected for fib ###\n')
-        s1 = self.net.switches[ 0 ]
-        s2 = self.net.switches[ 1 ]
+        s1 = self.net.switches[0]
+        s2 = self.net.switches[1]
 
         # Parse the "ovsdb-client dump" output and extract the lines between
         # "Route table" and "Route_Map table". This section will have all the
@@ -118,21 +120,21 @@ class fibSelectionCTTest( OpsVsiTest ):
         for line in lines:
             if check:
                 if ('static' in line and 'unicast' in line and
-                '10.0.30.0/24' in line and 'true' in line):
+                        '10.0.30.0/24' in line and 'true' in line):
                     print '\nIPv4 route selected for FIB. Success!\n'
                     print line
                     print '\n'
                 elif ('static' in line and 'unicast' in line and
-                '10.0.30.0/24' in line):
+                      '10.0.30.0/24' in line):
                     print line
                     assert 0, 'IPv4 route selection failed'
                 elif ('static' in line and 'unicast' in line and
-                '2002::/120' in line and 'true' in line):
+                      '2002::/120' in line and 'true' in line):
                     print '\nIPv6 route selected for FIB. Success!\n'
                     print line
                     print '\n'
                 elif ('static' in line and 'unicast' in line
-                and '2002::/120' in line):
+                      and '2002::/120' in line):
                     print line
                     assert 0, 'IPv6 route selection failed'
             if 'Route table' in line:
@@ -141,6 +143,7 @@ class fibSelectionCTTest( OpsVsiTest ):
                 check = False
 
         info('########## Test Passed ##########\n')
+
 
 class Test_zebra_fib_selection:
 
@@ -159,7 +162,6 @@ class Test_zebra_fib_selection:
     def test_testZebra(self):
         # Function to test zebra fib selection
         self.test.testFibSelection()
-        #CLI(self.test.net)
 
     def __del__(self):
         del self.test

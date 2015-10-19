@@ -19,11 +19,7 @@
  * 02111-1307, USA.  
  */
 
-#ifdef ENABLE_OVSDB
-#include <stdio.h>
-#else
 #include <zebra.h>
-#endif
 
 #include <sys/un.h>
 #include <setjmp.h>
@@ -39,10 +35,6 @@
 #include "vtysh/vtysh.h"
 #include "log.h"
 #include "bgpd/bgp_vty.h"
-
-#ifdef ENABLE_OVSDB
-int enable_mininet_test_prompt = 0;
-#endif
 
 /* Struct VTY. */
 struct vty *vty;
@@ -306,10 +298,7 @@ vtysh_execute_func (const char *line, int pager)
    * Changing vty->node is enough to try it just out without actual walkup in
    * the vtysh. */
   while (ret != CMD_SUCCESS && ret != CMD_SUCCESS_DAEMON && ret != CMD_WARNING
-#ifdef ENABLE_OVSDB
-         && ret != CMD_OVSDB_FAILURE
-#endif
-         && vty->node > CONFIG_NODE)
+	 && vty->node > CONFIG_NODE)
     {
       vty->node = node_parent(vty->node);
       ret = cmd_execute_command (vline, vty, &cmd, 1);
@@ -351,11 +340,6 @@ vtysh_execute_func (const char *line, int pager)
   cmd_stat = ret;
   switch (ret)
     {
-#ifdef ENABLE_OVSDB
-    case CMD_OVSDB_FAILURE:
-      fprintf (stdout,"%% Command failed.\n");
-      break;
-#endif
     case CMD_WARNING:
       if (vty->type == VTY_FILE)
 	fprintf (stdout,"Warning...\n");
@@ -861,7 +845,7 @@ DEFUNSH (VTYSH_ALL,
 {
   return vtysh_end ();
 }
-#if 0
+
 DEFUNSH (VTYSH_BGPD,
 	 router_bgp,
 	 router_bgp_cmd,
@@ -883,7 +867,7 @@ ALIAS_SH (VTYSH_BGPD,
 	  AS_STR
 	  "BGP view\n"
 	  "view name\n")
-#endif
+
 DEFUNSH (VTYSH_BGPD,
 	 address_family_vpnv4,
 	 address_family_vpnv4_cmd,
@@ -1313,43 +1297,16 @@ ALIAS (vtysh_exit_line_vty,
        "quit",
        "Exit current mode and down to previous mode\n")
 
-#ifdef ENABLE_OVSDB
-DEFUN (vtysh_interface,
-       vtysh_interface_cmd,
-       "interface IFNAME",
-       "Select an interface to configure\n"
-       "Interface's name\n")
-{
-  vty->node = INTERFACE_NODE;
-  static char ifnumber[50];
-  if (strlen(argv[0]) < 50)
-    memcpy(ifnumber, argv[0], strlen(argv));
-  vty->index = ifnumber;
-  return CMD_SUCCESS;
-}
-
-DEFUN ( vtysh_mult_cxt_test,
-        vtysh_mult_cxt_test_cmd,
-        "test-interfaceCxt",
-        "Prints the interface context number\n")
-{
-  if (vty->index)
-    printf("The current context is %s\n",(char*)vty->index);
-
-  return CMD_SUCCESS;
-}
-#else
 DEFUNSH (VTYSH_INTERFACE,
-         vtysh_interface,
-         vtysh_interface_cmd,
-         "interface IFNAME",
-         "Select an interface to configure\n"
-         "Interface's name\n")
+	 vtysh_interface,
+	 vtysh_interface_cmd,
+	 "interface IFNAME",
+	 "Select an interface to configure\n"
+	 "Interface's name\n")
 {
   vty->node = INTERFACE_NODE;
   return CMD_SUCCESS;
 }
-#endif
 
 /* TODO Implement "no interface command in isisd. */
 DEFSH (VTYSH_ZEBRA|VTYSH_RIPD|VTYSH_RIPNGD|VTYSH_OSPFD|VTYSH_OSPF6D,
@@ -1409,84 +1366,6 @@ DEFUN (vtysh_show_memory,
   
   return ret;
 }
-
-#ifdef ENABLE_OVSDB
-
-DEFUN (vtysh_set_hostname,
-       vtysh_set_hostname_cmd,
-       "set-hostname WORD",
-       "Setting the hostname in ovsdb from vtysh\n"
-       "Give the string you want to set as hostname\n")
-{
-  vtysh_ovsdb_hostname_set(argv[0]);
-  return CMD_SUCCESS;
-}
-
-DEFUN (vtysh_get_hostname,
-       vtysh_get_hostname_cmd,
-       "get-hostname",
-       "Get the hostname set in ovsdb\n")
-{
-  vtysh_ovsdb_hostname_get();
-  return CMD_SUCCESS;
-}
-
-DEFUN (vtysh_test_port,
-       vtysh_test_port_cmd,
-       "test-port PORT",
-       "Testing the type PORT\n"
-       "Give a valid port value present in the DB\n")
-{
-  printf("The port given is %s\n", argv[0]);
-  return CMD_SUCCESS;
-}
-
-DEFUN (vtysh_test_vlan,
-       vtysh_test_vlan_cmd,
-       "test-vlan VLAN",
-       "Testing the type VLAN\n"
-       "Give a valid vlan value present in the DB\n")
-{
-  printf("The vlan given is %s\n", argv[0]);
-  return CMD_SUCCESS;
-}
-
-DEFUN (vtysh_test_interface,
-       vtysh_test_interface_cmd,
-       "test-interface IFNAME",
-       "Testing the type Interface\n"
-       "Give a valid interface value present in the DB\n")
-{
-  printf("The interface given is %s\n", argv[0]);
-  return CMD_SUCCESS;
-}
-
-DEFUN (vtysh_test_ip,
-       vtysh_test_ip_cmd,
-       "test-ip (A.B.C.D|X:X::X:X)",
-       "Testing the type ip\n"
-       "Give a valid ipv4 address\n"
-       "Give a valid ipv6 address\n")
-{
-  if (argv)
-    printf("The ip address given is %s\n", argv[0]);
-  else
-    printf("The argument is NULL\n");
-
-  return CMD_SUCCESS;
-}
-
-DEFUN (vtysh_test_regex,
-       vtysh_test_regex_cmd,
-       "test-regex WORD",
-       "Testing the input for regex\n"
-       "Enter regex\n")
-{
-  if(vtysh_regex_match("regex", argv[0]) == 0)
-    printf("We matched successfully\n");
-  return CMD_SUCCESS;
-}
-#endif /* ENABLE_OVSDB */
 
 /* Logging commands. */
 DEFUN (vtysh_show_logging,
@@ -1992,45 +1871,11 @@ ALIAS (vtysh_write_memory,
        "write",
        "Write running configuration to memory, network, or terminal\n")
 
-#ifdef ENABLE_OVSDB
-DEFUN (vtysh_show_running_config,
-       vtysh_show_running_config_cmd,
-       "show running-config",
-       SHOW_STR
-       "Current running configuration\n")
-{
-  FILE *fp = NULL;
-
-  fp = stdout;
-
-  vtysh_ovsdb_read_config(fp);
-  return CMD_SUCCESS;
-}
-
-ALIAS (vtysh_show_running_config,
-       vtysh_do_show_running_config_cmd,
-       "do show running-config",
-       SHOW_STR
-       "Current running configuration\n")
-
-DEFUN (vtysh_show_ovsdb_config_table_client_list,
-       vtysh_show_ovdb_config_table_client_list_cmd,
-       "show ovsdb-config-table-client-list",
-       "Ovsdb Config Table Client List\n"
-       "Ovsdb Config Table Client List\n")
-{
-  vty_out (vty, "%sCurrent Ovsdb Config Table client list %s", VTY_NEWLINE, VTY_NEWLINE);
-
-  vtysh_ovsdb_table_list_clients (vty);
-  return CMD_SUCCESS;
-}
-#else
 ALIAS (vtysh_write_terminal,
        vtysh_show_running_config_cmd,
        "show running-config",
        SHOW_STR
        "Current operating configuration\n")
-#endif /* ENABLE_OVSDB */
 
 DEFUN (vtysh_terminal_length,
        vtysh_terminal_length_cmd,
@@ -2389,20 +2234,8 @@ vtysh_prompt (void)
 	uname (&names);
       hostname = names.nodename;
     }
-#ifdef ENABLE_OVSDB
-  static char newhost[100];
-  char* temphost = cmd_prompt(vty->node);
-  strcpy(newhost, temphost);
-  if (enable_mininet_test_prompt == 1)
-  {
-    int len = strlen(temphost);
-    int x = 127;
-    newhost[len - 1] = (char)x;
-  }
-  snprintf (buf, sizeof buf, newhost, hostname);
-#else
+
   snprintf (buf, sizeof buf, cmd_prompt (vty->node), hostname);
-#endif
 
   return buf;
 }
@@ -2464,26 +2297,6 @@ vtysh_init_vty (void)
   vtysh_install_default (KEYCHAIN_KEY_NODE);
   vtysh_install_default (VTY_NODE);
 
-#ifdef ENABLE_OVSDB
-  install_element (VIEW_NODE, &vtysh_set_hostname_cmd);
-  install_element (ENABLE_NODE, &vtysh_set_hostname_cmd);
-  install_element (VIEW_NODE, &vtysh_get_hostname_cmd);
-  install_element (ENABLE_NODE, &vtysh_get_hostname_cmd);
-  install_element (VIEW_NODE, &vtysh_test_port_cmd);
-  install_element (ENABLE_NODE, &vtysh_test_port_cmd);
-  install_element (VIEW_NODE, &vtysh_test_vlan_cmd);
-  install_element (ENABLE_NODE, &vtysh_test_vlan_cmd);
-  install_element (VIEW_NODE, &vtysh_test_interface_cmd);
-  install_element (ENABLE_NODE, &vtysh_test_interface_cmd);
-  install_element (VIEW_NODE, &vtysh_test_ip_cmd);
-  install_element (ENABLE_NODE, &vtysh_test_ip_cmd);
-  install_element (VIEW_NODE, &vtysh_test_regex_cmd);
-  install_element (ENABLE_NODE, &vtysh_test_regex_cmd);
-  install_element (INTERFACE_NODE, &vtysh_mult_cxt_test_cmd);
-  install_element (VIEW_NODE, &vtysh_show_ovdb_config_table_client_list_cmd);
-  install_element (ENABLE_NODE, &vtysh_show_ovdb_config_table_client_list_cmd);
-#endif /* ENABLE_OVSDB */
-
   install_element (VIEW_NODE, &vtysh_enable_cmd);
   install_element (ENABLE_NODE, &vtysh_config_terminal_cmd);
   install_element (ENABLE_NODE, &vtysh_disable_cmd);
@@ -2515,9 +2328,6 @@ vtysh_init_vty (void)
   install_element (BGP_IPV6_NODE, &vtysh_quit_bgpd_cmd);
   install_element (BGP_IPV6M_NODE, &vtysh_exit_bgpd_cmd);
   install_element (BGP_IPV6M_NODE, &vtysh_quit_bgpd_cmd);
-
-  bgp_vty_init();
-
   install_element (ISIS_NODE, &vtysh_exit_isisd_cmd);
   install_element (ISIS_NODE, &vtysh_quit_isisd_cmd);
   install_element (KEYCHAIN_NODE, &vtysh_exit_ripd_cmd);
@@ -2564,10 +2374,8 @@ vtysh_init_vty (void)
 #endif
   install_element (CONFIG_NODE, &router_babel_cmd);
   install_element (CONFIG_NODE, &router_isis_cmd);
-#if 0
   install_element (CONFIG_NODE, &router_bgp_cmd);
   install_element (CONFIG_NODE, &router_bgp_view_cmd);
-#endif
   install_element (BGP_NODE, &address_family_vpnv4_cmd);
   install_element (BGP_NODE, &address_family_vpnv4_unicast_cmd);
   install_element (BGP_NODE, &address_family_ipv4_unicast_cmd);
@@ -2590,10 +2398,6 @@ vtysh_init_vty (void)
   install_element (CONFIG_NODE, &vtysh_interface_cmd);
   install_element (CONFIG_NODE, &vtysh_no_interface_cmd);
   install_element (ENABLE_NODE, &vtysh_show_running_config_cmd);
-#ifdef ENABLE_OVSDB
-  install_element (CONFIG_NODE, &vtysh_do_show_running_config_cmd);
-  install_element (INTERFACE_NODE, &vtysh_do_show_running_config_cmd);
-#endif /* ENABLE_OVSDB */
   install_element (ENABLE_NODE, &vtysh_copy_runningconfig_startupconfig_cmd);
   install_element (ENABLE_NODE, &vtysh_write_file_cmd);
   install_element (ENABLE_NODE, &vtysh_write_cmd);
@@ -2677,7 +2481,4 @@ vtysh_init_vty (void)
   install_element (CONFIG_NODE, &vtysh_enable_password_text_cmd);
   install_element (CONFIG_NODE, &no_vtysh_enable_password_cmd);
 
-#ifdef ENABLE_OVSDB
-  lldp_vty_init();
-#endif
 }

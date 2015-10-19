@@ -1,5 +1,8 @@
-/* BGP attributes. 
-   Copyright (C) 1996, 97, 98 Kunihiro Ishiguro
+/*
+
+BGP attributes.
+Copyright (C) 1996, 97, 98 Kunihiro Ishiguro
+Copyright (C) 2015 Hewlett Packard Enterprise Development LP
 
 This file is part of GNU Zebra.
 
@@ -20,6 +23,8 @@ Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 
 #ifndef _QUAGGA_BGP_ATTR_H
 #define _QUAGGA_BGP_ATTR_H
+
+#include "prefix.h"
 
 /* Simple bit mapping. */
 #define BITMAP_NBBY 8

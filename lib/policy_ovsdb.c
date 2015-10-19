@@ -58,7 +58,7 @@ struct lookup_entry {
  * Translation table from ovsdb to guagga
  */
 const struct lookup_entry match_table[]={
-  {MATCH_PREFIX, "ip address prefix list", "prefix_list"},
+  {MATCH_PREFIX, "ip address prefix-list", "prefix_list"},
   {0, NULL, NULL},
 };
 
@@ -82,11 +82,11 @@ policy_ovsdb_free_arg_list(char ***parmv, int argcsize)
     for (i = 0; i < argcsize; i ++)
     {
         if (argv[i]) {
-            XFREE (MTYPE_POLICY, argv[i]);
+            free(argv[i]);
             argv[i] = NULL;
         }
     }
-    XFREE (MTYPE_POLICY, argv);
+    free(argv);
     argv = NULL;
     *parmv = argv;
 }
@@ -101,13 +101,13 @@ policy_ovsdb_alloc_arg_list(char *** argv, int argcsize, int argvsize)
     char ** parmv;
 
     *argv = NULL;
-    parmv = XCALLOC(MTYPE_POLICY, sizeof (char *) * argcsize);
+    parmv = xmalloc(sizeof (char *) * argcsize);
     if (!parmv)
         return 1;
 
     for (i = 0; i < argcsize; i ++)
       {
-        parmv[i] = XCALLOC (MTYPE_POLICY, sizeof (char) * argvsize);
+        parmv[i] = xmalloc(sizeof(char) * argvsize);
         if (!(parmv[i])) {
             policy_ovsdb_free_arg_list(&parmv, argcsize);
             return 1;
@@ -386,10 +386,6 @@ policy_ovsdb_rt_map(struct ovsdb_idl *idl)
      * Add route map set command
      */
   for (i = 0; i < argcset; i += 2) {
-      if (strcmp(argvset[i], "community")) {
-            policy_ovsdb_rt_map_set_community(argvset[i], argvset[i+1], index);
-            continue;
-      }
       ret = route_map_add_set (index, argvset[i], argvset[i+1]);
       ret = policy_ovsdb_rt_map_vlog(ret);
   }

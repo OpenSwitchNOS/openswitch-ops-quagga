@@ -78,7 +78,11 @@ unsigned int idl_seqno;
 static char *appctl_path = NULL;
 static struct unixctl_server *appctl;
 static int system_configured = false;
-
+/*
+ * Global System ECMP status affects maxpath config
+ * Keep a local ECMP status to update when needed
+ */
+static int sys_ecmp_status = 1;
 boolean exiting = false;
 static int bgp_ovspoll_enqueue (bgp_ovsdb_t *bovs_g);
 static int bovs_read_cb (struct thread *thread);
@@ -92,7 +96,10 @@ bgp_unixctl_dump (struct unixctl_conn *conn, int argc OVS_UNUSED,
     const char *argv[] OVS_UNUSED, void *aux OVS_UNUSED)
 {
 }
-
+int get_global_ecmp_status()
+{
+   return sys_ecmp_status;
+}
 /*
  * From bgp router row in db to get bgp asn #
  */
@@ -290,6 +297,7 @@ ovsdb_init (const char *db_path)
 
     ovsdb_idl_add_column(idl, &ovsrec_system_col_cur_cfg);
     ovsdb_idl_add_column(idl, &ovsrec_system_col_hostname);
+    ovsdb_idl_add_column(idl, &ovsrec_system_col_ecmp_config);
 
     /* BGP tables */
     bgp_ovsdb_tables_init(idl);
@@ -551,6 +559,11 @@ static void
 bgp_apply_global_changes (void)
 {
     const struct ovsrec_system *sys;
+    const struct ovsrec_vrf *ovs_vrf;
+    const struct ovsrec_bgp_router *ovs_bgp;
+    int64_t asn;
+    int i;
+    int ecmp_status = 1;
 
     sys = ovsrec_system_first(idl);
     if (OVSREC_IDL_ANY_TABLE_ROWS_DELETED(sys, idl_seqno)) {
@@ -563,6 +576,21 @@ bgp_apply_global_changes (void)
         return;
     }
 
+    if(OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_system_col_ecmp_config, idl_seqno) ) {
+        ecmp_status = smap_get_bool(&sys->ecmp_config, SYSTEM_ECMP_CONFIG_STATUS,
+                SYSTEM_ECMP_CONFIG_ENABLE_DEFAULT);
+        if(sys_ecmp_status != ecmp_status) {
+            VLOG_INFO("ECMP changed compared to local cache!");
+            sys_ecmp_status = ecmp_status;
+            OVSREC_VRF_FOR_EACH(ovs_vrf, idl) {
+                for (i = 0; i < ovs_vrf->n_bgp_routers; i++) {
+                    asn = ovs_vrf->key_bgp_routers[i];
+                    ovs_bgp = ovs_vrf->value_bgp_routers[i];
+                    bgp_ovsdb_readvertise_route(ovs_bgp, asn);
+                }
+            }
+        }
+    }
     if (sys) {
         /* Update the hostname */
         bgp_set_hostname(sys->hostname);
@@ -894,7 +922,6 @@ bgp_router_read_ovsdb_apply_changes (struct ovsdb_idl *idl)
         }
     }
 }
-
 /*
  * Subscribe for changes in the BGP_Router table
  */
@@ -912,8 +939,8 @@ bgp_apply_bgp_router_changes (struct ovsdb_idl *idl)
     if (bgp_first && !OVSREC_IDL_ANY_TABLE_ROWS_INSERTED(bgp_first, idl_seqno)
         && !OVSREC_IDL_ANY_TABLE_ROWS_DELETED(bgp_first, idl_seqno)
         && !OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED(bgp_first, idl_seqno)) {
-            VLOG_DBG("No BGP_Router changes");
-            return;
+        VLOG_DBG("No BGP_Router changes");
+        return;
     }
 
     if (bgp_first == NULL) {

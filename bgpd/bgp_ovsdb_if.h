@@ -48,8 +48,11 @@ void bgp_ovsdb_exit(void);
 #define ROW_CHANGED			OVSREC_IDL_IS_ROW_MODIFIED
 /* row is not used now but may be in the future */
 #define COL_CHANGED(row, col, s)	OVSREC_IDL_IS_COLUMN_MODIFIED(col, s)
+#define ECMP_STATUS    0x1
+#define SYSTEM_ECMP_CHANGE(conf)   (conf&ECMP_STATUS)
+extern  int sys_ecmp_status;
 
 /* Initialize and integrate the ovs poll loop with the daemon */
 void bgp_ovsdb_init_poll_loop (struct bgp_master *bm);
-
+int  get_global_ecmp_status(void);
 #endif /* BGP_OVSDB_IF_H */

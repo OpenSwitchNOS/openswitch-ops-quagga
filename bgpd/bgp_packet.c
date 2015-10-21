@@ -1,5 +1,6 @@
 /* BGP packet management routine.
    Copyright (C) 1999 Kunihiro Ishiguro
+   Copyright (C) 2015 Hewlett Packard Enterprise Development LP
 
 This file is part of GNU Zebra.
 
@@ -763,6 +764,10 @@ bgp_write (struct thread *thread)
 	  peer->dynamic_cap_out++;
 	  break;
 	}
+
+#ifdef ENABLE_OVSDB
+        bgp_daemon_ovsdb_neighbor_statistics_update(true, NULL, peer);
+#endif // ENABLE_OVSDB
 
       /* OK we send packet so delete it. */
       bgp_packet_delete (peer);
@@ -1935,6 +1940,10 @@ bgp_update_receive (struct peer *peer, bgp_size_t size)
   BGP_TIMER_OFF (peer->t_holdtime);
   bgp_timer_set (peer);
 
+#ifdef ENABLE_OVSDB
+  bgp_daemon_ovsdb_neighbor_statistics_update(true, NULL, peer);
+#endif // ENABLE_OVSDB
+
   return 0;
 }
 
@@ -2008,6 +2017,10 @@ bgp_notify_receive (struct peer *peer, bgp_size_t size)
   if (bgp_notify.code == BGP_NOTIFY_OPEN_ERR &&
       bgp_notify.subcode == BGP_NOTIFY_OPEN_UNSUP_PARAM )
     UNSET_FLAG (peer->sflags, PEER_STATUS_CAPABILITY_OPEN);
+
+#ifdef ENABLE_OVSDB
+  bgp_daemon_ovsdb_neighbor_statistics_update(true, NULL, peer);
+#endif // ENABLE_OVSDB
 
   BGP_EVENT_ADD (peer, Receive_NOTIFICATION_message);
 }
@@ -2615,6 +2628,10 @@ bgp_read (struct thread *thread)
       bgp_capability_receive (peer, size);
       break;
     }
+
+#ifdef ENABLE_OVSDB
+    bgp_daemon_ovsdb_neighbor_statistics_update(true, NULL, peer);
+#endif // ENABLE_OVSDB
 
   /* Clear input buffer. */
   peer->packet_size = 0;

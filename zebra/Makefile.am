@@ -26,7 +26,21 @@ AM_CFLAGS += -I $(LOCAL_SYSROOT_DIR)/usr/local/include/ovs
 endif
 AM_LDFLAGS = $(PILDFLAGS)
 
+#
+# ovsdb related files must have extra error checks (-Werror)
+#
+if ENABLE_OVSDB
+zebra_ovsdb_if_LDADD = libzebra_ovsdb_if.a
+noinst_LIBRARIES = libzebra_ovsdb_if.a
+libzebra_ovsdb_if_a_SOURCES = zebra_ovsdb_if.c zebra_ovsdb_if.h
+libzebra_ovsdb_if_a_CFLAGS = $(AM_CFLAGS) -Werror
+endif
+
+if ENABLE_OVSDB
+sbin_PROGRAMS = ops-zebra
+else
 sbin_PROGRAMS = zebra
+endif
 
 noinst_PROGRAMS = testzebra
 
@@ -35,8 +49,9 @@ zebra_SOURCES = \
 	redistribute.c debug.c rtadv.c zebra_snmp.c zebra_vty.c \
 	irdp_main.c irdp_interface.c irdp_packet.c router-id.c zebra_fpm.c \
 	$(othersrc)
+
 if ENABLE_OVSDB
-zebra_SOURCES += zebra_ovsdb_if.c
+ops_zebra_SOURCES = $(zebra_SOURCES)
 endif
 
 testzebra_SOURCES = test_main.c zebra_rib.c interface.c connected.c debug.c \
@@ -51,14 +66,16 @@ if ENABLE_OVSDB
 noinst_HEADERS += zebra_ovsdb_if.h
 endif
 
-zebra_LDADD = $(otherobj) ../lib/libzebra.la $(LIBCAP)
 if ENABLE_OVSDB
-zebra_LDADD += -lovscommon -lovsdb -lpthread
+ops_zebra_LDADD = $(otherobj) libzebra_ovsdb_if.a ../lib/libzebra.la \
+		  $(LIBCAP) -lovscommon -lovsdb -lpthread
+ops_zebra_DEPENDENCIES = $(otherobj)
+else
+zebra_LDADD = $(otherobj) libzebra_ovsdb_if.a ../lib/libzebra.la $(LIBCAP)
+zebra_DEPENDENCIES = $(otherobj)
 endif
 
-testzebra_LDADD = ../lib/libzebra.la $(LIBCAP)
-
-zebra_DEPENDENCIES = $(otherobj)
+testzebra_LDADD = libzebra_ovsdb_if.a ../lib/libzebra.la $(LIBCAP)
 
 EXTRA_DIST = if_ioctl.c if_ioctl_solaris.c if_netlink.c \
         if_sysctl.c ipforward_proc.c \
@@ -68,8 +85,9 @@ EXTRA_DIST = if_ioctl.c if_ioctl_solaris.c if_netlink.c \
 	ioctl.c ioctl_solaris.c \
 	GNOME-SMI GNOME-PRODUCT-ZEBRA-MIB
 
-client : client_main.o ../lib/libzebra.la
-	$(CC) -g -o client client_main.o ../liblzebra.la $(LIBS) $(LIB_IPV6)
+client : client_main.o ../lib/libzebra.la libzebra_ovsdb_if.a
+	$(CC) -g -o client client_main.o libzebra_ovsdb_if.a \
+	    ../liblzebra.la $(LIBS) $(LIB_IPV6)
 
 quaggaconfdir = $(sysconfdir)
 

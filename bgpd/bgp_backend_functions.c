@@ -1,6 +1,10 @@
 
-/* BGP VTY interface.
-   Copyright (C) 1996, 97, 98, 99, 2000 Kunihiro Ishiguro
+/*
+
+BGP VTY interface.
+
+Copyright (C) 1996, 97, 98, 99, 2000 Kunihiro Ishiguro
+Copyright (C) 2015 Hewlett Packard Enterprise Development LP
 
 This file is part of GNU Zebra.
 
@@ -17,7 +21,9 @@ General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with GNU Zebra; see the file COPYING.  If not, write to the Free
 Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
-02111-1307, USA.  */
+02111-1307, USA.
+
+*/
 
 /*
 **		        IMPORTANT
@@ -156,6 +162,28 @@ peer_lookup_vty (struct vty *vty, const char *ip_str)
   return peer;
 }
 
+static struct peer *
+bgp_peer_and_group_lookup (struct bgp *bgp, const char *peer_str)
+{
+    int ret;
+    union sockunion su;
+    struct peer *peer;
+    struct peer_group *group;
+
+    ret = str2sockunion(peer_str, &su);
+    if (ret == 0) {
+        peer = peer_lookup(bgp, &su);
+        if (peer)
+            return peer;
+    } else {
+        group = peer_group_lookup(bgp, peer_str);
+        if (group)
+            return group->conf;
+    }
+
+    return NULL;
+}
+
 /* Utility function for looking up peer or peer group.  */
 static struct peer *
 peer_and_group_lookup_vty (struct vty *vty, const char *peer_str)
@@ -260,7 +288,7 @@ log_bgp_error (int ret)
     }
   if (str)
     {
-      LOG_ERROR("%% %s", str);
+      VLOG_ERR(str);
       return CMD_WARNING;
     }
   return CMD_SUCCESS;
@@ -1454,18 +1482,22 @@ ALIAS (no_bgp_default_local_preference,
        "local preference (higher=more preferred)\n"
        "Configure default local preference value\n")
 
+/*
+** neighbor_remote_as_cmd
+*/
 int
 daemon_neighbor_remote_as_cmd_execute (struct bgp *bgp, char *peer_str,
-    as_t as, afi_t afi, safi_t safi)
+    as_t *asp, afi_t afi, safi_t safi)
 {
   int ret;
   union sockunion su;
+  as_t as = *asp;
 
   VLOG_INFO("daemon_neighbor_remote_as_cmd_execute, peer_str %s, as %u\n",
     peer_str, as);
 
   if ((as < 1) || (as > BGP_AS4_MAX)) {
-    LOG_ERROR("%% incorrect as number %d", as);
+    VLOG_ERR("%% incorrect as number %d\n", as);
     return CMD_WARNING;
   }
 
@@ -1476,7 +1508,7 @@ daemon_neighbor_remote_as_cmd_execute (struct bgp *bgp, char *peer_str,
       ret = peer_group_remote_as(bgp, peer_str, &as);
       if (ret < 0)
 	{
-	  LOG_ERROR("%% Create the peer-group first");
+	  VLOG_ERR("%% Create the peer-group first\n");
 	  return CMD_WARNING;
 	}
       return CMD_SUCCESS;
@@ -1484,7 +1516,7 @@ daemon_neighbor_remote_as_cmd_execute (struct bgp *bgp, char *peer_str,
 
   if (peer_address_self_check(&su))
     {
-      LOG_ERROR("%% Can not configure the local system as neighbor");
+      VLOG_ERR("%% Can not configure the local system as neighbor\n");
       return CMD_WARNING;
     }
 
@@ -1494,49 +1526,31 @@ daemon_neighbor_remote_as_cmd_execute (struct bgp *bgp, char *peer_str,
   switch (ret)
     {
     case BGP_ERR_PEER_GROUP_MEMBER:
-      LOG_ERROR("%% Peer-group AS %u. Cannot configure remote-as for member", as);
+      VLOG_ERR("%% Peer-group AS %u. Cannot configure remote-as for member\n", as);
       return CMD_WARNING;
     case BGP_ERR_PEER_GROUP_PEER_TYPE_DIFFERENT:
-      LOG_ERROR("%% The AS# can not be changed from %u to %u, peer-group members must be all internal or all external", as, as);
+      VLOG_ERR("%% The AS# can not be changed from %u to %u, peer-group members must be all internal or all external\n", as, as);
       return CMD_WARNING;
     }
   return log_bgp_error(ret);
 }
 
-#if 0
-DEFUN (neighbor_remote_as,
-       neighbor_remote_as_cmd,
-       NEIGHBOR_CMD2 "remote-as " CMD_AS_RANGE,
-       NEIGHBOR_STR
-       NEIGHBOR_ADDR_STR2
-       "Specify a BGP neighbor\n"
-       AS_STR)
+int
+daemon_neighbor_peer_group_cmd_execute (struct bgp *bgp,
+                                        const char *groupName)
 {
-    return
-	daemon_neighbor_remote_as_cmd_execute(NULL, argv[0], argv[1], AFI_IP, SAFI_UNICAST);
-}
-#endif
+    struct peer_group *group;
 
-DEFUN (neighbor_peer_group,
-       neighbor_peer_group_cmd,
-       "neighbor WORD peer-group",
-       NEIGHBOR_STR
-       "Neighbor tag\n"
-       "Configure peer-group\n")
-{
-  struct bgp *bgp;
-  struct peer_group *group;
+    group = peer_group_get(bgp, groupName);
+    if (!group)
+        return CMD_WARNING;
 
-  bgp = vty->index;
-
-  group = peer_group_get (bgp, argv[0]);
-  if (! group)
-    return CMD_WARNING;
-
-  return CMD_SUCCESS;
+    return CMD_SUCCESS;
 }
 
-/* no version of daemon_neighbor_remote_as_cmd_execute */
+/*
+** no neighbor_remote_as_cmd
+*/
 int
 daemon_no_neighbor_remote_as_cmd_execute (struct vty *vty, char *peer_str)
 {
@@ -1739,6 +1753,7 @@ ALIAS (no_neighbor_local_as,
        "Do not prepend local-as to updates from ebgp peers\n"
        "Do not prepend local-as to updates from ibgp peers\n")
 
+#ifndef ENABLE_OVSDB
 DEFUN (neighbor_password,
        neighbor_password_cmd,
        NEIGHBOR_CMD2 "password LINE",
@@ -1776,6 +1791,7 @@ DEFUN (no_neighbor_password,
   ret = peer_password_unset (peer);
   return log_bgp_error(ret);
 }
+#endif /* !ENABLE_OVSDB */
 
 DEFUN (neighbor_activate,
        neighbor_activate_cmd,
@@ -1816,6 +1832,51 @@ DEFUN (no_neighbor_activate,
   return log_bgp_error(ret);
 }
 
+int
+daemon_neighbor_set_peer_group_cmd_execute (struct bgp *bgp,
+                                            const char *peer_str,
+                                            const char *peer_group_name,
+                                            afi_t afi,
+                                            safi_t safi)
+{
+    int ret;
+    as_t as;
+    union sockunion su;
+    struct peer_group *group;
+
+    ret = str2sockunion (peer_str, &su);
+    if (ret < 0)
+    {
+        LOG_ERROR("%% Malformed address: %s%s", peer_str);
+        return CMD_WARNING;
+    }
+
+    group = peer_group_lookup (bgp, peer_group_name);
+    if (!group)
+    {
+        LOG_ERROR("%% Configure the peer-group first");
+        return CMD_WARNING;
+    }
+
+    if (peer_address_self_check (&su))
+    {
+        LOG_ERROR("%% Can not configure the local system as neighbor");
+        return CMD_WARNING;
+    }
+
+    ret = peer_group_bind (bgp, &su, group, afi, safi, &as);
+
+    if (ret == BGP_ERR_PEER_GROUP_PEER_TYPE_DIFFERENT)
+    {
+        LOG_ERROR("%% Peer with AS %u cannot be in this peer-group, members "
+                  "must be all internal or all external%s", as);
+        return CMD_WARNING;
+    }
+
+    return log_bgp_error(ret);
+}
+
+#if 0
 DEFUN (neighbor_set_peer_group,
        neighbor_set_peer_group_cmd,
        NEIGHBOR_CMD "peer-group WORD",
@@ -1863,7 +1924,46 @@ DEFUN (neighbor_set_peer_group,
 
   return log_bgp_error(ret);
 }
+#endif
 
+int
+daemon_no_neighbor_set_peer_group_cmd_execute (struct bgp *bgp,
+                                               const char *peer_str,
+                                               afi_t afi,
+                                               safi_t safi)
+{
+    int ret;
+    struct peer *peer;
+    struct peer_group *group;
+
+    union sockunion su;
+
+    ret = str2sockunion (peer_str, &su);
+    if (ret < 0)
+    {
+      LOG_ERROR("%% Malformed address %s", peer_str);
+      return NULL;
+    }
+
+    peer = peer_lookup (bgp, &su);
+    if (!peer)
+    {
+        LOG_ERROR("%% Configure peer first");
+        return CMD_WARNING;
+    }
+
+    if (!peer->group)
+    {
+        LOG_ERROR("%% Peer does not have peer-group configured.");
+        return CMD_WARNING;
+    }
+
+    ret = peer_group_unbind (bgp, peer, peer->group, afi, safi);
+
+    return log_bgp_error(ret);
+}
+
+#if 0
 DEFUN (no_neighbor_set_peer_group,
        no_neighbor_set_peer_group_cmd,
        NO_NEIGHBOR_CMD "peer-group WORD",
@@ -1896,6 +1996,7 @@ DEFUN (no_neighbor_set_peer_group,
 
   return log_bgp_error(ret);
 }
+#endif
 
 static int
 peer_flag_modify_vty (struct vty *vty, const char *ip_str,
@@ -1914,6 +2015,27 @@ peer_flag_modify_vty (struct vty *vty, const char *ip_str,
     ret = peer_flag_unset (peer, flag);
 
   return log_bgp_error(ret);
+}
+
+static int
+peer_flag_modify_bgp (struct bgp *bgp, const char *name,
+                      u_int16_t flag, int set)
+{
+    int ret;
+    struct peer *peer;
+
+    peer = bgp_peer_and_group_lookup(bgp, name);
+    if (!peer) {
+        VLOG_ERR("Peer not found");
+        return CMD_WARNING;
+    }
+
+    if (set)
+        ret = peer_flag_set(peer, flag);
+    else
+        ret = peer_flag_unset(peer, flag);
+
+    return log_bgp_error(ret);
 }
 
 static int
@@ -1950,6 +2072,111 @@ DEFUN (no_neighbor_passive,
   return peer_flag_unset_vty (vty, argv[0], PEER_FLAG_PASSIVE);
 }
 
+/*
+ *
+ */
+int
+daemon_neighbor_description_cmd_execute (struct bgp *bgp, char *peer_str, char *description)
+{
+    struct peer *peer;
+
+    peer= bgp_peer_and_group_lookup (bgp, peer_str);
+    if (! peer) return 1;
+
+    if (description) {
+        VLOG_DBG("neighbor %s set description %s \n", peer_str, description);
+        peer_description_set (peer, description);
+        return 0;
+    } else {
+        peer_description_unset (peer);
+        return 0;
+    }
+}
+
+int
+daemon_neighbor_password_cmd_execute (struct bgp *bgp, char *peer_str, char *password)
+{
+    struct peer *peer;
+
+    peer= bgp_peer_and_group_lookup (bgp, peer_str);
+    if (! peer) return 1;
+
+    if (password) {
+        VLOG_DBG("neighbor %s set password %s \n", peer_str, password);
+        return peer_password_set (peer, password);
+    } else {
+        return peer_password_unset (peer);
+    }
+}
+
+/*
+ *
+ */
+int
+daemon_neighbor_timers_cmd_execute (struct bgp *bgp, const char *peer_str,
+                                    const u_int32_t keepalive,
+                                    const u_int32_t holdtime,
+                                    bool set)
+{
+    struct peer *peer;
+
+    peer = bgp_peer_and_group_lookup(bgp, peer_str);
+
+    if (!peer) {
+        VLOG_ERR("Peer/peer-group not found");
+        return CMD_WARNING;
+    }
+
+    if (set)
+        return peer_timers_set(peer, keepalive, holdtime);
+    else
+        return peer_timers_unset(peer);
+}
+
+int
+daemon_neighbor_shutdown_cmd_execute (struct bgp *bgp, char *peer_str,
+    bool shut)
+{
+    VLOG_DBG("Modifying neighbor %s is shutdown", peer_str);
+    return peer_flag_modify_bgp(bgp, peer_str, PEER_FLAG_SHUTDOWN, shut);
+}
+
+int
+daemon_neighbor_route_map_cmd_execute(struct bgp *bgp, char *peer_str,
+                                      afi_t afi, safi_t safi,
+                                      const char *name_str,
+                                      const char *direct_str) {
+    struct peer *peer;
+    int direct = RMAP_IN;
+
+    peer = bgp_peer_and_group_lookup(bgp, peer_str);
+    if (!peer || !(direct_str && direct_str[0])) {
+        VLOG_ERR("Peer %s not found or NULL direction string.", peer_str);
+        return CMD_WARNING;
+    }
+
+    /* Check filter direction. */
+    if (strncmp(direct_str, "in", 2) == 0)
+        direct = RMAP_IN;
+    else if (strncmp(direct_str, "o", 1) == 0)
+        direct = RMAP_OUT;
+    else if (strncmp(direct_str, "im", 2) == 0)
+        direct = RMAP_IMPORT;
+    else if (strncmp(direct_str, "e", 1) == 0)
+        direct = RMAP_EXPORT;
+
+    if (name_str && direct_str) {
+        VLOG_DBG("neighbor %s route-map %s %s\n",
+                 peer_str, name_str, direct_str);
+
+        return peer_route_map_set(peer, afi, safi, direct, name_str);
+    } else {
+        // name was NULL, which means this is a "no" command
+        return peer_route_map_unset(peer, afi, safi, direct);
+    }
+}
+
+#if 0
 /* neighbor shutdown. */
 DEFUN (neighbor_shutdown,
        neighbor_shutdown_cmd,
@@ -1960,17 +2187,7 @@ DEFUN (neighbor_shutdown,
 {
   return peer_flag_set_vty (vty, argv[0], PEER_FLAG_SHUTDOWN);
 }
-
-DEFUN (no_neighbor_shutdown,
-       no_neighbor_shutdown_cmd,
-       NO_NEIGHBOR_CMD2 "shutdown",
-       NO_STR
-       NEIGHBOR_STR
-       NEIGHBOR_ADDR_STR2
-       "Administratively shut down this neighbor\n")
-{
-  return peer_flag_unset_vty (vty, argv[0], PEER_FLAG_SHUTDOWN);
-}
+#endif
 
 /* Deprecated neighbor capability route-refresh. */
 DEFUN_DEPRECATED (neighbor_capability_route_refresh,
@@ -2062,6 +2279,27 @@ peer_af_flag_modify_vty (struct vty *vty, const char *peer_str, afi_t afi,
 }
 
 static int
+peer_af_flag_modify_bgp (struct bgp *bgp, const char **peer_str, afi_t afi,
+                         safi_t safi, u_int32_t flag, int set)
+{
+    int ret;
+    struct peer *peer;
+
+    peer = bgp_peer_and_group_lookup(bgp, peer_str);
+    if (!peer) {
+        VLOG_ERR("Peer not found");
+        return CMD_WARNING;
+    }
+
+    if (set)
+        ret = peer_af_flag_set(peer, afi, safi, flag);
+    else
+        ret = peer_af_flag_unset(peer, afi, safi, flag);
+
+    return log_bgp_error(ret);
+}
+
+static int
 peer_af_flag_set_vty (struct vty *vty, const char *peer_str, afi_t afi,
 		      safi_t safi, u_int32_t flag)
 {
@@ -2070,10 +2308,21 @@ peer_af_flag_set_vty (struct vty *vty, const char *peer_str, afi_t afi,
 
 static int
 peer_af_flag_unset_vty (struct vty *vty, const char *peer_str, afi_t afi,
-			safi_t safi, u_int32_t flag)
+                        safi_t safi, u_int32_t flag)
 {
   return peer_af_flag_modify_vty (vty, peer_str, afi, safi, flag, 0);
 }
+
+int
+daemon_neighbor_remove_private_as_cmd_execute (struct bgp *bgp, char *peer_str,
+                                               afi_t afi, safi_t safi,
+                                               bool private_as)
+{
+    VLOG_DBG("Modifying neighbor %s remove private AS", peer_str);
+    return peer_af_flag_modify_bgp(bgp, peer_str, afi, safi,
+                                   PEER_FLAG_REMOVE_PRIVATE_AS, private_as);
+}
+
 
 /* neighbor capability orf prefix-list. */
 DEFUN (neighbor_capability_orf_prefix,
@@ -2167,34 +2416,8 @@ DEFUN (no_neighbor_nexthop_self,
        "Apply also to ibgp-learned routes when acting as a route reflector\n")
 {
   return peer_af_flag_unset_vty (vty, argv[0], bgp_node_afi (vty),
-				 bgp_node_safi (vty),
-				 PEER_FLAG_NEXTHOP_SELF|PEER_FLAG_NEXTHOP_SELF_ALL);
-}
-
-/* neighbor remove-private-AS. */
-DEFUN (neighbor_remove_private_as,
-       neighbor_remove_private_as_cmd,
-       NEIGHBOR_CMD2 "remove-private-AS",
-       NEIGHBOR_STR
-       NEIGHBOR_ADDR_STR2
-       "Remove private AS number from outbound updates\n")
-{
-  return peer_af_flag_set_vty (vty, argv[0], bgp_node_afi (vty),
-			       bgp_node_safi (vty),
-			       PEER_FLAG_REMOVE_PRIVATE_AS);
-}
-
-DEFUN (no_neighbor_remove_private_as,
-       no_neighbor_remove_private_as_cmd,
-       NO_NEIGHBOR_CMD2 "remove-private-AS",
-       NO_STR
-       NEIGHBOR_STR
-       NEIGHBOR_ADDR_STR2
-       "Remove private AS number from outbound updates\n")
-{
-  return peer_af_flag_unset_vty (vty, argv[0], bgp_node_afi (vty),
-				 bgp_node_safi (vty),
-				 PEER_FLAG_REMOVE_PRIVATE_AS);
+                                 bgp_node_safi (vty),
+                                 PEER_FLAG_NEXTHOP_SELF|PEER_FLAG_NEXTHOP_SELF_ALL);
 }
 
 /* neighbor send-community. */
@@ -2273,6 +2496,29 @@ DEFUN (no_neighbor_send_community_type,
 				 bgp_node_safi (vty),
 				 (PEER_FLAG_SEND_COMMUNITY |
 				  PEER_FLAG_SEND_EXT_COMMUNITY));
+}
+
+int
+daemon_neighbor_inbound_soft_reconfiguration_cmd_execute (struct bgp *bgp,
+                                                          const char *peer_str,
+                                                          afi_t afi,
+                                                          safi_t safi,
+                                                          bool is_set)
+{
+    struct peer *peer;
+    peer = bgp_peer_and_group_lookup (bgp, peer_str);
+
+    if (!peer) {
+        return CMD_WARNING;
+    }
+
+    if (is_set) {
+        return peer_af_flag_set (peer, afi, safi, PEER_FLAG_SOFT_RECONFIG);
+    } else {
+        return peer_af_flag_unset (peer, afi, safi, PEER_FLAG_SOFT_RECONFIG);
+    }
+
+    return CMD_SUCCESS;
 }
 
 /* neighbor soft-reconfig. */
@@ -3004,6 +3250,8 @@ ALIAS (no_neighbor_disable_connected_check,
        NEIGHBOR_ADDR_STR2
        "Enforce EBGP neighbors perform multihop\n")
 
+#ifndef ENABLE_OVSDB
+
 DEFUN (neighbor_description,
        neighbor_description_cmd,
        NEIGHBOR_CMD2 "description .LINE",
@@ -3058,6 +3306,8 @@ ALIAS (no_neighbor_description,
        NEIGHBOR_ADDR_STR2
        "Neighbor specific description\n"
        "Up to 80 characters describing this neighbor\n")
+
+#endif /* !ENABLE_OVSDB */
 
 /* Neighbor update-source. */
 static int
@@ -4154,6 +4404,8 @@ ALIAS (no_neighbor_maximum_prefix,
        "Restart bgp connection after limit is exceeded\n"
        "Restart interval in minutes")
 
+#ifndef ENABLE_OVSDB
+
 /* "neighbor allowas-in" */
 DEFUN (neighbor_allowas_in,
        neighbor_allowas_in_cmd,
@@ -4176,10 +4428,35 @@ DEFUN (neighbor_allowas_in,
     VTY_GET_INTEGER_RANGE ("AS number", allow_num, argv[1], 1, 10);
 
   ret = peer_allowas_in_set (peer, bgp_node_afi (vty), bgp_node_safi (vty),
-			     allow_num);
+                        allow_num);
 
   return log_bgp_error(ret);
 }
+
+#endif /* !ENABLE_OVSDB */
+
+int
+daemon_neighbor_allow_as_in_cmd_execute (struct bgp *bgp,
+    char *peer_str, afi_t afi, safi_t safi, int64_t *allow_as_in)
+{
+    struct peer *peer;
+
+    peer= bgp_peer_and_group_lookup (bgp, peer_str);
+
+    if (!peer)
+        return CMD_WARNING;
+
+    if (allow_as_in) {
+        VLOG_DBG("neighbor %s set allowas number %ld\n", peer_str, *allow_as_in);
+        peer_allowas_in_set (peer, afi , safi,
+                 (int32_t)(*allow_as_in));
+        return 0;
+    } else {
+        return peer_allowas_in_unset(peer, afi, safi);
+    }
+}
+
+#ifndef ENABLE_OVSDB
 
 ALIAS (neighbor_allowas_in,
        neighbor_allowas_in_arg_cmd,
@@ -4208,6 +4485,8 @@ DEFUN (no_neighbor_allowas_in,
 
   return log_bgp_error(ret);
 }
+
+#endif /* !ENABLE_OVSDB */
 
 DEFUN (neighbor_ttl_security,
        neighbor_ttl_security_cmd,
@@ -9234,9 +9513,9 @@ bgp_vty_init (void)
   //install_element (BGP_NODE, &no_neighbor_remote_as_cmd);
 
   /* "neighbor peer-group" commands. */
-  install_element (BGP_NODE, &neighbor_peer_group_cmd);
-  install_element (BGP_NODE, &no_neighbor_peer_group_cmd);
-  install_element (BGP_NODE, &no_neighbor_peer_group_remote_as_cmd);
+  // install_element (BGP_NODE, &neighbor_peer_group_cmd);
+  // install_element (BGP_NODE, &no_neighbor_peer_group_cmd);
+  // install_element (BGP_NODE, &no_neighbor_peer_group_remote_as_cmd);
 
   /* "neighbor local-as" commands. */
   install_element (BGP_NODE, &neighbor_local_as_cmd);
@@ -9247,9 +9526,11 @@ bgp_vty_init (void)
   install_element (BGP_NODE, &no_neighbor_local_as_val2_cmd);
   install_element (BGP_NODE, &no_neighbor_local_as_val3_cmd);
 
+#ifndef ENABLE_OVSDB
   /* "neighbor password" commands. */
   install_element (BGP_NODE, &neighbor_password_cmd);
   install_element (BGP_NODE, &no_neighbor_password_cmd);
+#endif /* !ENABLE_OVSDB */
 
   /* "neighbor activate" commands. */
   install_element (BGP_NODE, &neighbor_activate_cmd);
@@ -9268,20 +9549,24 @@ bgp_vty_init (void)
   install_element (BGP_VPNV4_NODE, &no_neighbor_activate_cmd);
 
   /* "neighbor peer-group set" commands. */
+#ifndef ENABLE_OVSDB
   install_element (BGP_NODE, &neighbor_set_peer_group_cmd);
   install_element (BGP_IPV4_NODE, &neighbor_set_peer_group_cmd);
   install_element (BGP_IPV4M_NODE, &neighbor_set_peer_group_cmd);
   install_element (BGP_IPV6_NODE, &neighbor_set_peer_group_cmd);
   install_element (BGP_IPV6M_NODE, &neighbor_set_peer_group_cmd);
   install_element (BGP_VPNV4_NODE, &neighbor_set_peer_group_cmd);
+#endif /* !ENABLE_OVSDB */
 
   /* "no neighbor peer-group unset" commands. */
+#if 0
   install_element (BGP_NODE, &no_neighbor_set_peer_group_cmd);
   install_element (BGP_IPV4_NODE, &no_neighbor_set_peer_group_cmd);
   install_element (BGP_IPV4M_NODE, &no_neighbor_set_peer_group_cmd);
   install_element (BGP_IPV6_NODE, &no_neighbor_set_peer_group_cmd);
   install_element (BGP_IPV6M_NODE, &no_neighbor_set_peer_group_cmd);
   install_element (BGP_VPNV4_NODE, &no_neighbor_set_peer_group_cmd);
+#endif
 
   /* "neighbor softreconfiguration inbound" commands.*/
   install_element (BGP_NODE, &neighbor_soft_reconfiguration_cmd);
@@ -9454,19 +9739,6 @@ bgp_vty_init (void)
   install_element (BGP_VPNV4_NODE, &neighbor_nexthop_self_cmd);
   install_element (BGP_VPNV4_NODE, &no_neighbor_nexthop_self_cmd);
 
-  /* "neighbor remove-private-AS" commands. */
-  install_element (BGP_NODE, &neighbor_remove_private_as_cmd);
-  install_element (BGP_NODE, &no_neighbor_remove_private_as_cmd);
-  install_element (BGP_IPV4_NODE, &neighbor_remove_private_as_cmd);
-  install_element (BGP_IPV4_NODE, &no_neighbor_remove_private_as_cmd);
-  install_element (BGP_IPV4M_NODE, &neighbor_remove_private_as_cmd);
-  install_element (BGP_IPV4M_NODE, &no_neighbor_remove_private_as_cmd);
-  install_element (BGP_IPV6_NODE, &neighbor_remove_private_as_cmd);
-  install_element (BGP_IPV6_NODE, &no_neighbor_remove_private_as_cmd);
-  install_element (BGP_IPV6M_NODE, &neighbor_remove_private_as_cmd);
-  install_element (BGP_IPV6M_NODE, &no_neighbor_remove_private_as_cmd);
-  install_element (BGP_VPNV4_NODE, &neighbor_remove_private_as_cmd);
-  install_element (BGP_VPNV4_NODE, &no_neighbor_remove_private_as_cmd);
 
   /* "neighbor send-community" commands.*/
   install_element (BGP_NODE, &neighbor_send_community_cmd);
@@ -9525,11 +9797,11 @@ bgp_vty_init (void)
   /* "neighbor passive" commands. */
   install_element (BGP_NODE, &neighbor_passive_cmd);
   install_element (BGP_NODE, &no_neighbor_passive_cmd);
-
+#ifndef ENABLE_OVSDB
   /* "neighbor shutdown" commands. */
   install_element (BGP_NODE, &neighbor_shutdown_cmd);
   install_element (BGP_NODE, &no_neighbor_shutdown_cmd);
-
+#endif /* !ENABLE_OVSDB */
   /* Deprecated "neighbor capability route-refresh" commands.*/
   install_element (BGP_NODE, &neighbor_capability_route_refresh_cmd);
   install_element (BGP_NODE, &no_neighbor_capability_route_refresh_cmd);
@@ -9565,12 +9837,12 @@ bgp_vty_init (void)
   install_element (BGP_NODE, &no_neighbor_disable_connected_check_cmd);
   install_element (BGP_NODE, &neighbor_enforce_multihop_cmd);
   install_element (BGP_NODE, &no_neighbor_enforce_multihop_cmd);
-
+#ifndef ENABLE_OVSDB
   /* "neighbor description" commands. */
   install_element (BGP_NODE, &neighbor_description_cmd);
   install_element (BGP_NODE, &no_neighbor_description_cmd);
   install_element (BGP_NODE, &no_neighbor_description_val_cmd);
-
+#endif /* !ENABLE_OVSDB */
   /* "neighbor update-source" commands. "*/
   install_element (BGP_NODE, &neighbor_update_source_cmd);
   install_element (BGP_NODE, &no_neighbor_update_source_cmd);
@@ -9614,11 +9886,11 @@ bgp_vty_init (void)
   /* "neighbor strict-capability-match" commands. */
   install_element (BGP_NODE, &neighbor_strict_capability_cmd);
   install_element (BGP_NODE, &no_neighbor_strict_capability_cmd);
-
+#ifndef ENABLE_OVSDB
   /* "neighbor timers" commands. */
   install_element (BGP_NODE, &neighbor_timers_cmd);
   install_element (BGP_NODE, &no_neighbor_timers_cmd);
-
+#endif /* !ENABLE_OVSDB */
   /* "neighbor timers connect" commands. */
   install_element (BGP_NODE, &neighbor_timers_connect_cmd);
   install_element (BGP_NODE, &no_neighbor_timers_connect_cmd);
@@ -9785,7 +10057,7 @@ bgp_vty_init (void)
   install_element (BGP_VPNV4_NODE, &no_neighbor_maximum_prefix_threshold_warning_cmd);
   install_element (BGP_VPNV4_NODE, &no_neighbor_maximum_prefix_restart_cmd);
   install_element (BGP_VPNV4_NODE, &no_neighbor_maximum_prefix_threshold_restart_cmd);
-
+#ifndef ENABLE_OVSDB
   /* "neighbor allowas-in" */
   install_element (BGP_NODE, &neighbor_allowas_in_cmd);
   install_element (BGP_NODE, &neighbor_allowas_in_arg_cmd);
@@ -9805,7 +10077,7 @@ bgp_vty_init (void)
   install_element (BGP_VPNV4_NODE, &neighbor_allowas_in_cmd);
   install_element (BGP_VPNV4_NODE, &neighbor_allowas_in_arg_cmd);
   install_element (BGP_VPNV4_NODE, &no_neighbor_allowas_in_cmd);
-
+#endif /* ENABLE_OVSDB */
   /* address-family commands. */
   install_element (BGP_NODE, &address_family_ipv4_cmd);
   install_element (BGP_NODE, &address_family_ipv4_safi_cmd);

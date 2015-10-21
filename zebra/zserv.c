@@ -1,5 +1,6 @@
 /* Zebra daemon server routine.
  * Copyright (C) 1997, 98, 99 Kunihiro Ishiguro
+ * (c) Copyright 2015 Hewlett Packard Enterprise Development LP
  *
  * This file is part of GNU Zebra.
  *
@@ -835,6 +836,9 @@ zread_ipv4_add (struct zserv *client, u_short length)
   message = stream_getc (s); 
   safi = stream_getw (s);
   rib->uptime = time (NULL);
+#ifdef ENABLE_OVSDB
+  rib->ovsdb_route_row_ptr = NULL;
+#endif
 
   /* IPv4 prefix. */
   memset (&p, 0, sizeof (struct prefix_ipv4));
@@ -890,6 +894,12 @@ zread_ipv4_add (struct zserv *client, u_short length)
     
   /* Table */
   rib->table=zebrad.rtm_table_default;
+
+  /* OVSDB route pointer */
+#ifdef ENABLE_OVSDB
+  rib->ovsdb_route_row_ptr = NULL;
+#endif
+
   rib_add_ipv4_multipath (&p, rib, safi);
   return 0;
 }

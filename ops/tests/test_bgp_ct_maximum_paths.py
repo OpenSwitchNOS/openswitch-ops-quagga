@@ -21,6 +21,7 @@ import pytest
 from opsvsiutils.vtyshutils import *
 from opsvsiutils.bgpconfig import *
 
+
 BGP1_ASN = "1"
 BGP1_ROUTER_ID = "9.0.0.1"
 BGP1_NETWORK = "11.0.0.0"
@@ -153,8 +154,9 @@ BGP_CONFIGS = [BGP1_CONFIG, BGP2_CONFIG, BGP3_CONFIG, BGP4_CONFIG, BGP5_CONFIG]
 
 NUM_OF_SWITCHES = 5
 NUM_HOSTS_PER_SWITCH = 0
-
 SWITCH_PREFIX = "s"
+MAX_RTE_VERI_ATTEMPTS = 300
+CMD_ROUTE = "show rib"
 
 
 class myTopo(Topo):
@@ -319,8 +321,10 @@ class bgpTest(OpsVsiTest):
         self.verify_bgp_routes()
 
     def get_number_of_paths_for_bgp1(self):
+
         switch = self.net.switches[0]
-        route_info = SwitchVtyshUtils.vtysh_cmd(switch, "sh ip route")
+
+        route_info = SwitchVtyshUtils.vtysh_cmd(switch, CMD_ROUTE)
 
         multipath_count = 0
         if BGP1_NEIGHBOR1 in route_info:
@@ -334,39 +338,133 @@ class bgpTest(OpsVsiTest):
 
         return multipath_count
 
+    def verify_num_ip_route_exist_in_bgp1(self, no_route):
+        info("\n### Verifying %d route(s) in %s ###\n" % (no_route, CMD_ROUTE))
+        for i in range(MAX_RTE_VERI_ATTEMPTS):
+            multipath_count = self.get_number_of_paths_for_bgp1()
+            info("\n### Route Verification attempts %d ###\n" % i)
+            if multipath_count == no_route:
+                break
+            time.sleep(1)
+        return (multipath_count == no_route)
+
+    def configure_ecmp(self, ecmp_status):
+        s1 = self.net.switches[0]
+        cfg_array = []
+        if ecmp_status:
+            cfg_array.append("no ip ecmp disable")
+            SwitchVtyshUtils.vtysh_cfg_cmd(s1, cfg_array)
+            info("### Verifying ecmp is enabled ###\n")
+            exists = SwitchVtyshUtils.verify_cfg_exist(s1, ["ip ecmp disable"])
+            assert not exists, "Fail to enable ip ecmp\n"
+            info("### Successfully enable ecmp ###\n")
+        else:
+            cfg_array.append("ip ecmp disable")
+            SwitchVtyshUtils.vtysh_cfg_cmd(s1, cfg_array)
+            info("### Verifying ecmp disabled ###\n")
+            exists = SwitchVtyshUtils.verify_cfg_exist(s1, ["ip ecmp disable"])
+            assert exists, "Fail to disable ip ecmp\n"
+            info("### Successfully disable ip ecmp ###\n")
+
+    def configure_maxpaths(self, max_path):
+        s1 = self.net.switches[0]
+        cfg_array = []
+        cfg_array.append("router bgp %s" % BGP1_ASN)
+        if(max_path):
+            cfg_array.append("maximum-paths 5")
+            SwitchVtyshUtils.vtysh_cfg_cmd(s1, cfg_array)
+            info("### Verifying maximum-paths configured ###\n")
+            exists = SwitchVtyshUtils.verify_cfg_exist(s1, ["maximum-paths 5"])
+            assert exists, "Fail to set maximum-paths to 5\n"
+            info("### Successfully set maximum-paths to 5 ###\n")
+        else:
+            cfg_array.append("no maximum-paths")
+            SwitchVtyshUtils.vtysh_cfg_cmd(s1, cfg_array)
+            info("### Verifying maximum-paths config removed ###\n")
+            exists = SwitchVtyshUtils.verify_cfg_exist(s1, ["maximum-paths"])
+            assert not exists, "Maximum-paths was not unconfigured"
+            info("### Successfully set no maximum-paths ###\n")
+
     def verify_max_paths(self):
         info("\n########## Verifying maximum-paths ##########\n")
         self.verify_bgp_routes()
-
+        info("### Setting maximum-paths to 5 ###\n")
+        self.configure_maxpaths(True)
         info("### Verifying that there are 3 multipaths ###\n")
-        multipath_count = self.get_number_of_paths_for_bgp1()
-        assert multipath_count == 3, "Not all paths were detected."
-
+        ret = self.verify_num_ip_route_exist_in_bgp1(3)
+        assert ret, "Not all paths were detected."
         info("### All paths were detected ###\n")
 
     def verify_no_max_paths(self):
         info("\n########## Verifying no maximum-paths ##########\n")
         info("### Setting no maximum-paths ###\n")
-        switch = self.net.switches[0]
-        cfg_array = []
-        cfg_array.append("router bgp %s" % BGP1_ASN)
-        cfg_array.append("no maximum-paths")
-
-        SwitchVtyshUtils.vtysh_cfg_cmd(switch, cfg_array)
-
-        info("### Verifying maximum-paths config removed ###\n")
-        exists = SwitchVtyshUtils.verify_cfg_exist(switch, ["maximum-paths"])
-        assert not exists, "Maximum-paths was not unconfigured"
-
-        info("### Maximum-paths removed successfully from config ###\n")
-
-        self.reconfigure_neighbors()
-
+        self.configure_maxpaths(False)
         info("### Verifying that there is only 1 path ###\n")
-        multipath_count = self.get_number_of_paths_for_bgp1()
-        assert multipath_count == 1, "More than one paths are present."
-
+        ret = self.verify_num_ip_route_exist_in_bgp1(1)
+        assert ret, "More than one paths are present."
         info("### Only 1 path detected after unsetting max-paths ###\n")
+
+    def verify_maxpaths_ecmp_disabled(self,
+                                      change_maxpaths=False,
+                                      maxpaths_enabled=False):
+        # Disable ecmp_config
+        # Configure maxpath if applied
+        # Verify global route if it has only 1 route
+        info("\n########## Verifying maxpaths - ecmp disabled ##########\n")
+        self.configure_ecmp(False)
+        if change_maxpaths:
+            if maxpaths_enabled:
+                self.configure_maxpaths(True)
+            else:
+                self.configure_maxpaths(False)
+
+        info("\n### Verify if ip route show 1 paths ###\n")
+        ret = self.verify_num_ip_route_exist_in_bgp1(1)
+        assert ret, "More than one paths are present."
+        info("### Only 1 path detected after ecmp disabled ###\n")
+
+    def verify_maxpaths_ecmp_enabled(self,
+                                     change_maxpaths=False,
+                                     maxpaths_enabled=False):
+        # Enable ecmp_config, configure maxpath if applies
+        # If not, it expects maxpath set previously
+        # Verify global route if it has 3 routes (>1 route) if maxpath is set
+        # and 1 route if maxpath is unset
+
+        info("\n########## Verifying maxpaths - ecmp enabled ##########\n")
+        self.configure_ecmp(True)
+        no_paths = 3
+        if change_maxpaths:
+            if maxpaths_enabled:
+                self.configure_maxpaths(True)
+            else:
+                self.configure_maxpaths(False)
+                no_paths = 1
+        info("\n### Verify if ip route show %s paths ###\n" % no_paths)
+        ret = self.verify_num_ip_route_exist_in_bgp1(no_paths)
+        assert ret, "Not all paths were detected."
+        info("\n### %s paths detected after ecmp enabled ###\n" % no_paths)
+
+    def config_maxpath_only(self):
+        # Ecmp is previously enabled (by default),
+        # Configure only maxpath to 5 expecting > 1 paths advertised
+        # Configure no maxpath, expecting 1 path advertised
+        self.verify_max_paths()
+        self.verify_no_max_paths()
+        self.verify_max_paths()
+
+    def config_ecmp_only(self):
+        # Disable ecmp, expecting 1 path advertised
+        # Enable ecmp, expecting > 1 paths advertised
+        self.verify_maxpaths_ecmp_disabled()
+        self.verify_maxpaths_ecmp_enabled()
+
+    def config_both_ecmp_maxpath(self):
+        # Test if changing both maxpath and ecmp causing any issue
+        # Disable ecmp, set max paths = 5, expecting 1 path advertised
+        # Enable ecmp, set no maxpath, expecting 1 path advertised
+        self.verify_maxpaths_ecmp_disabled(True, True)
+        self.verify_maxpaths_ecmp_enabled(True, False)
 
 
 class Test_bgpd_maximum_paths:
@@ -388,13 +486,28 @@ class Test_bgpd_maximum_paths:
     def teardown_method(self, method):
         pass
 
+    def run_test(self):
+        info("\n########## Changing maxpaths only ##########\n")
+        self.test_var.config_maxpath_only()
+        info("\n########## Changing ecmp only ##########\n")
+        self.test_var.config_ecmp_only()
+        info("\n########## Changing ecmp and maxpaths ##########\n")
+        self.test_var.config_both_ecmp_maxpath()
+
+    def loop_test(self, loop=1):
+        #Running loop to test stability and catching intermitten issue if any
+        for i in range(loop):
+            info("\n########## Test Loop %d ##########\n" % i)
+            self.run_test()
+
     def __del__(self):
         del self.test_var
 
     def test_bgp_full(self):
+
         self.test_var.configure_switch_ips()
         self.test_var.verify_bgp_running()
         self.test_var.configure_bgp()
         self.test_var.verify_configs()
-        self.test_var.verify_max_paths()
-        self.test_var.verify_no_max_paths()
+        # Enter value > 1 in the loop_test to test stability
+        self.loop_test(1)

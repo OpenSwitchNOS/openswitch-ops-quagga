@@ -51,5 +51,5 @@ void bgp_ovsdb_exit(void);
 
 /* Initialize and integrate the ovs poll loop with the daemon */
 void bgp_ovsdb_init_poll_loop (struct bgp_master *bm);
-
+boolean  get_global_ecmp_status(void);
 #endif /* BGP_OVSDB_IF_H */

@@ -66,9 +66,6 @@ void zebra_ovsdb_exit (void);
 /* Initialize and integrate the ovs poll loop with the daemon */
 void zebra_ovsdb_init_poll_loop (struct zebra_t *zebrad);
 
-int zebra_update_selected_route_to_db (struct route_node *rn,
-                                       struct rib *route,
-                                       int action);
 void zebra_delete_route_nexthop_port_from_db (struct rib *route,
                                               char* port_name);
 void zebra_delete_route_nexthop_addr_from_db (struct rib *route,
@@ -81,6 +78,10 @@ void zebra_update_selected_nh (struct route_node *rn,
                                char* port_name,
                                char* nh_addr,
                                int if_selected);
+void zebra_update_selected_route_nexthops_to_db (
+                                            struct route_node *rn,
+                                            struct rib *route,
+                                            int action);
 extern int zebra_create_txn (void);
 extern int zebra_finish_txn (void);
 

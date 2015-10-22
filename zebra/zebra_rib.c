@@ -1405,8 +1405,9 @@ rib_process (struct route_node *rn)
           if (rib != fib)
             {
               if (IS_ZEBRA_DEBUG_RIB)
-		rnode_debug (rn, "rn %p, removing rib %p", rn, rib);
-	      rib_unlink (rn, rib);
+                rnode_debug (rn, "rn %p, removing rib %p", rn, rib);
+
+              rib_unlink (rn, rib);
             }
           else
             del = rib;
@@ -1481,12 +1482,13 @@ rib_process (struct route_node *rn)
   if (select && select == fib)
     {
       if (IS_ZEBRA_DEBUG_RIB)
-	rnode_debug (rn, "Updating existing route, select %p, fib %p",
-		     select, fib);
+        rnode_debug (rn, "Updating existing route, select %p, fib %p",
+                     select, fib);
+
       if (CHECK_FLAG (select->flags, ZEBRA_FLAG_CHANGED))
         {
           if (info->safi == SAFI_UNICAST)
-	    zfpm_trigger_update (rn, "updating existing route");
+            zfpm_trigger_update (rn, "updating existing route");
 
           VLOG_DBG("In process_rib delete existing route");
           redistribute_delete (&rn->p, select);
@@ -1499,20 +1501,21 @@ rib_process (struct route_node *rn)
           VLOG_DBG("In process_rib install in kernel");
           if (! RIB_SYSTEM_ROUTE (select))
             rib_install_kernel (rn, select);
+
           redistribute_add (&rn->p, select);
 #ifdef ENABLE_OVSDB
           if (CHECK_FLAG (select->flags, ZEBRA_FLAG_CHANGED))
-	    {
+            {
               /*
                * nexthop_active_update will update the rib flags
                * and set it to ZEBRA_FLAG_CHANGED if any NH was updated.
                * If this happens, the route needs to be updated in the DB
                */
-              zebra_update_selected_route_to_db(rn, select,
-                                                ZEBRA_RT_UNINSTALL);
-              zebra_update_selected_route_to_db(rn, select,
-                                                ZEBRA_RT_INSTALL);
-	    }
+              zebra_update_selected_route_nexthops_to_db(rn, select,
+                                                         ZEBRA_NH_UNINSTALL);
+              zebra_update_selected_route_nexthops_to_db(rn, select,
+                                                         ZEBRA_NH_INSTALL);
+            }
 #endif
         }
       else if (! RIB_SYSTEM_ROUTE (select))
@@ -1526,19 +1529,20 @@ rib_process (struct route_node *rn)
 
           for (ALL_NEXTHOPS_RO(select->nexthop, nexthop, tnexthop, recursing))
             if (CHECK_FLAG (nexthop->flags, NEXTHOP_FLAG_FIB))
-            {
-              VLOG_DBG("In process_rib route already installed");
-              installed = 1;
-              break;
-            }
+              {
+                VLOG_DBG("In process_rib route already installed");
+                installed = 1;
+                break;
+              }
+
           if (! installed)
-	    {
-	      rib_install_kernel (rn, select);
+            {
+              rib_install_kernel (rn, select);
 #ifdef ENABLE_OVSDB
-	      zebra_update_selected_route_to_db(rn, select,
-                                                ZEBRA_RT_INSTALL);
+              zebra_update_selected_route_nexthops_to_db(rn, select,
+                                                         ZEBRA_NH_INSTALL);
 #endif
-	    }
+            }
         }
       goto end;
     }
@@ -1551,20 +1555,23 @@ rib_process (struct route_node *rn)
     {
       VLOG_DBG("In process_rib Removing existing route");
       if (IS_ZEBRA_DEBUG_RIB)
-	rnode_debug (rn, "Removing existing route, fib %p", fib);
+       rnode_debug (rn, "Removing existing route, fib %p", fib);
 
       if (info->safi == SAFI_UNICAST)
         zfpm_trigger_update (rn, "removing existing route");
 
       redistribute_delete (&rn->p, fib);
+
       if (! RIB_SYSTEM_ROUTE (fib))
         {
           rib_uninstall_kernel (rn, fib);
 #ifdef ENABLE_OVSDB
-          zebra_update_selected_route_to_db(rn, fib,
-                                            ZEBRA_RT_UNINSTALL);
+          if (!CHECK_FLAG (fib->status, RIB_ENTRY_REMOVED))
+            zebra_update_selected_route_nexthops_to_db(rn, fib,
+                                                       ZEBRA_NH_UNINSTALL);
 #endif
-	}
+        }
+
       UNSET_FLAG (fib->flags, ZEBRA_FLAG_SELECTED);
 
       /* Set real nexthop. */
@@ -1578,7 +1585,7 @@ rib_process (struct route_node *rn)
   if (select)
     {
       if (IS_ZEBRA_DEBUG_RIB)
-	rnode_debug (rn, "Adding route, select %p", select);
+        rnode_debug (rn, "Adding route, select %p", select);
 
       if (info->safi == SAFI_UNICAST)
         zfpm_trigger_update (rn, "new route selected");
@@ -1589,12 +1596,13 @@ rib_process (struct route_node *rn)
       VLOG_DBG("In process_rib Adding to kernel");
       if (! RIB_SYSTEM_ROUTE (select))
         {
-	  rib_install_kernel (rn, select);
+          rib_install_kernel (rn, select);
 #ifdef ENABLE_OVSDB
-	  zebra_update_selected_route_to_db(rn, select,
-                                            ZEBRA_RT_INSTALL);
+          zebra_update_selected_route_nexthops_to_db(rn, select,
+                                                     ZEBRA_NH_INSTALL);
 #endif
         }
+
       SET_FLAG (select->flags, ZEBRA_FLAG_SELECTED);
       redistribute_add (&rn->p, select);
     }
@@ -1605,6 +1613,7 @@ rib_process (struct route_node *rn)
       VLOG_DBG("Deleting fib");
       if (IS_ZEBRA_DEBUG_RIB)
         rnode_debug (rn, "Deleting fib %p, rn %p", del, rn);
+
       rib_unlink (rn, del);
     }
 

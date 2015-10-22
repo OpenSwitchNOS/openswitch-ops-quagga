@@ -379,35 +379,39 @@ zebra_if_port_is_l3 (struct zebra_l3_port* port)
 static bool
 zebra_if_ovsrec_port_is_l3 (const struct ovsrec_port* port)
 {
+
+  const struct ovsrec_vrf *vrf_row = NULL;
+  const struct ovsrec_port *port_row = NULL;
+  size_t port_index;
+  bool if_ovsrec_port_is_l3 = false;
+
   if (!port)
     return(false);
 
-  /*
-   * Check if there are any primary IP/IPv6 addresses
-   * on the OVSDB port
-   */
-  if (port->ip4_address || port->ip6_address)
-    return(true);
+  OVSREC_VRF_FOR_EACH (vrf_row, idl)
+    {
+      if (vrf_row)
+        {
+          for (port_index = 0; port_index < vrf_row->n_ports; ++port_index)
+           {
+             if (port->name && vrf_row->ports[port_index] &&
+                 vrf_row->ports[port_index]->name &&
+                 (strcmp((const char*)port->name,
+                         (const char*)vrf_row->ports[port_index]->name) == 0))
+               {
+                 VLOG_DBG("Found a match for port %s in vrf %s",
+                          port->name, vrf_row->name);
+                 if_ovsrec_port_is_l3 = true;
+                 break;
+               }
+           }
 
-  /*
-   * Check if there are any secondary IP addresses
-   * on the OVSDB port
-   */
-  if (port->n_ip4_address_secondary)
-    return(true);
+          if (if_ovsrec_port_is_l3)
+            break;
+        }
+    }
 
-  /*
-   * Check if there are any secondary IPv6 addresses
-   * on the OVSDB port
-   */
-  if (port->n_ip6_address_secondary)
-    return(true);
-
-  /*
-   * If there are no primary or secondary IP/IPv6
-   * addresses on the the port, then OVSDB port is L2.
-   */
-  return(false);
+  return(if_ovsrec_port_is_l3);
 }
 
 /*
@@ -1830,8 +1834,8 @@ zebra_nh_port_active_in_cached_l3_ports_hash (char* port_name)
       return(false);
     }
 
-  VLOG_DBG("Found a valid L3 port structure for port %s",
-           port_name);
+  VLOG_DBG("Found a valid L3 port structure for port %s state %s",
+           port_name, l3_port->if_active ? "up":"down");
 
   return(l3_port->if_active);
 }
@@ -2288,6 +2292,11 @@ ovsdb_init (const char *db_path)
   ovsdb_idl_add_table(idl, &ovsrec_table_interface);
   ovsdb_idl_add_column(idl, &ovsrec_interface_col_name);
   ovsdb_idl_add_column(idl, &ovsrec_interface_col_admin_state);
+
+  /* Register for the vrf table to find the if the port is L2/L# */
+  ovsdb_idl_add_table(idl, &ovsrec_table_vrf);
+  ovsdb_idl_add_column(idl, &ovsrec_vrf_col_name);
+  ovsdb_idl_add_column(idl, &ovsrec_vrf_col_ports);
 
   /*
    * Intialize the local L3 port hash.
@@ -3067,40 +3076,6 @@ zebra_handle_static_route_change (const struct ovsrec_route *route)
           else
             static_add_ipv4_safi(safi, &p, ifname ? NULL : &gate, ifname,
                                  flag, distance, 0, (void*) route);
-          if (ifname)
-            {
-              /*
-               * If the port is not active, then mark the next-hop as
-               * unselected in the OVSDB.
-               */
-              if (!zebra_nh_port_active_in_cached_l3_ports_hash((char*)ifname))
-                {
-                  VLOG_DBG("Mark the next-hop port %s of the "
-                            "route as unselected in OVSDB", ifname);
-                  if_selected = false;
-                  ovsrec_nexthop_set_selected(nexthop, &if_selected, 1);
-                  zebra_txn_updates = true;
-                }
-            }
-
-          if (nexthop->ip_address)
-            {
-              /*
-               * If the port having the next-hop address is not active,
-               * then mark the next-hop as  unselected in the OVSDB.
-               */
-              if (!zebra_nh_addr_active_in_cached_l3_ports_hash(
-                      nexthop->ip_address,
-                      (ipv6_addr_type == true) ? AFI_IP6 : AFI_IP))
-                {
-                  VLOG_DBG("Mark the next-hop addr %s of the "
-                            "route as unselected in OVSDB",
-                            nexthop->ip_address);
-                  if_selected = false;
-                  ovsrec_nexthop_set_selected(nexthop, &if_selected, 1);
-                  zebra_txn_updates = true;
-                }
-            }
         }
     }
 }
@@ -3858,6 +3833,169 @@ void zebra_delete_route_nexthop_port_from_db (struct rib *route,
     }
 }
 
+/* Update the selected column in the route row in OVSDB
+ */
+static int
+zebra_ovs_update_selected_route (const struct ovsrec_route *ovs_route,
+                                 bool *selected)
+{
+  if (ovs_route)
+    {
+      /*
+       * Found the route entry. Update the selected column.
+       * ECMP: Update only if it is different.
+       */
+      VLOG_DBG("Updating selected flag for route %s", ovs_route->prefix);
+      if ( (ovs_route->selected != NULL) &&
+          (ovs_route->selected[0] == *selected) )
+        {
+          VLOG_DBG("No change in selected flag previous %s and new %s",
+                    ovs_route->selected[0] ? "true" : "false",
+                    *selected ? "true" : "false");
+          return 0;
+        }
+
+      /*
+       * Update the selected bit, and mark it to commit into DB.
+       */
+      ovsrec_route_set_selected(ovs_route, selected, 1);
+      zebra_txn_updates = true;
+      VLOG_DBG("Route update successful");
+
+    }
+  return 0;
+}
+
+/*
+ * When zebra is ready to update the kernel with the selected route,
+ * update the DB with the same information. This function will take care
+ * of updating the DB
+ */
+static int
+zebra_update_selected_route_to_db (struct route_node *rn, struct rib *route,
+                                   int action)
+{
+  char prefix_str[256];
+  const struct ovsrec_route *ovs_route = NULL;
+  bool selected = (action == ZEBRA_RT_INSTALL) ? true:false;
+  struct prefix *p = NULL;
+  rib_table_info_t *info = NULL;
+
+  /*
+   * Fetch the rib entry from the DB and update the selected field based
+   * on action:
+   * action == ZEBRA_RT_INSTALL => selected = 1
+   * action == ZEBRA_RT_UNINSTALL => selected = 0
+   *
+   * If the 'route' has a valid 'ovsdb_route_row_ptr' pointer,
+   * then reference the 'ovsrec_route' structure directly from
+   * 'ovsdb_route_row_ptr' pointer. Otherwise iterate through the
+   * OVSDB route to find out the relevant 'ovsrec_route' structure. We
+   * need to investigate more on how to set the route selected bit
+   * in cases when zebra adds/update/deletes the route from the kernel.
+   */
+  if (route->ovsdb_route_row_ptr)
+    {
+      ovs_route = (struct ovsrec_route *)(route->ovsdb_route_row_ptr);
+
+      VLOG_DBG("Cached OVSDB Route Entry: Prefix %s family %s "
+               "from %s priv %p for setting selected to %s", ovs_route->prefix,
+               ovs_route->address_family, ovs_route->from,
+               ovs_route->protocol_private,
+               selected ? "true" : "false");
+    }
+  else
+    {
+      p = &rn->p;
+      info = rib_table_info(rn->table);
+      memset(prefix_str, 0, sizeof(prefix_str));
+      prefix2str(p, prefix_str, sizeof(prefix_str));
+
+      VLOG_DBG("Prefix %s Family %d\n",prefix_str, PREFIX_FAMILY(p));
+
+      switch (PREFIX_FAMILY (p))
+        {
+	case AF_INET:
+
+	  VLOG_DBG("Walk the OVSDB route DB to find the relevant row for"
+		   " prefix %s\n", prefix_str);
+
+	  OVSREC_ROUTE_FOR_EACH (ovs_route, idl)
+	    {
+	      /*
+	       * TODO: Need to add support to check vrf
+	       */
+	      VLOG_DBG("DB Entry: Prefix %s family %s from %s",
+		       ovs_route->prefix, ovs_route->address_family,
+		       ovs_route->from);
+
+	      if (!strcmp(ovs_route->address_family,
+			  OVSREC_ROUTE_ADDRESS_FAMILY_IPV4))
+		{
+		  if (!strcmp(ovs_route->prefix, prefix_str))
+		    {
+		      if (route->type ==
+			  ovsdb_proto_to_zebra_proto(ovs_route->from))
+			{
+			  if (info->safi ==
+			      ovsdb_safi_to_zebra_safi(
+					ovs_route->sub_address_family))
+			    break;
+			}
+		    }
+		}
+	    }
+	  break;
+#ifdef HAVE_IPV6
+	case AF_INET6:
+
+          VLOG_DBG("Walk the OVSDB route DB to find the relevant row for"
+		   " prefix %s\n", prefix_str);
+
+          OVSREC_ROUTE_FOR_EACH (ovs_route, idl)
+	    {
+	      /*
+	       * TODO: Need to add support to check vrf
+	       */
+	      VLOG_DBG("DB Entry: Prefix %s family %s from %s",
+		       ovs_route->prefix, ovs_route->address_family,
+		       ovs_route->from);
+
+	      if (!strcmp(ovs_route->address_family,
+				  OVSREC_ROUTE_ADDRESS_FAMILY_IPV6))
+		{
+		  if (!strcmp(ovs_route->prefix, prefix_str))
+		    {
+		      if (route->type ==
+			      ovsdb_proto_to_zebra_proto(ovs_route->from))
+			{
+			  if (info->safi ==
+			      ovsdb_safi_to_zebra_safi(
+					ovs_route->sub_address_family))
+			    break;
+			}
+		    }
+		}
+	    }
+          break;
+#endif
+          default:
+          /* Unsupported protocol family! */
+          VLOG_ERR("Unsupported protocol in route update");
+          return 0;
+	}
+    }
+
+  if (ovs_route)
+    {
+        VLOG_DBG("Updating the selected flag for the non-private routes. "
+                 "Setting selected %s for prefix %s",
+                 selected ? "true":"false", ovs_route->prefix);
+        zebra_ovs_update_selected_route(ovs_route, &selected);
+    }
+  return 0;
+}
+
 /*
  * This function takes a zebra rn, zebra rib entry, the next-hop
  * port or IP/IPv6 address and the selected bit. The function then
@@ -4008,7 +4146,7 @@ void zebra_update_selected_nh (struct route_node *rn, struct rib *route,
                * we should mark the route as unselected as no next-hops
                * that are selected.
                */
-              if (number_of_selected_nh == 1)
+              if (!number_of_selected_nh)
                 {
                   VLOG_DBG("The route has no active next-hops. "
                            "Unset the selected bit on the route.");
@@ -4024,157 +4162,281 @@ void zebra_update_selected_nh (struct route_node *rn, struct rib *route,
     }
 }
 
-/* Update the selected column in the route row in OVSDB
- */
-static int
-zebra_ovs_update_selected_route (const struct ovsrec_route *ovs_route,
-                                 bool *selected)
-{
-  if (ovs_route)
-    {
-      /*
-       * Found the route entry. Update the selected column.
-       * ECMP: Update only if it is different.
-       */
-      VLOG_DBG("Updating selected flag for route %s", ovs_route->prefix);
-      if ( (ovs_route->selected != NULL) &&
-          (ovs_route->selected[0] == *selected) )
-        {
-          VLOG_DBG("No change in selected flag previous %s and new %s",
-                    ovs_route->selected[0] ? "true" : "false",
-                    *selected ? "true" : "false");
-          return 0;
-        }
-
-      /*
-       * Update the selected bit, and mark it to commit into DB.
-       */
-      ovsrec_route_set_selected(ovs_route, selected, 1);
-      zebra_txn_updates = true;
-      VLOG_DBG("Route update successful");
-
-    }
-  return 0;
-}
-
 /*
- * When zebra is ready to update the kernel with the selected route,
- * update the DB with the same information. This function will take care
- * of updating the DB
+ * This function sets the selected flag on the route and next-hops
+ * based on the 'action' variable. The OVSDB route entry is references
+ * from the 'rib' data structure from zebra. This function should not
+ * br called in cases when there are route entry deletions in the
+ * OVSDB route table. The OVSDB route table entry is garbage collected
+ * and hence the related pointer should not be referenced.
  */
-int
-zebra_update_selected_route_to_db (struct route_node *rn, struct rib *route,
-                                   int action)
+void
+zebra_update_selected_route_nexthops_to_db (struct route_node *rn,
+                                            struct rib *route,
+                                            int action)
 {
   char prefix_str[256];
   const struct ovsrec_route *ovs_route = NULL;
-  bool selected = (action == ZEBRA_RT_INSTALL) ? true:false;
+  bool selected = (action == ZEBRA_NH_INSTALL) ? true:false;
   struct prefix *p = NULL;
   rib_table_info_t *info = NULL;
+  struct nexthop *nexthop;
+  char nexthop_str[256];
 
-  /*
-   * Fetch the rib entry from the DB and update the selected field based
-   * on action:
-   * action == ZEBRA_RT_INSTALL => selected = 1
-   * action == ZEBRA_RT_UNINSTALL => selected = 0
-   *
-   * TODO: If the 'route' has a valid 'ovsdb_route_row_ptr' pointer,
-   * then reference the 'ovsrec_route' structure directly from
-   * 'ovsdb_route_row_ptr' pointer. Otherwise iterate through the
-   * OVSDB route to find out the relevant 'ovsrec_route' structure. We
-   * need to investigate more on how to set the route selected bit
-   * in cases when zebra adds/update/deletes the route from the kernel.
-   */
+  if (!rn)
     {
+      VLOG_DBG("The route node is NULL");
+      return;
+    }
 
-      p = &rn->p;
-      info = rib_table_info(rn->table);
-      memset(prefix_str, 0, sizeof(prefix_str));
-      prefix2str(p, prefix_str, sizeof(prefix_str));
+  if (!route)
+    {
+      VLOG_DBG("The route rib entry is NULL");
+      return;
+    }
 
-      VLOG_DBG("Prefix %s Family %d\n",prefix_str, PREFIX_FAMILY(p));
+  p = &rn->p;
+  info = rib_table_info(rn->table);
+  memset(prefix_str, 0, sizeof(prefix_str));
+  prefix2str(p, prefix_str, sizeof(prefix_str));
 
-      switch (PREFIX_FAMILY (p))
-        {
-	case AF_INET:
+  VLOG_DBG("Prefix %s Family %d selected = %s\n",prefix_str, PREFIX_FAMILY(p),
+           selected ? "true":"false");
 
-	  VLOG_DBG("Walk the OVSDB route DB to find the relevant row for"
-		   " prefix %s\n", prefix_str);
+  switch (PREFIX_FAMILY (p))
+    {
+      /*
+       * Case when the address family is IPv4.
+       */
+	  case AF_INET:
 
-	  OVSREC_ROUTE_FOR_EACH (ovs_route, idl)
-	    {
-	      /*
-	       * TODO: Need to add support to check vrf
-	       */
-	      VLOG_DBG("DB Entry: Prefix %s family %s from %s",
-		       ovs_route->prefix, ovs_route->address_family,
-		       ovs_route->from);
+        /*
+         * Walk all the next-hops of the 'rib' entry and set/un-set
+         * the selected flag on the next-hop.
+         */
+        nexthop = route->nexthop;
+        while (nexthop)
+          {
+            memset(nexthop_str, 0, sizeof(nexthop_str));
+            switch (nexthop->type)
+              {
+                /*
+                 * Case when the next-hop is of IP address.
+                 */
+                case NEXTHOP_TYPE_IPV4:
+                  if (inet_ntop(AF_INET, &nexthop->gate.ipv4,
+                                nexthop_str, sizeof(nexthop_str)))
+                    {
+                      /*
+                       * If the next-hop should be marked as selected, then
+                       * check whether the next-hop address is active or not.
+                       */
+                      if (action == ZEBRA_NH_INSTALL)
+                        {
+                          /*
+                           * If the next-hop address is not active, then mark
+                           * the next-hop as unselected in OVSDB. If the next-hop
+                           * address is active, then mark the next-hop and route
+                           * selected.
+                           */
+                          if (!zebra_nh_addr_active_in_cached_l3_ports_hash(
+                                                         nexthop_str, AFI_IP))
+                            {
+                              zebra_update_selected_nh(rn, route, NULL, nexthop_str,
+                                                       ZEBRA_NH_UNINSTALL);
+                            }
+                          else
+                            {
+                              zebra_update_selected_nh(rn, route, NULL, nexthop_str,
+                                                       ZEBRA_NH_INSTALL);
+                            }
+                        }
+                      else
+                        {
+                          /*
+                           * In case, the next-hop is to be marked as unselected,
+                           * then mark the next-hop and route as unselected in
+                           * OVSDB roue table.
+                           */
+                          zebra_update_selected_nh(rn, route, NULL,
+                                                 nexthop_str, ZEBRA_NH_UNINSTALL);
+                        }
+                    }
+                  break;
 
-	      if (!strcmp(ovs_route->address_family,
-			  OVSREC_ROUTE_ADDRESS_FAMILY_IPV4))
-		{
-		  if (!strcmp(ovs_route->prefix, prefix_str))
-		    {
-		      if (route->type ==
-			  ovsdb_proto_to_zebra_proto(ovs_route->from))
-			{
-			  if (info->safi ==
-			      ovsdb_safi_to_zebra_safi(
-					ovs_route->sub_address_family))
-			    break;
-			}
-		    }
-		}
-	    }
-	  break;
+                /*
+                 * Case when the next-hop is of port type.
+                 */
+                case NEXTHOP_TYPE_IFNAME:
+
+                  /*
+                   * If the next-hop should be marked as selected, then
+                   * check whether the next-hop port is active or not.
+                   */
+                  if (action == ZEBRA_NH_INSTALL)
+                    {
+                      /*
+                       * If the next-hop port is not active, then mark
+                       * the next-hop as unselected in OVSDB. If the next-hop
+                       * port is active, then mark the next-hop and route
+                       * selected.
+                       */
+                      if (!zebra_nh_port_active_in_cached_l3_ports_hash(
+                                                              nexthop->ifname))
+                        {
+                          zebra_update_selected_nh(rn, route, nexthop->ifname,
+                                                   NULL, ZEBRA_NH_UNINSTALL);
+                        }
+                      else
+                        {
+                          zebra_update_selected_nh(rn, route, nexthop->ifname,
+                                                   NULL, ZEBRA_NH_INSTALL);
+                        }
+                    }
+                  else
+                    {
+                      /*
+                       * In case, the next-hop is to be marked as unselected,
+                       * then mark the next-hop and route as unselected in
+                       * OVSDB roue table.
+                       */
+                      zebra_update_selected_nh(rn, route, nexthop->ifname,
+                                               NULL, ZEBRA_NH_UNINSTALL);
+                    }
+                  break;
+
+                /*
+                 * Case when the next-hop type is unregnizable.
+                 */
+                default:
+                  VLOG_ERR("Unregnizable next-hop");
+                  break;
+              }
+
+            nexthop = nexthop->next;
+          }
+        break;
+
 #ifdef HAVE_IPV6
-	case AF_INET6:
+      /*
+       * Case when the address family is IPv6.
+       */
+	  case AF_INET6:
 
-          VLOG_DBG("Walk the OVSDB route DB to find the relevant row for"
-		   " prefix %s\n", prefix_str);
+        /*
+         * Walk all the next-hops of the 'rib' entry and set/un-set
+         * the selected flag on the next-hop.
+         */
+        nexthop = route->nexthop;
+        while (nexthop)
+          {
+            switch (nexthop->type)
+              {
+                /*
+                 * Case when the next-hop is of IPv6 address.
+                 */
+                case NEXTHOP_TYPE_IPV6:
+                  if (inet_ntop(AF_INET6, &nexthop->gate.ipv6,
+                                nexthop_str, sizeof(nexthop_str)))
+                    {
+                      /*
+                       * If the next-hop should be marked as selected, then
+                       * check whether the next-hop address is active or not.
+                       */
+                      if (action == ZEBRA_NH_INSTALL)
+                        {
+                          /*
+                           * If the next-hop address is not active, then mark
+                           * the next-hop as unselected in OVSDB. If the next-hop
+                           * address is active, then mark the next-hop and route
+                           * selected.
+                           */
+                          if (!zebra_nh_addr_active_in_cached_l3_ports_hash(
+                                                         nexthop_str, AFI_IP6))
+                            {
+                              zebra_update_selected_nh(rn, route, NULL, nexthop_str,
+                                                       ZEBRA_NH_UNINSTALL);
+                            }
+                          else
+                            {
+                              zebra_update_selected_nh(rn, route, NULL, nexthop_str,
+                                                       ZEBRA_NH_INSTALL);
+                            }
+                        }
+                      else
+                        {
+                          /*
+                           * In case, the next-hop is to be marked as unselected,
+                           * then mark the next-hop and route as unselected in
+                           * OVSDB roue table.
+                           */
+                          zebra_update_selected_nh(rn, route, NULL,
+                                                   nexthop_str, ZEBRA_NH_UNINSTALL);
+                        }
+                    }
+                  break;
 
-          OVSREC_ROUTE_FOR_EACH (ovs_route, idl)
-	    {
-	      /*
-	       * TODO: Need to add support to check vrf
-	       */
-	      VLOG_DBG("DB Entry: Prefix %s family %s from %s",
-		       ovs_route->prefix, ovs_route->address_family,
-		       ovs_route->from);
+                /*
+                 * Case when the next-hop is of port type.
+                 */
+                case NEXTHOP_TYPE_IFNAME:
 
-	      if (!strcmp(ovs_route->address_family,
-				  OVSREC_ROUTE_ADDRESS_FAMILY_IPV6))
-		{
-		  if (!strcmp(ovs_route->prefix, prefix_str))
-		    {
-		      if (route->type ==
-			      ovsdb_proto_to_zebra_proto(ovs_route->from))
-			{
-			  if (info->safi ==
-			      ovsdb_safi_to_zebra_safi(
-					ovs_route->sub_address_family))
-			    break;
-			}
-		    }
-		}
-	    }
-          break;
+                  /*
+                   * If the next-hop should be marked as selected, then
+                   * check whether the next-hop port is active or not.
+                   */
+                  if (action == ZEBRA_NH_INSTALL)
+                    {
+                      /*
+                       * If the next-hop port is not active, then mark
+                       * the next-hop as unselected in OVSDB. If the next-hop
+                       * port is active, then mark the next-hop and route
+                       * selected.
+                       */
+                      if (!zebra_nh_port_active_in_cached_l3_ports_hash(
+                                                              nexthop->ifname))
+                        {
+                          zebra_update_selected_nh(rn, route, nexthop->ifname,
+                                                   NULL, ZEBRA_NH_UNINSTALL);
+                        }
+                      else
+                        {
+                          zebra_update_selected_nh(rn, route, nexthop->ifname,
+                                                   NULL, ZEBRA_NH_INSTALL);
+                        }
+                    }
+                  else
+                    {
+                      /*
+                       * In case, the next-hop is to be marked as unselected,
+                       * then mark the next-hop and route as unselected in
+                       * OVSDB roue table.
+                       */
+                       zebra_update_selected_nh(rn, route, nexthop->ifname,
+                                                NULL, ZEBRA_NH_UNINSTALL);
+                    }
+                  break;
+
+                /*
+                 * Case when the next-hop type is unregnizable.
+                 */
+                default:
+                  VLOG_ERR("Unregnizable next-hop");
+                  break;
+              }
+
+            nexthop = nexthop->next;
+          }
+        break;
 #endif
-          default:
-          /* Unsupported protocol family! */
-          VLOG_ERR("Unsupported protocol in route update");
-          return 0;
-	}
-    }
 
-  if (ovs_route)
-    {
-        VLOG_DBG("Updating the selected flag for the non-private routes. "
-                 "Setting selected %s for prefix %s",
-                 selected ? "true":"false", ovs_route->prefix);
-        zebra_ovs_update_selected_route(ovs_route, &selected);
+      /*
+       * Case when the address family is unregnizable.
+       */
+      default:
+        VLOG_ERR("Unregnizable address family");
+        break;
     }
-  return 0;
 }
 
 /*

@@ -1,5 +1,6 @@
 /* BGP-4, BGP-4+ daemon program
    Copyright (C) 1996, 97, 98, 99, 2000 Kunihiro Ishiguro
+   Copyright (C) 2015 Hewlett Packard Enterprise Development LP
 
 This file is part of GNU Zebra.
 
@@ -188,6 +189,18 @@ bgp_router_id_set (struct bgp *bgp, struct in_addr *id)
   return 0;
 }
 
+/* Unset BGP Router identifier */
+int
+bgp_router_id_unset (struct bgp *bgp, struct in_addr *id)
+{
+  int ret;
+
+  bgp->router_id_static.s_addr = 0;
+  bgp_router_id_set (bgp, &router_id_zebra);
+
+  return CMD_SUCCESS;
+}
+
 /* BGP's cluster-id control. */
 int
 bgp_cluster_id_set (struct bgp *bgp, struct in_addr *cluster_id)
@@ -335,6 +348,9 @@ bgp_confederation_id_set (struct bgp *bgp, as_t as)
 		BGP_EVENT_ADD (peer, BGP_Stop);
 	    }
 	}
+#ifdef ENABLE_OVSDB
+        bgp_daemon_ovsdb_neighbor_update(peer, false);
+#endif /* ENABLE_OVSDB */
     }
   return 0;
 }
@@ -363,6 +379,9 @@ bgp_confederation_id_unset (struct bgp *bgp)
 
 	  else
 	    BGP_EVENT_ADD (peer, BGP_Stop);
+#ifdef ENABLE_OVSDB
+	  bgp_daemon_ovsdb_neighbor_update(peer, false);
+#endif /* ENABLE_OVSDB */
 	}
     }
   return 0;
@@ -426,6 +445,9 @@ bgp_confederation_peers_add (struct bgp *bgp, as_t as)
                }
 	      else
 	        BGP_EVENT_ADD (peer, BGP_Stop);
+#ifdef ENABLE_OVSDB
+              bgp_daemon_ovsdb_neighbor_update(peer, false);
+#endif /* ENABLE_OVSDB */
 	    }
 	}
     }
@@ -482,6 +504,9 @@ bgp_confederation_peers_remove (struct bgp *bgp, as_t as)
                }
 	      else
 		BGP_EVENT_ADD (peer, BGP_Stop);
+#ifdef ENABLE_OVSDB
+	      bgp_daemon_ovsdb_neighbor_update(peer, false);
+#endif /* ENABLE_OVSDB */
 	    }
 	}
     }
@@ -889,6 +914,11 @@ peer_create (union sockunion *su, struct bgp *bgp, as_t local_as,
   if (! active && peer_active (peer))
     bgp_timer_set (peer);
 
+#ifdef ENABLE_OVSDB
+  /* update daemon side data of neighbors in the database */
+  bgp_daemon_ovsdb_neighbor_update(peer, true);
+#endif /* ENABLE_OVSDB */
+
   return peer;
 }
 
@@ -968,6 +998,10 @@ peer_as_change (struct peer *peer, as_t as)
       UNSET_FLAG (peer->flags, PEER_FLAG_LOCAL_AS_NO_PREPEND);
       UNSET_FLAG (peer->flags, PEER_FLAG_LOCAL_AS_REPLACE_AS);
     }
+
+#ifdef ENABLE_OVSDB
+  bgp_daemon_ovsdb_neighbor_update(peer, false);
+#endif /* ENABLE_OVSDB */
 }
 
 /* If peer does not exist, create new one.  If peer already exists,
@@ -1662,6 +1696,10 @@ peer_group2peer_config_copy (struct peer_group *group, struct peer *peer,
       pfilter->usmap.name = NULL;
       pfilter->usmap.map = NULL;
     }
+
+#ifdef ENABLE_OVSDB
+  bgp_daemon_ovsdb_neighbor_update(peer, false);
+#endif /* ENABLE_OVSDB */
 } 
 
 /* Peer group's remote AS configuration.  */
@@ -2078,7 +2116,7 @@ bgp_get (struct bgp **bgp_val, as_t *as, const char *name)
     bgp = bgp_create (as, name);
 #ifndef ENABLE_OVSDB
   bgp_router_id_set(bgp, &router_id_zebra);
-#endif
+#endif /* ENABLE_OVSDB */
    *bgp_val = bgp;
 
   /* Create BGP server socket, if first instance.  */
@@ -3167,6 +3205,9 @@ int
 peer_port_set (struct peer *peer, u_int16_t port)
 {
   peer->port = port;
+#ifdef ENABLE_OVSDB
+  bgp_daemon_ovsdb_neighbor_update(peer, false);
+#endif /* ENABLE_OVSDB */
   return 0;
 }
 
@@ -3174,6 +3215,9 @@ int
 peer_port_unset (struct peer *peer)
 {
   peer->port = BGP_PORT_DEFAULT;
+#ifdef ENABLE_OVSDB
+  bgp_daemon_ovsdb_neighbor_update(peer, false);
+#endif /* ENABLE_OVSDB */
   return 0;
 }
 
@@ -3187,6 +3231,10 @@ peer_weight_set (struct peer *peer, u_int16_t weight)
   SET_FLAG (peer->config, PEER_CONFIG_WEIGHT);
   peer->weight = weight;
 
+#ifdef ENABLE_OVSDB
+  bgp_daemon_ovsdb_neighbor_update(peer, false);
+#endif /* ENABLE_OVSDB */
+
   if (! CHECK_FLAG (peer->sflags, PEER_STATUS_GROUP))
     return 0;
 
@@ -3195,6 +3243,9 @@ peer_weight_set (struct peer *peer, u_int16_t weight)
   for (ALL_LIST_ELEMENTS (group->peer, node, nnode, peer))
     {
       peer->weight = group->conf->weight;
+#ifdef ENABLE_OVSDB
+      bgp_daemon_ovsdb_neighbor_update(peer, false);
+#endif /* ENABLE_OVSDB */
     }
   return 0;
 }
@@ -3211,6 +3262,10 @@ peer_weight_unset (struct peer *peer)
   else
     peer->weight = 0;
 
+#ifdef ENABLE_OVSDB
+  bgp_daemon_ovsdb_neighbor_update(peer, false);
+#endif /* ENABLE_OVSDB */
+
   UNSET_FLAG (peer->config, PEER_CONFIG_WEIGHT);
 
   if (! CHECK_FLAG (peer->sflags, PEER_STATUS_GROUP))
@@ -3221,6 +3276,9 @@ peer_weight_unset (struct peer *peer)
   for (ALL_LIST_ELEMENTS (group->peer, node, nnode, peer))
     {
       peer->weight = 0;
+#ifdef ENABLE_OVSDB
+      bgp_daemon_ovsdb_neighbor_update(peer, 0);
+#endif /* ENABLE_OVSDB */
     }
   return 0;
 }

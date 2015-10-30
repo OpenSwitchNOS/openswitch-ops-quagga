@@ -1,6 +1,7 @@
 /* BGP-4 Finite State Machine   
    From RFC1771 [A Border Gateway Protocol 4 (BGP-4)]
    Copyright (C) 1996, 97, 98 Kunihiro Ishiguro
+   Copyright (C) 2015 Hewlett Packard Enterprise Development LP
 
 This file is part of GNU Zebra.
 
@@ -417,6 +418,10 @@ bgp_fsm_change_status (struct peer *peer, int status)
 		peer->host,
 		LOOKUP (bgp_status_msg, peer->ostatus),
 		LOOKUP (bgp_status_msg, peer->status));
+
+#ifdef ENABLE_OVSDB
+  bgp_daemon_ovsdb_neighbor_update(peer, false);
+#endif // ENABLE_OVSDB
 }
 
 /* Flush the event queue and ensure the peer is shut down */
@@ -494,6 +499,11 @@ bgp_stop (struct peer *peer)
 
       /* Reset peer synctime */
       peer->synctime = 0;
+
+#ifdef ENABLE_OVSDB
+      bgp_daemon_ovsdb_neighbor_statistics_update(true, NULL, peer);
+#endif // ENABLE_OVSDB
+
     }
 
   /* Stop read and write threads when exists. */
@@ -898,6 +908,10 @@ bgp_establish (struct peer *peer)
 
   BGP_TIMER_ON (peer->t_routeadv, bgp_routeadv_timer, 1);
 
+#ifdef ENABLE_OVSDB
+  bgp_daemon_ovsdb_neighbor_statistics_update(true, NULL, peer);
+#endif // ENABLE_OVSDB
+
   return 0;
 }
 
@@ -907,6 +921,10 @@ bgp_fsm_keepalive (struct peer *peer)
 {
   /* peer count update */
   peer->keepalive_in++;
+
+#ifdef ENABLE_OVSDB
+  bgp_daemon_ovsdb_neighbor_statistics_update(true, NULL, peer);
+#endif // ENABLE_OVSDB
 
   BGP_TIMER_OFF (peer->t_holdtime);
   return 0;

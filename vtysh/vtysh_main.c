@@ -19,9 +19,7 @@
  * 02111-1307, USA.  
  */
 
-#ifndef ENABLE_OVSDB
 #include <zebra.h>
-#endif
 
 #include <sys/un.h>
 #include <setjmp.h>
@@ -38,11 +36,6 @@
 
 #include "vtysh/vtysh.h"
 #include "vtysh/vtysh_user.h"
-#ifdef ENABLE_OVSDB
-#include "openvswitch/vlog.h"
-#include "vtysh/vtysh_ovsdb_if.h"
-#include "vtysh_ovsdb_config.h"
-#endif
 
 /* VTY shell program name. */
 char *progname;
@@ -171,10 +164,6 @@ struct option longopts[] =
   { "dryrun",		    no_argument,	     NULL, 'C'},
   { "help",                 no_argument,             NULL, 'h'},
   { "noerror",		    no_argument,	     NULL, 'n'},
-#ifdef ENABLE_OVSDB
-  { "mininet-test",         no_argument,             NULL, 't'},
-  { "verbose",              required_argument,       NULL, 'v'},
-#endif
   { 0 }
 };
 
@@ -248,11 +237,7 @@ main (int argc, char **argv, char **env)
   /* Option handling. */
   while (1)
     {
-#ifdef ENABLE_OVSDB
-      opt = getopt_long (argc, argv, "be:c:d:nEhCtv:", longopts, 0);
-#else
       opt = getopt_long (argc, argv, "be:c:d:nEhC", longopts, 0);
-#endif
     
       if (opt == EOF)
 	break;
@@ -293,24 +278,11 @@ main (int argc, char **argv, char **env)
 	case 'h':
 	  usage (0);
 	  break;
-#ifdef ENABLE_OVSDB
-        case 't':
-          enable_mininet_test_prompt = 1;
-          break;
-        case 'v':
-          vlog_set_verbosity(optarg);
-          break;
-#endif
 	default:
 	  usage (1);
 	  break;
 	}
     }
-
-#ifdef ENABLE_OVSDB
-  vtysh_ovsdb_init_clients();
-  vtysh_ovsdb_init(argc, argv);
-#endif
 
   /* Initialize user input buffer. */
   line_read = NULL;
@@ -333,7 +305,6 @@ main (int argc, char **argv, char **env)
   /* Start execution only if not in dry-run mode */
   if(dryrun)
     return(0);
-
   /* Ignore error messages */
   if (no_error)
     freopen("/dev/null", "w", stdout);
@@ -341,14 +312,12 @@ main (int argc, char **argv, char **env)
   /* Make sure we pass authentication before proceeding. */
   vtysh_auth ();
 
-#ifndef ENABLE_OVSDB
   /* Do not connect until we have passed authentication. */
   if (vtysh_connect_all (daemon_name) <= 0)
     {
       fprintf(stderr, "Exiting: failed to connect to any daemons.\n");
       exit(1);
     }
-#endif
 
   /* If eval mode. */
   if (cmd)
@@ -438,11 +407,6 @@ main (int argc, char **argv, char **env)
 
   history_truncate_file(history_file,1000);
   printf ("\n");
-
-#ifdef ENABLE_OVSDB
-  lib_vtysh_ovsdb_exit();
-  vtysh_ovsdb_exit();
-#endif
 
   /* Rest in peace. */
   exit (0);

@@ -28,7 +28,7 @@
 
 /* Setup zebra to connect with ovsdb and daemonize. This daemonize is used
  * over the daemonize in the main function to keep the behavior consistent
- * with the other daemons in the HALON system
+ * with the other daemons in the OpenSwitch system
  */
 void bgp_ovsdb_init(int argc, char *argv[]);
 
@@ -37,6 +37,19 @@ void bgp_ovsdb_init(int argc, char *argv[]);
  */
 void bgp_ovsdb_exit(void);
 
+/*
+** Original names are soo long.. exceeds 80 chars,
+** shorten them a bit
+*/
+#define ANY_NEW_ROW			OVSREC_IDL_ANY_TABLE_ROWS_INSERTED
+#define ANY_ROW_CHANGED			OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED
+#define ANY_ROW_DELETED			OVSREC_IDL_ANY_TABLE_ROWS_DELETED
+#define NEW_ROW				OVSREC_IDL_IS_ROW_INSERTED
+#define ROW_CHANGED			OVSREC_IDL_IS_ROW_MODIFIED
+/* row is not used now but may be in the future */
+#define COL_CHANGED(row, col, s)	OVSREC_IDL_IS_COLUMN_MODIFIED(col, s)
+
 /* Initialize and integrate the ovs poll loop with the daemon */
 void bgp_ovsdb_init_poll_loop (struct bgp_master *bm);
+
 #endif /* BGP_OVSDB_IF_H */

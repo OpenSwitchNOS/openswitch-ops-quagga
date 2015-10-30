@@ -1,5 +1,6 @@
 /* BGP network related fucntions
    Copyright (C) 1999 Kunihiro Ishiguro
+   Copyright (C) 2015 Hewlett Packard Enterprise Development LP
 
 This file is part of GNU Zebra.
 
@@ -262,6 +263,9 @@ bgp_accept (struct thread *thread)
     /* Make peer's address string. */
     sockunion2str (&su, buf, SU_ADDRSTRLEN);
     peer->host = XSTRDUP (MTYPE_BGP_PEER_HOST, buf);
+#ifdef ENABLE_OVSDB
+    bgp_daemon_ovsdb_neighbor_update(peer, false);
+#endif // ENABLE_OVSDB
   }
 
   BGP_EVENT_ADD (peer, TCP_connection_open);

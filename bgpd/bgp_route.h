@@ -1,22 +1,25 @@
 /* BGP routing information base
-   Copyright (C) 1996, 97, 98, 2000 Kunihiro Ishiguro
-
-This file is part of GNU Zebra.
-
-GNU Zebra is free software; you can redistribute it and/or modify it
-under the terms of the GNU General Public License as published by the
-Free Software Foundation; either version 2, or (at your option) any
-later version.
-
-GNU Zebra is distributed in the hope that it will be useful, but
-WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with GNU Zebra; see the file COPYING.  If not, write to the Free
-Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
-02111-1307, USA.  */
+ *
+ * Copyright (C) 1996, 97, 98, 2000 Kunihiro Ishiguro
+ * (c) Copyright 2015 Hewlett Packard Enterprise Development LP
+ *
+ * This file is part of GNU Zebra.
+ *
+ * GNU Zebra is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2, or (at your option) any
+ * later version.
+ *
+ * GNU Zebra is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with GNU Zebra; see the file COPYING.  If not, write to the Free
+ * Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
+ * 02111-1307, USA.
+ */
 
 #ifndef _QUAGGA_BGP_ROUTE_H
 #define _QUAGGA_BGP_ROUTE_H
@@ -187,7 +190,7 @@ extern void bgp_clear_stale_route (struct peer *, afi_t, safi_t);
 
 extern struct bgp_info *bgp_info_lock (struct bgp_info *);
 extern struct bgp_info *bgp_info_unlock (struct bgp_info *);
-extern void bgp_info_add (struct bgp_node *rn, struct bgp_info *ri);
+extern void bgp_info_add (struct bgp_node *rn, struct bgp_info *ri, safi_t safi);
 extern void bgp_info_delete (struct bgp_node *rn, struct bgp_info *ri);
 extern struct bgp_info_extra *bgp_info_extra_get (struct bgp_info *);
 extern void bgp_info_set_flag (struct bgp_node *, struct bgp_info *, u_int32_t);
@@ -211,6 +214,9 @@ extern void bgp_static_withdraw (struct bgp *, struct prefix *, afi_t, safi_t);
 
 extern int bgp_static_set (struct vty *vty, struct bgp *bgp, const char *ip_str,
 			   afi_t afi, safi_t safi, const char *rmap, int backdoor);
+
+extern int bgp_static_unset (struct vty *vty, struct bgp *bgp, const char *ip_str,
+                  afi_t afi, safi_t safi);
                      
 extern int bgp_static_set_vpnv4 (struct vty *vty, const char *, 
                           const char *, const char *);

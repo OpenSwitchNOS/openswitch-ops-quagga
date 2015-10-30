@@ -1,5 +1,6 @@
 /* Zebra VTY functions
  * Copyright (C) 2002 Kunihiro Ishiguro
+ * (c) Copyright 2015 Hewlett Packard Enterprise Development LP
  *
  * This file is part of GNU Zebra.
  *
@@ -86,7 +87,11 @@ zebra_static_ipv4_safi (struct vty *vty, safi_t safi, int add_cmd,
           return CMD_WARNING;
         }
       if (add_cmd)
+#ifdef ENABLE_OVSDB
+        static_add_ipv4_safi (safi, &p, NULL, NULL, ZEBRA_FLAG_BLACKHOLE, distance, 0, NULL);
+#else
         static_add_ipv4_safi (safi, &p, NULL, NULL, ZEBRA_FLAG_BLACKHOLE, distance, 0);
+#endif
       else
         static_delete_ipv4_safi (safi, &p, NULL, NULL, distance, 0);
       return CMD_SUCCESS;
@@ -112,7 +117,11 @@ zebra_static_ipv4_safi (struct vty *vty, safi_t safi, int add_cmd,
   if (gate_str == NULL)
   {
     if (add_cmd)
+#ifdef ENABLE_OVSDB
+      static_add_ipv4_safi (safi, &p, NULL, NULL, flag, distance, 0, NULL);
+#else
       static_add_ipv4_safi (safi, &p, NULL, NULL, flag, distance, 0);
+#endif
     else
       static_delete_ipv4_safi (safi, &p, NULL, NULL, distance, 0);
 
@@ -128,7 +137,11 @@ zebra_static_ipv4_safi (struct vty *vty, safi_t safi, int add_cmd,
     ifname = gate_str;
 
   if (add_cmd)
+#ifdef ENABLE_OVSDB
+    static_add_ipv4_safi (safi, &p, ifname ? NULL : &gate, ifname, flag, distance, 0, NULL);
+#else
     static_add_ipv4_safi (safi, &p, ifname ? NULL : &gate, ifname, flag, distance, 0);
+#endif
   else
     static_delete_ipv4_safi (safi, &p, ifname ? NULL : &gate, ifname, distance, 0);
 
@@ -1568,7 +1581,11 @@ static_ipv6_func (struct vty *vty, int add_cmd, const char *dest_str,
     }
 
   if (add_cmd)
+#ifdef ENABLE_OVSDB
+    static_add_ipv6 (&p, type, gate, ifname, flag, distance, table, NULL);
+#else
     static_add_ipv6 (&p, type, gate, ifname, flag, distance, table);
+#endif
   else
     static_delete_ipv6 (&p, type, gate, ifname, distance, table);
 

@@ -44,7 +44,7 @@
 #include "vswitch-idl.h"
 #include "coverage.h"
 
-#include "openhalon-idl.h"
+#include "openswitch-idl.h"
 
 #include "ospfd/ospf_ovsdb_if.h"
 

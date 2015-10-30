@@ -44,7 +44,7 @@
 #include "vswitch-idl.h"
 #include "coverage.h"
 
-#include "openhalon-idl.h"
+#include "openswitch-idl.h"
 
 #include "ospfd/ospf_ovsdb_if.h"
 
@@ -92,21 +92,21 @@ ovsdb_init (const char *db_path)
     /* Initialize IDL through a new connection to the dB. */
     idl = ovsdb_idl_create(db_path, &ovsrec_idl_class, false, true);
     idl_seqno = ovsdb_idl_get_seqno(idl);
-    ovsdb_idl_set_lock(idl, "halon_ospf");
+    ovsdb_idl_set_lock(idl, "OpenSwitch_ospf");
     ovsdb_idl_verify_write_only(idl);
 
     /* Cache OpenVSwitch table */
     ovsdb_idl_add_table(idl, &ovsrec_table_open_vswitch);
 
-    ovsdb_idl_add_column(idl, &ovsrec_open_vswitch_col_cur_cfg);
-    ovsdb_idl_add_column(idl, &ovsrec_open_vswitch_col_hostname);
+    ovsdb_idl_add_column(idl, &ovsrec_system_col_cur_cfg);
+    ovsdb_idl_add_column(idl, &ovsrec_system_col_hostname);
 
     /* Register ovs-appctl commands for this daemon. */
     unixctl_command_register("ospfd/dump", "", 0, 0, ospf_unixctl_dump, NULL);
 }
 
 static void
-halon_ospf_exit(struct unixctl_conn *conn, int argc OVS_UNUSED,
+ops_ospf_exit(struct unixctl_conn *conn, int argc OVS_UNUSED,
                 const char *argv[] OVS_UNUSED, void *exiting_)
 {
     boolean *exiting = exiting_;
@@ -133,7 +133,7 @@ usage(void)
     exit(EXIT_SUCCESS);
 }
 
-/* HALON_TODO: Need to merge this parse function with the main parse function
+/* OPS_TODO: Need to merge this parse function with the main parse function
  * in ospf_main to avoid issues.
  */
 static char *
@@ -190,7 +190,7 @@ ospf_ovsdb_parse_options(int argc, char *argv[], char **unixctl_pathp)
 
 /* Setup ospf to connect with ovsdb and daemonize. This daemonize is used
  * over the daemonize in the main function to keep the behavior consistent
- * with the other daemons in the HALON system
+ * with the other daemons in the OpenSwitch system
  */
 void ospf_ovsdb_init (int argc, char *argv[])
 {
@@ -219,7 +219,7 @@ void ospf_ovsdb_init (int argc, char *argv[])
     }
 
     /* Register the ovs-appctl "exit" command for this daemon. */
-    unixctl_command_register("exit", "", 0, 0, halon_ospf_exit, &exiting);
+    unixctl_command_register("exit", "", 0, 0, ops_ospf_exit, &exiting);
 
    /* Create the IDL cache of the dB at ovsdb_sock. */
    ovsdb_init(ovsdb_sock);
@@ -251,14 +251,14 @@ ospf_ovs_clear_fds (void)
  */
 static inline void ospf_chk_for_system_configured(void)
 {
-    const struct ovsrec_open_vswitch *ovs_vsw = NULL;
+    const struct ovsrec_system *ovs_vsw = NULL;
 
     if (system_configured) {
         /* Nothing to do if we're already configured. */
         return;
     }
 
-    ovs_vsw = ovsrec_open_vswitch_first(idl);
+    ovs_vsw = ovsrec_system_first(idl);
 
     if (ovs_vsw && (ovs_vsw->cur_cfg > (int64_t) 0)) {
         system_configured = true;
@@ -279,9 +279,9 @@ ospf_set_hostname (char *hostname)
 static void
 ospf_apply_global_changes (void)
 {
-    const struct ovsrec_open_vswitch *ovs;
+    const struct ovsrec_system *ovs;
 
-    ovs = ovsrec_open_vswitch_first(idl);
+    ovs = ovsrec_system_first(idl);
     if (OVSREC_IDL_ANY_TABLE_ROWS_DELETED(ovs, idl_seqno)) {
         VLOG_WARN("First Row deleted from Open_vSwitch tbl\n");
         return;

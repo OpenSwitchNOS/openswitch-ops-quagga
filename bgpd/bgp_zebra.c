@@ -1,6 +1,6 @@
 /* zebra client
    Copyright (C) 1997, 98, 99 Kunihiro Ishiguro
-
+   Copyright (C) 2015 Hewlett Packard Enterprise Development LP
 This file is part of GNU Zebra.
 
 GNU Zebra is free software; you can redistribute it and/or modify it
@@ -663,6 +663,7 @@ bgp_nexthop_set (union sockunion *local, union sockunion *remote,
 void
 bgp_zebra_announce (struct prefix *p, struct bgp_info *info, struct bgp *bgp, safi_t safi)
 {
+#ifndef ENABLE_OVSDB
   int flags;
   u_char distance;
   struct peer *peer;
@@ -825,11 +826,16 @@ bgp_zebra_announce (struct prefix *p, struct bgp_info *info, struct bgp *bgp, sa
                        (struct prefix_ipv6 *) p, &api);
     }
 #endif /* HAVE_IPV6 */
+
+#else
+     bgp_ovsdb_announce_rib_entry(p, info, bgp, safi);
+#endif
 }
 
 void
 bgp_zebra_withdraw (struct prefix *p, struct bgp_info *info, safi_t safi)
 {
+#ifndef ENABLE_OVSDB
   int flags;
   struct peer *peer;
 
@@ -942,6 +948,9 @@ bgp_zebra_withdraw (struct prefix *p, struct bgp_info *info, safi_t safi)
                        (struct prefix_ipv6 *) p, &api);
     }
 #endif /* HAVE_IPV6 */
+#else
+  bgp_ovsdb_withdraw_rib_entry(p, info, info->peer->bgp, safi);
+#endif
 }
 
 /* Other routes redistribution into BGP. */

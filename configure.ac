@@ -115,7 +115,7 @@ dnl already, eg "-O2 -g" for gcc, "-g" for others
 dnl (Wall is gcc specific... have to make sure
 dnl  gcc is being used before setting it)
 dnl
-dnl Intel icc 8.0 also sets __GNUC__, 
+dnl Intel icc 8.0 also sets __GNUC__,
 dnl but doesn't support all these fancy -W options.
 dnl Intel compiler warnings we ignore:
 dnl 279: controlling expression is constant.
@@ -394,7 +394,7 @@ case "${enable_multipath}" in
     ;;
   "")
     ;;
-  *)           
+  *)
     AC_MSG_FAILURE([Please specify digit to enable multipath ARG])
     ;;
 esac
@@ -640,7 +640,7 @@ dnl	 [TODO] on Linux, and in [TODO] on Solaris.
 	 AC_CHECK_LIB(termcap, tputs, LIBREADLINE="$LIBREADLINE -ltermcap",
 	   [AC_CHECK_LIB(tinfo, tputs, LIBREADLINE="$LIBREADLINE -ltinfo",
 	     [AC_CHECK_LIB(curses, tputs, LIBREADLINE="$LIBREADLINE -lcurses",
-	       [AC_CHECK_LIB(ncurses, tputs, 
+	       [AC_CHECK_LIB(ncurses, tputs,
 	                     LIBREADLINE="$LIBREADLINE -lncurses")]
 	      )]
 	    )]
@@ -654,7 +654,7 @@ dnl	 [TODO] on Linux, and in [TODO] on Solaris.
 	 if test $ac_cv_header_readline_history_h = no;then
            AC_MSG_ERROR([readline is too old to have readline/history.h, please update to the latest readline library.])
 	 fi
-	 AC_CHECK_LIB(readline, rl_completion_matches, 
+	 AC_CHECK_LIB(readline, rl_completion_matches,
 	              LIBREADLINE="$LIBREADLINE",, "$LIBREADLINE")
          if test $ac_cv_lib_readline_rl_completion_matches = no; then
            AC_DEFINE(rl_completion_matches,completion_matches,Old readline)
@@ -789,7 +789,7 @@ AC_CHECK_FUNCS([dup2 ftruncate getcwd gethostbyname getpagesize gettimeofday \
 	uname fcntl])
 
 AC_CHECK_FUNCS(setproctitle, ,
-  [AC_CHECK_LIB(util, setproctitle, 
+  [AC_CHECK_LIB(util, setproctitle,
      [LIBS="$LIBS -lutil"
       AC_DEFINE(HAVE_SETPROCTITLE,, Have setproctitle)
      ]
@@ -969,9 +969,9 @@ AC_CHECK_HEADER([net/if.h],
     ])
     AC_CHECK_MEMBERS( [struct ifmediareq.ifm_status],
       AC_DEFINE(HAVE_BSD_LINK_DETECT,,[BSD link-detect]),
-      [], LINK_DETECT_INCLUDES)], 
+      [], LINK_DETECT_INCLUDES)],
     [],
-    QUAGGA_INCLUDES)], 
+    QUAGGA_INCLUDES)],
   [], QUAGGA_INCLUDES )
 
 dnl ---------------------------------------------------------------
@@ -988,7 +988,7 @@ dnl ------------------------
 dnl TCP_MD5SIG socket option
 dnl ------------------------
 
-AC_CHECK_HEADER([netinet/tcp.h], 
+AC_CHECK_HEADER([netinet/tcp.h],
    [m4_define([MD5_INCLUDES],
       QUAGGA_INCLUDES
       [#include <netinet/tcp.h>
@@ -1023,7 +1023,7 @@ else
 fi
 case $quagga_cv_ipforward_method in
   "/proc/net/snmp")  quagga_cv_ipforward_method="proc";;
-  "/dev/ip")         
+  "/dev/ip")
                      case "$host" in
                        *-freebsd*)    quagga_cv_ipforward_method="sysctl";;
                        *)             quagga_cv_ipforward_method="solaris";;
@@ -1296,7 +1296,7 @@ AC_CHECK_MEMBERS([struct sockaddr.sa_len,
 dnl ---------------------------
 dnl IRDP/pktinfo/icmphdr checks
 dnl ---------------------------
-AC_CHECK_TYPES([struct in_pktinfo], 
+AC_CHECK_TYPES([struct in_pktinfo],
  [AC_CHECK_TYPES([struct icmphdr],
    [if test "${enable_irdp}" != "no"; then
       AC_DEFINE(HAVE_IRDP,, IRDP)
@@ -1381,7 +1381,7 @@ if test "${enable_capabilities}" != "no"; then
     AC_CHECK_HEADERS(sys/capability.h)
   fi
   if test x"${ac_cv_header_sys_capability_h}" = x"yes"; then
-    AC_CHECK_LIB(cap, cap_init, 
+    AC_CHECK_LIB(cap, cap_init,
       [AC_DEFINE(HAVE_LCAPS,1,Capabilities)
        LIBCAP="-lcap"
        quagga_ac_lcaps="yes"]
@@ -1423,7 +1423,7 @@ AX_SYS_WEAK_ALIAS
 
 dnl ---------------------------
 dnl check for glibc 'backtrace'
-dnl --------------------------- 
+dnl ---------------------------
 if test x"${enable_backtrace}" != x"no" ; then
   backtrace_ok=no
   AC_CHECK_HEADER([execinfo.h], [
@@ -1528,10 +1528,10 @@ fi
 AC_MSG_RESULT(${quagga_statedir})
 AC_SUBST(quagga_statedir)
 
-AC_DEFINE_UNQUOTED(PATH_ZEBRA_PID, "$quagga_statedir/zebra.pid",zebra PID)
+AC_DEFINE_UNQUOTED(PATH_ZEBRA_PID, "$quagga_statedir/ops-zebra.pid",zebra PID)
 AC_DEFINE_UNQUOTED(PATH_RIPD_PID, "$quagga_statedir/ripd.pid",ripd PID)
 AC_DEFINE_UNQUOTED(PATH_RIPNGD_PID, "$quagga_statedir/ripngd.pid",ripngd PID)
-AC_DEFINE_UNQUOTED(PATH_BGPD_PID, "$quagga_statedir/bgpd.pid",bgpd PID)
+AC_DEFINE_UNQUOTED(PATH_BGPD_PID, "$quagga_statedir/ops-bgpd.pid",bgpd PID)
 AC_DEFINE_UNQUOTED(PATH_OSPFD_PID, "$quagga_statedir/ospfd.pid",ospfd PID)
 AC_DEFINE_UNQUOTED(PATH_OSPF6D_PID, "$quagga_statedir/ospf6d.pid",ospf6d PID)
 AC_DEFINE_UNQUOTED(PATH_BABELD_PID, "$quagga_statedir/babeld.pid",babeld PID)
@@ -1551,7 +1551,7 @@ AC_DEFINE_UNQUOTED(PIM_VTYSH_PATH, "$quagga_statedir/pimd.vty",pimd vty socket)
 AC_DEFINE_UNQUOTED(DAEMON_VTY_DIR, "$quagga_statedir",daemon vty directory)
 
 dnl -------------------------------
-dnl Quagga sources should always be 
+dnl Quagga sources should always be
 dnl current wrt interfaces. Dont
 dnl allow deprecated interfaces to
 dnl be exposed.
@@ -1569,7 +1569,7 @@ AC_CACHE_VAL(ac_cv_htonl_works,
 )
 AC_MSG_RESULT($ac_cv_htonl_works)
 
-AC_CONFIG_FILES([Makefile lib/Makefile zebra/Makefile ripd/Makefile 
+AC_CONFIG_FILES([Makefile lib/Makefile zebra/Makefile ripd/Makefile
 	  ripngd/Makefile bgpd/Makefile ospfd/Makefile watchquagga/Makefile
 	  ospf6d/Makefile isisd/Makefile babeld/Makefile vtysh/Makefile
 	  doc/Makefile ospfclient/Makefile tests/Makefile m4/Makefile
@@ -1578,7 +1578,7 @@ AC_CONFIG_FILES([Makefile lib/Makefile zebra/Makefile ripd/Makefile
 	  tests/libzebra.tests/Makefile
 	  redhat/Makefile
 	  pkgsrc/Makefile
-	  redhat/quagga.spec 
+	  redhat/quagga.spec
 	  lib/version.h
 	  doc/defines.texi
 	  isisd/topology/Makefile
@@ -1618,5 +1618,5 @@ if test x"$quagga_cv_gnu_make" = x"no"; then echo "
 Warning: The ${MAKE-make} programme detected, either in your path or
 via the MAKE variable, is not GNU Make. GNU make may be installed as
 gmake on some systems. and is required to complete a build of Quagga
-" > /dev/stderr 
+" > /dev/stderr
 fi

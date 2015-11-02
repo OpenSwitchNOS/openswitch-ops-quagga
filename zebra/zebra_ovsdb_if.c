@@ -28,6 +28,10 @@
 #include "thread.h"
 #include "memory.h"
 #include "zebra/zserv.h"
+#ifdef ENABLE_OVSDB
+#include "zebra/debug.h"
+#endif
+
 /* OVS headers */
 #include "config.h"
 #include "command-line.h"
@@ -48,6 +52,11 @@
 #include "openswitch-idl.h"
 
 #include "zebra/zebra_ovsdb_if.h"
+
+#ifdef ENABLE_OVSDB
+#define NUM_CHAR_CMP 6
+#define NUM_CHAR_UNSUPPORTED 20
+#endif
 
 /* Local structure to hold the master thread
  * and counters for read/write callbacks
@@ -2224,6 +2233,89 @@ zebra_unixctl_dump (struct unixctl_conn *conn, int argc OVS_UNUSED,
   unixctl_command_reply_error(conn, "Nothing to dump");
 }
 
+#ifdef ENABLE_OVSDB
+/* ovs appctl set debug level function for this daemon
+ * This is to know what level of zebra logging has
+ * been set.
+ */
+static void
+debug_parse_options(int argc, const char *argv[], char *return_status,
+                    struct unixctl_conn *conn)
+{
+  if (argc != 2) {
+    sprintf(return_status, "Wrong argument count - %d", argc);
+    return;
+  }
+
+  if (!strncmp("event", argv[1], NUM_CHAR_CMP)) {
+    zebra_debug_event = ZEBRA_DEBUG_EVENT;
+  } else if (!strncmp("packet", argv[1], NUM_CHAR_CMP)) {
+    zebra_debug_packet |= ZEBRA_DEBUG_PACKET;
+  } else if (!strncmp("send", argv[1], NUM_CHAR_CMP)) {
+    zebra_debug_packet |= ZEBRA_DEBUG_SEND;
+  } else if (!strncmp("recv", argv[1], NUM_CHAR_CMP)) {
+    zebra_debug_packet |= ZEBRA_DEBUG_RECV;
+  } else if (!strncmp("detail", argv[1], NUM_CHAR_CMP)) {
+    zebra_debug_packet |= ZEBRA_DEBUG_DETAIL;
+  } else if (!strncmp("kernel", argv[1], NUM_CHAR_CMP)) {
+    zebra_debug_kernel = ZEBRA_DEBUG_KERNEL;
+  } else if (!strncmp("rib", argv[1], NUM_CHAR_CMP)) {
+    zebra_debug_rib |= ZEBRA_DEBUG_RIB;
+  } else if (!strncmp("ribq", argv[1], NUM_CHAR_CMP)) {
+    zebra_debug_rib |= ZEBRA_DEBUG_RIB_Q;
+  } else if (!strncmp("fpm", argv[1], NUM_CHAR_CMP)) {
+    zebra_debug_fpm = ZEBRA_DEBUG_FPM;
+  } else if (!strncmp("all", argv[1], NUM_CHAR_CMP)) {
+    zebra_debug_event = ZEBRA_DEBUG_EVENT;
+    zebra_debug_packet = ZEBRA_DEBUG_PACKET | ZEBRA_DEBUG_SEND | \
+                         ZEBRA_DEBUG_RECV  | ZEBRA_DEBUG_DETAIL;
+    zebra_debug_kernel = ZEBRA_DEBUG_KERNEL;
+    zebra_debug_rib = ZEBRA_DEBUG_RIB | ZEBRA_DEBUG_RIB_Q;
+    zebra_debug_fpm = ZEBRA_DEBUG_FPM;
+  } else if (!strncmp("show", argv[1], NUM_CHAR_CMP)) {
+    if (zebra_debug_event == ZEBRA_DEBUG_EVENT)
+      sprintf(return_status + strlen(return_status), "event\n");
+    if (zebra_debug_kernel == ZEBRA_DEBUG_KERNEL)
+      sprintf(return_status + strlen(return_status), "kernel\n");
+    if (zebra_debug_fpm == ZEBRA_DEBUG_FPM)
+      sprintf(return_status + strlen(return_status), "fpm\n");
+    if ((zebra_debug_packet & ZEBRA_DEBUG_PACKET) == ZEBRA_DEBUG_PACKET)
+      sprintf(return_status + strlen(return_status), "packet\n");
+    if ((zebra_debug_packet & ZEBRA_DEBUG_SEND) == ZEBRA_DEBUG_SEND)
+      sprintf(return_status + strlen(return_status), "send\n");
+    if ((zebra_debug_packet & ZEBRA_DEBUG_RECV) == ZEBRA_DEBUG_RECV)
+      sprintf(return_status + strlen(return_status), "recv\n");
+    if ((zebra_debug_packet & ZEBRA_DEBUG_DETAIL) == ZEBRA_DEBUG_DETAIL)
+      sprintf(return_status + strlen(return_status), "detail\n");
+    if ((zebra_debug_rib & ZEBRA_DEBUG_RIB) == ZEBRA_DEBUG_RIB)
+      sprintf(return_status + strlen(return_status), "rib\n");
+    if ((zebra_debug_rib & ZEBRA_DEBUG_RIB_Q) == ZEBRA_DEBUG_RIB_Q)
+      sprintf(return_status + strlen(return_status), "ribq\n");
+  } else {
+    sprintf(return_status, "Unsupported argument - %s", argv[1]);
+  }
+
+  return;
+}
+
+static void
+zebra_unixctl_set_debug_level (struct unixctl_conn *conn, int argc OVS_UNUSED,
+                    const char *argv[] OVS_UNUSED, void *aux OVS_UNUSED)
+{
+  char return_status[200] = "";
+
+  debug_parse_options(argc, argv, return_status, conn);
+
+  if (!strncmp(return_status, "Unsupported argument", NUM_CHAR_UNSUPPORTED)) {
+    unixctl_command_reply_error(conn, return_status);
+  } else {
+    unixctl_command_reply(conn, return_status);
+  }
+
+  return;
+}
+#endif
+
 /* Create a connection to the OVSDB at db_path and create a dB cache
  * for this daemon. */
 static void
@@ -2296,6 +2388,11 @@ ovsdb_init (const char *db_path)
 
   /* Register ovs-appctl commands for this daemon. */
   unixctl_command_register("zebra/dump", "", 0, 0, zebra_unixctl_dump, NULL);
+#ifdef ENABLE_OVSDB
+  unixctl_command_register("zebra/debug", "event|packet|send|recv|detail|kernel"
+                           "|rib|ribq|fpm|all|show", 1, 1,
+                           zebra_unixctl_set_debug_level, NULL);
+#endif
 }
 
 /* This function is invoked on appctl exit command to stop the daemon

@@ -39,6 +39,10 @@ static int logfile_fd = -1;	/* Used in signal handler. */
 
 struct zlog *zlog_default = NULL;
 
+#ifdef ENABLE_OVSDB
+VLOG_DEFINE_THIS_MODULE(zebra_log);
+#endif
+
 const char *zlog_proto_names[] = 
 {
   "NONE",
@@ -151,6 +155,11 @@ time_print(FILE *fp, struct timestamp_control *ctl)
 static void
 vzlog (struct zlog *zl, int priority, const char *format, va_list args)
 {
+#ifdef ENABLE_OVSDB
+  if(!VLOG_IS_DBG_ENABLED())
+    return;
+#endif
+
   struct timestamp_control tsctl;
   tsctl.already_rendered = 0;
 
@@ -686,6 +695,9 @@ openzlog (const char *progname, zlog_proto_t protocol,
     zl->maxlvl[i] = ZLOG_DISABLED;
   zl->maxlvl[ZLOG_DEST_MONITOR] = LOG_DEBUG;
   zl->default_lvl = LOG_DEBUG;
+#ifdef ENABLE_OVSDB
+  zl->maxlvl[ZLOG_DEST_SYSLOG] = LOG_DEBUG;
+#endif
 
   openlog (progname, syslog_flags, zl->facility);
   

@@ -24,6 +24,9 @@
 #define _ZEBRA_LOG_H
 
 #include <syslog.h>
+#ifdef ENABLE_OVSDB
+#include "openvswitch/vlog.h"
+#endif
 
 /* Here is some guidance on logging levels to use:
  *

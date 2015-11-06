@@ -270,6 +270,21 @@ Table 6: Column summary for vrf table
 ---------------------|----------------------------------------------------------
 ```
 
+Zebra debugging
+--------------------
+Debugs in zebra can be enabled using an appctl command, where in the level of zebra debugs
+can be specified as a parameter.The same appctl command can be used to display the zebra
+debug levels that have been set and also clear them.
+
+The bash command to look at the help string for the zebra debug options is:
+"ovs-appctl -t ops-zebra list-commands"
+
+The output of the command contains the following line:
+zebra/debug           event|packet|send|recv|detail|kernel|rib|ribq|fpm|all|show
+
+One example of using the command to set the zebra kernel debugs is :
+"ovs-appctl -t ops-zebra zebra/debug kernel"
+
 References
 ----------
 * [Reference 3 OpenSwitch Archiecture](http://www.openswitch.net/documents/user/architecture)

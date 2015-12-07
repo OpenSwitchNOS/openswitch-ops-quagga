@@ -1,4 +1,4 @@
-#High level design of OPS-Guagga-BGP
+#High level design of OPS-Quagga-BGP
 ============================
 #BGP overview
 
@@ -421,6 +421,6 @@ GR restart time: Restart time is received from restarting a peer previously adve
 #References
 ----------
 * [BGP](https://www.ietf.org/rfc/rfc4271.txt)
-* [Quagga](http://www.nongnu.org/quagga/docs.html)
 * [OpenSwitch](http://www.openswitch.net/documents/dev/ops-openvswitch/DESIGN)
+* [Quagga](http://www.nongnu.org/quagga/docs.html)
 * [Archtecture](http://www.openswitch.net/documents/user/architecture)

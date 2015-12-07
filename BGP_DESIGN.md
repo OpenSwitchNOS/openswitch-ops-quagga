@@ -1,4 +1,4 @@
-#High level design of OPS-Guagga-BGP
+#High level design of OPS-Quagga-BGP
 ============================
 #BGP overview
 

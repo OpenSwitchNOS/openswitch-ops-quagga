@@ -7,7 +7,8 @@ INSTALL_SDATA=@INSTALL@ -m 600
 lib_LTLIBRARIES = libospf.la
 libospf_la_LDFLAGS = -version-info 0:0:0
 
-sbin_PROGRAMS = ospfd
+#sbin_PROGRAMS = ospfd
+sbin_PROGRAMS = ops-ospfd
 
 libospf_la_SOURCES = \
 	ospfd.c ospf_zebra.c ospf_interface.c ospf_ism.c ospf_neighbor.c \
@@ -33,11 +34,14 @@ if ENABLE_OVSDB
 noinst_HEADERS += ospf_ovsdb_if.h
 endif
 
-ospfd_SOURCES = ospf_main.c
 
-ospfd_LDADD = libospf.la ../lib/libzebra.la @LIBCAP@
 if ENABLE_OVSDB
-ospfd_LDADD += -lovscommon -lovsdb -lpthread
+ops_ospfd_SOURCES = ospf_main.c
+ops_ospfd_LDADD = libospf.la ../lib/libzebra.la @LIBCAP@
+ops_ospfd_LDADD += -lovscommon -lovsdb -lpthread
+else
+ospfd_SOURCES = ospf_main.c
+ospfd_LDADD = libospf.la ../lib/libzebra.la @LIBCAP@
 endif
 
 EXTRA_DIST = OSPF-MIB.txt OSPF-TRAP-MIB.txt ChangeLog.opaque.txt

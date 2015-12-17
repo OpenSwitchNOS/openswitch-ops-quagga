@@ -1,6 +1,6 @@
 /*
  * OSPF version 2  Interface State Machine
- *   From RFC2328 [OSPF Version 2] 
+ *   From RFC2328 [OSPF Version 2]
  * Copyright (C) 1999, 2000 Toshiaki Takada
  *
  * This file is part of GNU Zebra.
@@ -44,6 +44,9 @@
 #include "ospfd/ospf_flood.h"
 #include "ospfd/ospf_abr.h"
 #include "ospfd/ospf_snmp.h"
+#ifdef ENABLE_OVSDB
+#include "ospf_ovsdb_if.h"
+#endif
 
 /* elect DR and BDR. Refer to RFC2319 section 9.4 */
 static struct ospf_neighbor *
@@ -57,15 +60,15 @@ ospf_dr_election_sub (struct list *routers)
   for (ALL_LIST_ELEMENTS_RO (routers, node, nbr))
     {
       if (max == NULL)
-	max = nbr;
+    max = nbr;
       else
-	{
-	  if (max->priority < nbr->priority)
-	    max = nbr;
-	  else if (max->priority == nbr->priority)
-	    if (IPV4_ADDR_CMP (&max->router_id, &nbr->router_id) < 0)
-	      max = nbr;
-	}
+    {
+      if (max->priority < nbr->priority)
+        max = nbr;
+      else if (max->priority == nbr->priority)
+        if (IPV4_ADDR_CMP (&max->router_id, &nbr->router_id) < 0)
+          max = nbr;
+    }
     }
 
   return max;
@@ -85,11 +88,11 @@ ospf_elect_dr (struct ospf_interface *oi, struct list *el_list)
     {
       /* neighbor declared to be DR. */
       if (NBR_IS_DR (nbr))
-	listnode_add (dr_list, nbr);
+    listnode_add (dr_list, nbr);
 
       /* Preserve neighbor BDR. */
       if (IPV4_ADDR_SAME (&BDR (oi), &nbr->address.u.prefix4))
-	bdr = nbr;
+    bdr = nbr;
     }
 
   /* Elect Designated Router. */
@@ -124,11 +127,11 @@ ospf_elect_bdr (struct ospf_interface *oi, struct list *el_list)
     {
       /* neighbor declared to be DR. */
       if (NBR_IS_DR (nbr))
-	continue;
+    continue;
 
       /* neighbor declared to be BDR. */
       if (NBR_IS_BDR (nbr))
-	listnode_add (bdr_list, nbr);
+    listnode_add (bdr_list, nbr);
 
       listnode_add (no_dr_list, nbr);
     }
@@ -172,11 +175,11 @@ ospf_dr_eligible_routers (struct route_table *nbrs, struct list *el_list)
     if ((nbr = rn->info) != NULL)
       /* Ignore 0.0.0.0 node*/
       if (nbr->router_id.s_addr != 0)
-	/* Is neighbor eligible? */
-	if (nbr->priority > 0)
-	  /* Is neighbor upper 2-Way? */
-	  if (nbr->state >= NSM_TwoWay)
-	    listnode_add (el_list, nbr);
+    /* Is neighbor eligible? */
+    if (nbr->priority > 0)
+      /* Is neighbor upper 2-Way? */
+      if (nbr->state >= NSM_TwoWay)
+        listnode_add (el_list, nbr);
 }
 
 /* Generate AdjOK? NSM event. */
@@ -190,11 +193,11 @@ ospf_dr_change (struct ospf *ospf, struct route_table *nbrs)
     if ((nbr = rn->info) != NULL)
       /* Ignore 0.0.0.0 node*/
       if (nbr->router_id.s_addr != 0)
-	/* Is neighbor upper 2-Way? */
-	if (nbr->state >= NSM_TwoWay)
-	  /* Ignore myself. */
-	  if (!IPV4_ADDR_SAME (&nbr->router_id, &ospf->router_id))
-	    OSPF_NSM_EVENT_SCHEDULE (nbr, NSM_AdjOK);
+    /* Is neighbor upper 2-Way? */
+    if (nbr->state >= NSM_TwoWay)
+      /* Ignore myself. */
+      if (!IPV4_ADDR_SAME (&nbr->router_id, &ospf->router_id))
+        OSPF_NSM_EVENT_SCHEDULE (nbr, NSM_AdjOK);
 }
 
 static int
@@ -227,7 +230,7 @@ ospf_dr_election (struct ospf_interface *oi)
       !(new_state == ISM_DROther && old_state < ISM_DROther))
     {
       ospf_elect_bdr (oi, el_list);
-      ospf_elect_dr (oi, el_list); 
+      ospf_elect_dr (oi, el_list);
 
       new_state = ospf_ism_state (oi);
 
@@ -240,7 +243,12 @@ ospf_dr_election (struct ospf_interface *oi)
   /* if DR or BDR changes, cause AdjOK? neighbor event. */
   if (!IPV4_ADDR_SAME (&old_dr, &DR (oi)) ||
       !IPV4_ADDR_SAME (&old_bdr, &BDR (oi)))
-    ospf_dr_change (oi->ospf, oi->nbrs);
+    {
+#ifdef ENABLE_OVSDB
+      ovsdb_update_nbr_dr_bdr(oi->nbr_self->src,DR (oi),BDR (oi));
+#endif
+       ospf_dr_change (oi->ospf, oi->nbrs);
+    }
 
   return new_state;
 }
@@ -253,17 +261,39 @@ ospf_hello_timer (struct thread *thread)
 
   oi = THREAD_ARG (thread);
   oi->t_hello = NULL;
-
   if (IS_DEBUG_OSPF (ism, ISM_TIMERS))
     zlog (NULL, LOG_DEBUG, "ISM[%s]: Timer (Hello timer expire)",
-	  IF_NAME (oi));
+      IF_NAME (oi));
 
   /* Sending hello packet. */
   ospf_hello_send (oi);
 
   /* Hello timer set. */
   OSPF_HELLO_TIMER_ON (oi);
-  
+#ifdef ENABLE_OVSDB
+   struct timeval ovsdb_hello;
+   long hello_due_at = 0;
+   long hello_msec = 0;
+   memset (&ovsdb_hello,0,sizeof (ovsdb_hello));
+   quagga_gettime (QUAGGA_CLK_MONOTONIC,&ovsdb_hello);
+
+   /* Increment by Hello timer interval
+    * Check if fast hello is enabled
+    */
+   if (OSPF_IF_PARAM ((oi), fast_hello))
+   {
+    /* This will be in milisecond */
+       hello_msec = OSPF_IF_PARAM ((oi), fast_hello);
+       ovsdb_hello.tv_sec += hello_msec / 1000;
+       ovsdb_hello.tv_usec += 1000*(hello_msec % 1000);
+   }
+   else
+       ovsdb_hello.tv_sec += OSPF_IF_PARAM ((oi), v_hello);
+   /* Hello due time in miliseconds */
+   hello_due_at = (1000000 * ovsdb_hello.tv_sec + ovsdb_hello.tv_usec)/1000;
+   ovsdb_ospf_set_hello_time_intervals (oi->ifp->name, OSPF_TIME_INTERVAL_HELLO_DUE,hello_due_at);
+#endif
+
   return 0;
 }
 
@@ -277,7 +307,7 @@ ospf_wait_timer (struct thread *thread)
 
   if (IS_DEBUG_OSPF (ism, ISM_TIMERS))
     zlog (NULL, LOG_DEBUG, "ISM[%s]: Timer (Wait timer expire)",
-	  IF_NAME (oi));
+      IF_NAME (oi));
 
   OSPF_ISM_EVENT_SCHEDULE (oi, ISM_WaitTimer);
 
@@ -294,55 +324,55 @@ ism_timer_set (struct ospf_interface *oi)
     {
     case ISM_Down:
       /* First entry point of ospf interface state machine. In this state
-	 interface parameters must be set to initial values, and timers are
-	 reset also. */
+     interface parameters must be set to initial values, and timers are
+     reset also. */
       OSPF_ISM_TIMER_OFF (oi->t_hello);
       OSPF_ISM_TIMER_OFF (oi->t_wait);
       OSPF_ISM_TIMER_OFF (oi->t_ls_ack);
       break;
     case ISM_Loopback:
       /* In this state, the interface may be looped back and will be
-	 unavailable for regular data traffic. */
+     unavailable for regular data traffic. */
       OSPF_ISM_TIMER_OFF (oi->t_hello);
       OSPF_ISM_TIMER_OFF (oi->t_wait);
       OSPF_ISM_TIMER_OFF (oi->t_ls_ack);
       break;
     case ISM_Waiting:
       /* The router is trying to determine the identity of DRouter and
-	 BDRouter. The router begin to receive and send Hello Packets. */
+     BDRouter. The router begin to receive and send Hello Packets. */
       /* send first hello immediately */
       OSPF_ISM_TIMER_MSEC_ON (oi->t_hello, ospf_hello_timer, 1);
       OSPF_ISM_TIMER_ON (oi->t_wait, ospf_wait_timer,
-			 OSPF_IF_PARAM (oi, v_wait));
+             OSPF_IF_PARAM (oi, v_wait));
       OSPF_ISM_TIMER_OFF (oi->t_ls_ack);
       break;
     case ISM_PointToPoint:
       /* The interface connects to a physical Point-to-point network or
-	 virtual link. The router attempts to form an adjacency with
-	 neighboring router. Hello packets are also sent. */
+     virtual link. The router attempts to form an adjacency with
+     neighboring router. Hello packets are also sent. */
       /* send first hello immediately */
-      OSPF_ISM_TIMER_MSEC_ON (oi->t_hello, ospf_hello_timer, 1);      
+      OSPF_ISM_TIMER_MSEC_ON (oi->t_hello, ospf_hello_timer, 1);
       OSPF_ISM_TIMER_OFF (oi->t_wait);
       OSPF_ISM_TIMER_ON (oi->t_ls_ack, ospf_ls_ack_timer, oi->v_ls_ack);
       break;
     case ISM_DROther:
       /* The network type of the interface is broadcast or NBMA network,
-	 and the router itself is neither Designated Router nor
-	 Backup Designated Router. */
+     and the router itself is neither Designated Router nor
+     Backup Designated Router. */
       OSPF_HELLO_TIMER_ON (oi);
       OSPF_ISM_TIMER_OFF (oi->t_wait);
       OSPF_ISM_TIMER_ON (oi->t_ls_ack, ospf_ls_ack_timer, oi->v_ls_ack);
       break;
     case ISM_Backup:
       /* The network type of the interface is broadcast os NBMA network,
-	 and the router is Backup Designated Router. */
+     and the router is Backup Designated Router. */
       OSPF_HELLO_TIMER_ON (oi);
       OSPF_ISM_TIMER_OFF (oi->t_wait);
       OSPF_ISM_TIMER_ON (oi->t_ls_ack, ospf_ls_ack_timer, oi->v_ls_ack);
       break;
     case ISM_DR:
       /* The network type of the interface is broadcast or NBMA network,
-	 and the router is Designated Router. */
+     and the router is Designated Router. */
       OSPF_HELLO_TIMER_ON (oi);
       OSPF_ISM_TIMER_OFF (oi->t_wait);
       OSPF_ISM_TIMER_ON (oi->t_ls_ack, ospf_ls_ack_timer, oi->v_ls_ack);
@@ -466,10 +496,10 @@ struct {
     /* Waiting: */
     { ism_ignore,          ISM_DependUpon },    /* NoEvent        */
     { ism_ignore,          ISM_Waiting },       /* InterfaceUp    */
-    { ism_wait_timer,	   ISM_DependUpon },    /* WaitTimer      */
+    { ism_wait_timer,      ISM_DependUpon },    /* WaitTimer      */
     { ism_backup_seen,     ISM_DependUpon },    /* BackupSeen     */
     { ism_ignore,          ISM_Waiting },       /* NeighborChange */
-    { ism_loop_ind,	   ISM_Loopback },      /* LoopInd        */
+    { ism_loop_ind,    ISM_Loopback },      /* LoopInd        */
     { ism_ignore,          ISM_Waiting },       /* UnloopInd      */
     { ism_interface_down,  ISM_Down },          /* InterfaceDown  */
   },
@@ -480,7 +510,7 @@ struct {
     { ism_ignore,          ISM_PointToPoint },  /* WaitTimer      */
     { ism_ignore,          ISM_PointToPoint },  /* BackupSeen     */
     { ism_ignore,          ISM_PointToPoint },  /* NeighborChange */
-    { ism_loop_ind,	   ISM_Loopback },      /* LoopInd        */
+    { ism_loop_ind,    ISM_Loopback },      /* LoopInd        */
     { ism_ignore,          ISM_PointToPoint },  /* UnloopInd      */
     { ism_interface_down,  ISM_Down },          /* InterfaceDown  */
   },
@@ -517,7 +547,7 @@ struct {
     { ism_ignore,          ISM_DR },            /* UnloopInd      */
     { ism_interface_down,  ISM_Down },          /* InterfaceDown  */
   },
-};  
+};
 
 static const char *ospf_ism_event_str[] =
 {
@@ -540,15 +570,15 @@ ism_change_state (struct ospf_interface *oi, int state)
   /* Logging change of state. */
   if (IS_DEBUG_OSPF (ism, ISM_STATUS))
     zlog (NULL, LOG_DEBUG, "ISM[%s]: State change %s -> %s", IF_NAME (oi),
-	  LOOKUP (ospf_ism_state_msg, oi->state),
-	  LOOKUP (ospf_ism_state_msg, state));
+      LOOKUP (ospf_ism_state_msg, oi->state),
+      LOOKUP (ospf_ism_state_msg, state));
 
   old_state = oi->state;
   oi->state = state;
   oi->state_change++;
 
 #ifdef HAVE_SNMP
-  /* Terminal state or regression */ 
+  /* Terminal state or regression */
   if ((state == ISM_DR) || (state == ISM_Backup) || (state == ISM_DROther) ||
       (state == ISM_PointToPoint) || (state < old_state))
     {
@@ -620,8 +650,8 @@ ospf_ism_event (struct thread *thread)
 
   if (IS_DEBUG_OSPF (ism, ISM_EVENTS))
     zlog (NULL, LOG_DEBUG, "ISM[%s]: %s (%s)", IF_NAME (oi),
-	  LOOKUP (ospf_ism_state_msg, oi->state),
-	  ospf_ism_event_str[event]);
+      LOOKUP (ospf_ism_state_msg, oi->state),
+      ospf_ism_event_str[event]);
 
   /* If state is changed. */
   if (next_state != oi->state)

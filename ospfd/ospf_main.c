@@ -218,28 +218,28 @@ main (int argc, char **argv)
       opt = getopt_long (argc, argv, "df:i:z:hA:P:u:g:avC", longopts, 0);
 
       if (opt == EOF)
-	break;
+    break;
 
       switch (opt)
-	{
-	case 0:
-	  break;
-	case 'd':
-	  daemon_mode = 1;
-	  break;
-	case 'f':
-	  config_file = optarg;
-	  break;
-	case 'A':
-	  vty_addr = optarg;
-	  break;
+    {
+    case 0:
+      break;
+    case 'd':
+      daemon_mode = 1;
+      break;
+    case 'f':
+      config_file = optarg;
+      break;
+    case 'A':
+      vty_addr = optarg;
+      break;
         case 'i':
           pid_file = optarg;
           break;
-	case 'z':
-	  zclient_serv_path_set (optarg);
-	  break;
-	case 'P':
+    case 'z':
+      zclient_serv_path_set (optarg);
+      break;
+    case 'P':
           /* Deal with atoi() returning 0 on failure, and ospfd not
              listening on ospfd port... */
           if (strcmp(optarg, "0") == 0)
@@ -250,32 +250,32 @@ main (int argc, char **argv)
           vty_port = atoi (optarg);
           if (vty_port <= 0 || vty_port > 0xffff)
             vty_port = OSPF_VTY_PORT;
-  	  break;
-	case 'u':
-	  ospfd_privs.user = optarg;
-	  break;
-	case 'g':
-	  ospfd_privs.group = optarg;
-	  break;
+      break;
+    case 'u':
+      ospfd_privs.user = optarg;
+      break;
+    case 'g':
+      ospfd_privs.group = optarg;
+      break;
 #ifdef SUPPORT_OSPF_API
-	case 'a':
-	  ospf_apiserver_enable = 1;
-	  break;
+    case 'a':
+      ospf_apiserver_enable = 1;
+      break;
 #endif /* SUPPORT_OSPF_API */
-	case 'v':
-	  print_version (progname);
-	  exit (0);
-	  break;
-	case 'C':
-	  dryrun = 1;
-	  break;
-	case 'h':
-	  usage (progname, 0);
-	  break;
-	default:
-	  usage (progname, 1);
-	  break;
-	}
+    case 'v':
+      print_version (progname);
+      exit (0);
+      break;
+    case 'C':
+      dryrun = 1;
+      break;
+    case 'h':
+      usage (progname, 0);
+      break;
+    default:
+      usage (progname, 1);
+      break;
+    }
     }
 
   /* Invoked by a priviledged user? -- endo. */
@@ -287,7 +287,12 @@ main (int argc, char **argv)
     }
 
   zlog_default = openzlog (progname, ZLOG_OSPF,
-			   LOG_CONS|LOG_NDELAY|LOG_PID, LOG_DAEMON);
+               LOG_CONS|LOG_NDELAY|LOG_PID, LOG_DAEMON);
+
+#ifdef ENABLE_OVSDB
+  zlog_set_level(NULL, ZLOG_DEST_SYSLOG, LOG_DEBUG);
+  zlog_set_level (NULL, ZLOG_DEST_STDOUT, LOG_DEBUG);
+#endif
 
   /* OSPF master init. */
   ospf_master_init ();
@@ -303,28 +308,12 @@ main (int argc, char **argv)
   vty_init (master);
   memory_init ();
 
-  access_list_init ();
-  prefix_list_init ();
-
-  /* OSPFd inits. */
-  ospf_if_init ();
-  ospf_zebra_init ();
-
-  /* OSPF vty inits. */
-  ospf_vty_init ();
-  ospf_vty_show_init ();
-
-  ospf_route_map_init ();
-#ifdef HAVE_SNMP
-  ospf_snmp_init ();
-#endif /* HAVE_SNMP */
-#ifdef HAVE_OPAQUE_LSA
-  ospf_opaque_init ();
-#endif /* HAVE_OPAQUE_LSA */
+  ospf_init();
 
   /* Need to initialize the default ospf structure, so the interface mode
-     commands can be duly processed if they are received before 'router ospf',
-     when quagga(ospfd) is restarted */
+   * commands can be duly processed if they are received before 'router ospf',
+   * when quagga(ospfd) is restarted
+   */
   if (!ospf_get())
     {
       zlog_err("OSPF instance init failed: %s", strerror(errno));
@@ -363,7 +352,9 @@ main (int argc, char **argv)
   /* Fetch next active thread. */
 #ifdef ENABLE_OVSDB
   while (!exiting && thread_fetch (master, &thread))
+  {
     thread_call (&thread);
+  }
 
   ospf_ovsdb_exit();
 #else

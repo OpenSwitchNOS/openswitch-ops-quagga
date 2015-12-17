@@ -48,6 +48,9 @@
 #include "ospfd/ospf_flood.h"
 #include "ospfd/ospf_abr.h"
 #include "ospfd/ospf_snmp.h"
+#ifdef ENABLE_OVSDB
+#include "ospf_ovsdb_if.h"
+#endif
 
 static void nsm_clear_adj (struct ospf_neighbor *);
 
@@ -62,7 +65,7 @@ ospf_inactivity_timer (struct thread *thread)
 
   if (IS_DEBUG_OSPF (nsm, NSM_TIMERS))
     zlog (NULL, LOG_DEBUG, "NSM[%s:%s]: Timer (Inactivity timer expire)",
-	  IF_NAME (nbr->oi), inet_ntoa (nbr->router_id));
+      IF_NAME (nbr->oi), inet_ntoa (nbr->router_id));
 
   OSPF_NSM_EVENT_SCHEDULE (nbr, NSM_InactivityTimer);
 
@@ -79,7 +82,7 @@ ospf_db_desc_timer (struct thread *thread)
 
   if (IS_DEBUG_OSPF (nsm, NSM_TIMERS))
     zlog (NULL, LOG_DEBUG, "NSM[%s:%s]: Timer (DD Retransmit timer expire)",
-	  IF_NAME (nbr->oi), inet_ntoa (nbr->src));
+      IF_NAME (nbr->oi), inet_ntoa (nbr->src));
 
   /* resent last send DD packet. */
   assert (nbr->last_send);
@@ -123,8 +126,8 @@ nsm_timer_set (struct ospf_neighbor *nbr)
       break;
     case NSM_Exchange:
       OSPF_NSM_TIMER_ON (nbr->t_ls_upd, ospf_ls_upd_timer, nbr->v_ls_upd);
-      if (!IS_SET_DD_MS (nbr->dd_flags))      
-	OSPF_NSM_TIMER_OFF (nbr->t_db_desc);
+      if (!IS_SET_DD_MS (nbr->dd_flags))
+    OSPF_NSM_TIMER_OFF (nbr->t_db_desc);
       break;
     case NSM_Loading:
     case NSM_Full:
@@ -163,12 +166,27 @@ nsm_packet_received (struct ospf_neighbor *nbr)
 {
   /* Start or Restart Inactivity Timer. */
   OSPF_NSM_TIMER_OFF (nbr->t_inactivity);
-  
+
   OSPF_NSM_TIMER_ON (nbr->t_inactivity, ospf_inactivity_timer,
-		     nbr->v_inactivity);
+             nbr->v_inactivity);
 
   if (nbr->oi->type == OSPF_IFTYPE_NBMA && nbr->nbr_nbma)
     OSPF_POLL_TIMER_OFF (nbr->nbr_nbma->t_poll);
+
+#ifdef ENABLE_OVSDB
+   struct timeval ovsdb_dead;
+   long dead_due_at = 0;
+   char* router_ip = NULL;
+
+   memset (&ovsdb_dead,0,sizeof (ovsdb_dead));
+   quagga_gettime (QUAGGA_CLK_MONOTONIC,&ovsdb_dead);
+   ovsdb_dead.tv_sec += nbr->v_inactivity;
+
+   dead_due_at = (1000000 * ovsdb_dead.tv_sec + ovsdb_dead.tv_usec)/1000;
+   router_ip = inet_ntoa (nbr->router_id);
+   ovsdb_ospf_set_spf_time_intervals (nbr->oi->ifp->name,OSPF_TIME_INTERVAL_DEAD_DUE,dead_due_at,nbr->src);
+#endif
+
 
   return 0;
 }
@@ -180,7 +198,7 @@ nsm_start (struct ospf_neighbor *nbr)
       OSPF_POLL_TIMER_OFF (nbr->nbr_nbma->t_poll);
 
   OSPF_NSM_TIMER_OFF (nbr->t_inactivity);
-  
+
   OSPF_NSM_TIMER_ON (nbr->t_inactivity, ospf_inactivity_timer,
                      nbr->v_inactivity);
 
@@ -233,8 +251,8 @@ ospf_db_summary_add (struct ospf_neighbor *nbr, struct ospf_lsa *lsa)
     return 0;
 
   if (IS_LSA_MAXAGE (lsa))
-    ospf_ls_retransmit_add (nbr, lsa);                      
-  else 
+    ospf_ls_retransmit_add (nbr, lsa);
+  else
     ospf_lsdb_add (&nbr->db_sum, lsa);
 
   return 0;
@@ -253,8 +271,8 @@ ospf_db_summary_clear (struct ospf_neighbor *nbr)
       struct route_node *rn;
 
       for (rn = route_top (table); rn; rn = route_next (rn))
-	if (rn->info)
-	  ospf_lsdb_delete (&nbr->db_sum, rn->info);
+    if (rn->info)
+      ospf_lsdb_delete (&nbr->db_sum, rn->info);
     }
 }
 
@@ -287,16 +305,16 @@ nsm_negotiation_done (struct ospf_neighbor *nbr)
   if (CHECK_FLAG (nbr->options, OSPF_OPTION_O))
     {
       LSDB_LOOP (OPAQUE_LINK_LSDB (area), rn, lsa)
-	ospf_db_summary_add (nbr, lsa);
+    ospf_db_summary_add (nbr, lsa);
       LSDB_LOOP (OPAQUE_AREA_LSDB (area), rn, lsa)
-	ospf_db_summary_add (nbr, lsa);
+    ospf_db_summary_add (nbr, lsa);
     }
 #endif /* HAVE_OPAQUE_LSA */
 
   if (CHECK_FLAG (nbr->options, OSPF_OPTION_NP))
     {
       LSDB_LOOP (NSSA_LSDB (area), rn, lsa)
-	ospf_db_summary_add (nbr, lsa);
+    ospf_db_summary_add (nbr, lsa);
     }
 
   if (nbr->oi->type != OSPF_IFTYPE_VIRTUALLINK
@@ -307,7 +325,7 @@ nsm_negotiation_done (struct ospf_neighbor *nbr)
 #ifdef HAVE_OPAQUE_LSA
   if (CHECK_FLAG (nbr->options, OSPF_OPTION_O)
       && (nbr->oi->type != OSPF_IFTYPE_VIRTUALLINK
-	  && area->external_routing == OSPF_AREA_DEFAULT))
+      && area->external_routing == OSPF_AREA_DEFAULT))
     LSDB_LOOP (OPAQUE_AS_LSDB (nbr->oi->ospf), rn, lsa)
       ospf_db_summary_add (nbr, lsa);
 #endif /* HAVE_OPAQUE_LSA */
@@ -375,7 +393,7 @@ nsm_kill_nbr (struct ospf_neighbor *nbr)
       assert (nbr != nbr->oi->nbr_self);
       return 0;
     }
-  
+
   if (nbr->oi->type == OSPF_IFTYPE_NBMA && nbr->nbr_nbma != NULL)
     {
       struct ospf_nbr_nbma *nbr_nbma = nbr->nbr_nbma;
@@ -386,11 +404,11 @@ nsm_kill_nbr (struct ospf_neighbor *nbr)
       nbr->nbr_nbma = NULL;
 
       OSPF_POLL_TIMER_ON (nbr_nbma->t_poll, ospf_poll_timer,
-			  nbr_nbma->v_poll);
+              nbr_nbma->v_poll);
 
       if (IS_DEBUG_OSPF (nsm, NSM_EVENTS))
-	zlog_debug ("NSM[%s:%s]: Down (PollIntervalTimer scheduled)",
-		   IF_NAME (nbr->oi), inet_ntoa (nbr->address.u.prefix4));  
+    zlog_debug ("NSM[%s:%s]: Down (PollIntervalTimer scheduled)",
+           IF_NAME (nbr->oi), inet_ntoa (nbr->address.u.prefix4));
     }
 
   return 0;
@@ -622,8 +640,8 @@ nsm_notice_state_change (struct ospf_neighbor *nbr, int next_state, int event)
     }
 
 #ifdef HAVE_SNMP
-  /* Terminal state or regression */ 
-  if ((next_state == NSM_Full) 
+  /* Terminal state or regression */
+  if ((next_state == NSM_Full)
       || (next_state == NSM_TwoWay)
       || (next_state < nbr->state))
     {
@@ -631,9 +649,9 @@ nsm_notice_state_change (struct ospf_neighbor *nbr, int next_state, int event)
       if (nbr->oi->type == OSPF_IFTYPE_VIRTUALLINK)
         ospfTrapVirtNbrStateChange(nbr);
       /* ospfNbrStateChange trap  */
-      else	
+      else
         /* To/From FULL, only managed by DR */
-        if (((next_state != NSM_Full) && (nbr->state != NSM_Full)) 
+        if (((next_state != NSM_Full) && (nbr->state != NSM_Full))
             || (nbr->oi->state == ISM_DR))
           ospfTrapNbrStateChange(nbr);
     }
@@ -648,7 +666,7 @@ nsm_change_state (struct ospf_neighbor *nbr, int state)
   u_char old_state;
   int x;
   int force = 1;
-  
+
   /* Preserve old status. */
   old_state = nbr->state;
 
@@ -685,71 +703,77 @@ nsm_change_state (struct ospf_neighbor *nbr, int state)
       (old_state == NSM_Full && state != NSM_Full))
     {
       if (state == NSM_Full)
-	{
-	  oi->full_nbrs++;
-	  oi->area->full_nbrs++;
+    {
+      oi->full_nbrs++;
+      oi->area->full_nbrs++;
+#ifdef ENABLE_OVSDB
+      ovsdb_update_full_nbr_count (nbr,oi->area->full_nbrs);
+#endif
 
           ospf_check_abr_status (oi->ospf);
 
-	  if (oi->type == OSPF_IFTYPE_VIRTUALLINK && vl_area)
+      if (oi->type == OSPF_IFTYPE_VIRTUALLINK && vl_area)
             if (++vl_area->full_vls == 1)
-	      ospf_schedule_abr_task (oi->ospf);
+          ospf_schedule_abr_task (oi->ospf);
 
-	  /* kevinm: refresh any redistributions */
-	  for (x = ZEBRA_ROUTE_SYSTEM; x < ZEBRA_ROUTE_MAX; x++)
-	    {
-	      if (x == ZEBRA_ROUTE_OSPF || x == ZEBRA_ROUTE_OSPF6)
-		continue;
-	      ospf_external_lsa_refresh_type (oi->ospf, x, force);
-	    }
+      /* kevinm: refresh any redistributions */
+      for (x = ZEBRA_ROUTE_SYSTEM; x < ZEBRA_ROUTE_MAX; x++)
+        {
+          if (x == ZEBRA_ROUTE_OSPF || x == ZEBRA_ROUTE_OSPF6)
+        continue;
+          ospf_external_lsa_refresh_type (oi->ospf, x, force);
+        }
           /* XXX: Clearly some thing is wrong with refresh of external LSAs
            * this added to hack around defaults not refreshing after a timer
            * jump.
            */
           ospf_external_lsa_refresh_default (oi->ospf);
-	}
+    }
       else
-	{
-	  oi->full_nbrs--;
-	  oi->area->full_nbrs--;
+    {
+      oi->full_nbrs--;
+      oi->area->full_nbrs--;
+#ifdef ENABLE_OVSDB
+      ovsdb_update_full_nbr_count (nbr,oi->area->full_nbrs);
+#endif
 
           ospf_check_abr_status (oi->ospf);
 
-	  if (oi->type == OSPF_IFTYPE_VIRTUALLINK && vl_area)
-	    if (vl_area->full_vls > 0)
-	      if (--vl_area->full_vls == 0)
-		ospf_schedule_abr_task (oi->ospf);
-	}
+      if (oi->type == OSPF_IFTYPE_VIRTUALLINK && vl_area)
+        if (vl_area->full_vls > 0)
+          if (--vl_area->full_vls == 0)
+        ospf_schedule_abr_task (oi->ospf);
+    }
 
       zlog_info ("nsm_change_state(%s, %s -> %s): "
-		 "scheduling new router-LSA origination",
-		 inet_ntoa (nbr->router_id),
-		 LOOKUP(ospf_nsm_state_msg, old_state),
-		 LOOKUP(ospf_nsm_state_msg, state));
+         "scheduling new router-LSA origination",
+         inet_ntoa (nbr->router_id),
+         LOOKUP(ospf_nsm_state_msg, old_state),
+         LOOKUP(ospf_nsm_state_msg, state));
 
       ospf_router_lsa_update_area (oi->area);
 
       if (oi->type == OSPF_IFTYPE_VIRTUALLINK)
-	{
-	  struct ospf_area *vl_area =
-	    ospf_area_lookup_by_area_id (oi->ospf, oi->vl_data->vl_area_id);
-	  
-	  if (vl_area)
-	    ospf_router_lsa_update_area (vl_area);
-	}
+    {
+      struct ospf_area *vl_area =
+        ospf_area_lookup_by_area_id (oi->ospf, oi->vl_data->vl_area_id);
+
+      if (vl_area)
+        ospf_router_lsa_update_area (vl_area);
+    }
 
       /* Originate network-LSA. */
       if (oi->state == ISM_DR)
-	{
-	  if (oi->network_lsa_self && oi->full_nbrs == 0)
-	    {
-	      ospf_lsa_flush_area (oi->network_lsa_self, oi->area);
-	      ospf_lsa_unlock (&oi->network_lsa_self);
-	      oi->network_lsa_self = NULL;
-	    }
-	  else
-	    ospf_network_lsa_update (oi);
-	}
+    {
+      if (oi->network_lsa_self && oi->full_nbrs == 0)
+        {
+          ospf_lsa_flush_area (oi->network_lsa_self, oi->area);
+          ospf_lsa_unlock (&oi->network_lsa_self);
+          oi->network_lsa_self = NULL;
+        }
+      else
+        ospf_network_lsa_update (oi);
+    }
     }
 
 #ifdef HAVE_OPAQUE_LSA
@@ -767,9 +791,9 @@ nsm_change_state (struct ospf_neighbor *nbr, int state)
   if (state == NSM_ExStart)
     {
       if (nbr->dd_seqnum == 0)
-	nbr->dd_seqnum = quagga_time (NULL);
+    nbr->dd_seqnum = quagga_time (NULL);
       else
-	nbr->dd_seqnum++;
+    nbr->dd_seqnum++;
 
       nbr->dd_flags = OSPF_DD_FLAG_I|OSPF_DD_FLAG_M|OSPF_DD_FLAG_MS;
       ospf_db_desc_send (nbr);
@@ -778,7 +802,7 @@ nsm_change_state (struct ospf_neighbor *nbr, int state)
   /* clear cryptographic sequence number */
   if (state == NSM_Down)
     nbr->crypt_seqnum = 0;
-  
+
   /* Preserve old status? */
 }
 
@@ -795,17 +819,17 @@ ospf_nsm_event (struct thread *thread)
 
   if (IS_DEBUG_OSPF (nsm, NSM_EVENTS))
     zlog_debug ("NSM[%s:%s]: %s (%s)", IF_NAME (nbr->oi),
-	       inet_ntoa (nbr->router_id),
-	       LOOKUP (ospf_nsm_state_msg, nbr->state),
-	       ospf_nsm_event_str [event]);
-  
+           inet_ntoa (nbr->router_id),
+           LOOKUP (ospf_nsm_state_msg, nbr->state),
+           ospf_nsm_event_str [event]);
+
   next_state = NSM [nbr->state][event].next_state;
 
   /* Call function. */
   if (NSM [nbr->state][event].func != NULL)
     {
       int func_state = (*(NSM [nbr->state][event].func))(nbr);
-      
+
       if (NSM [nbr->state][event].next_state == NSM_DependUpon)
         next_state = func_state;
       else if (func_state)
@@ -825,12 +849,16 @@ ospf_nsm_event (struct thread *thread)
     }
 
   assert (next_state != NSM_DependUpon);
-  
+
   /* If state is changed. */
   if (next_state != nbr->state)
     {
       nsm_notice_state_change (nbr, next_state, event);
       nsm_change_state (nbr, next_state);
+#ifdef ENABLE_OVSDB
+      if (nbr->state != NSM_Deleted)
+         ovsdb_update_nbr(nbr);
+#endif
     }
 
   /* Make sure timer is set. */
@@ -844,7 +872,12 @@ ospf_nsm_event (struct thread *thread)
    * 'Deleted' neighbour state.
    */
   if (nbr->state == NSM_Deleted)
+  {
+#ifdef ENABLE_OVSDB
+    ovsdb_delete_nbr(nbr);
+#endif
     ospf_nbr_delete (nbr);
+  }
 
   return 0;
 }
@@ -856,8 +889,8 @@ ospf_check_nbr_loading (struct ospf_neighbor *nbr)
   if (nbr->state == NSM_Loading)
     {
       if (ospf_ls_request_isempty (nbr))
-	OSPF_NSM_EVENT_SCHEDULE (nbr, NSM_LoadingDone);
+    OSPF_NSM_EVENT_SCHEDULE (nbr, NSM_LoadingDone);
       else if (nbr->ls_req_last == NULL)
-	ospf_ls_req_event (nbr);
+    ospf_ls_req_event (nbr);
     }
 }

@@ -8,19 +8,20 @@ from tornado.log import app_log
 class BgpRouterValidator(BaseValidator):
     resource = "bgp_router"
 
-    def validate_create(self, validation_args):
-        config_data = validation_args.config_data
-        vrf_resource = validation_args.p_resource
+    def validate_modification(self, validation_args):
+        is_new = validation_args.is_new
         vrf_row = validation_args.p_resource_row
 
-        bgp_routers = utils.get_column_data_from_row(vrf_row,
-                                                     vrf_resource.column)
+        if is_new:
+            bgp_routers = utils.get_column_data_from_row(vrf_row,
+                                                         "bgp_routers")
 
-        if bgp_routers is not None:
-            for asn in bgp_routers:
-                if asn != config_data["asn"]:
-                    code = error.RESOURCES_EXCEEDED
-                    details = "Another BGP with ASN %d already exists" % asn
+            # Since working on the IDL that already has the reflective change,
+            # the total number of bgp_routers in parent table can be used
+            # to validate allowed bgp_routers.
+            if bgp_routers is not None:
+                if len(bgp_routers) > 1:
+                    details = "Only one BGP router can be created"
                     raise ValidationError(error.RESOURCES_EXCEEDED, details)
 
         app_log.debug('Validation Successful')

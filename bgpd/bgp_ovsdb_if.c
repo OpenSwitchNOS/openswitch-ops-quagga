@@ -210,6 +210,8 @@ bgp_ovsdb_tables_init (struct ovsdb_idl *idl)
     ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_other_config);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_status);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_external_ids);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_fast_external_failover);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_log_neighbor_changes);
 
     /* BGP neighbor table */
     ovsdb_idl_add_table(idl, &ovsrec_table_bgp_neighbor);
@@ -640,6 +642,32 @@ insert_bgp_router_config (struct ovsdb_idl *idl,
 }
 
 void
+modify_bgp_fast_external_failover_config (struct bgp *bgp_cfg,
+                                          const struct ovsrec_bgp_router *bgp_mod_row)
+{
+    if (bgp_mod_row->n_fast_external_failover && bgp_mod_row->fast_external_failover[0]) {
+        VLOG_DBG("Setting BGP fast external failover flag");
+        bgp_flag_unset (bgp_cfg, BGP_FLAG_NO_FAST_EXT_FAILOVER);
+    } else {
+        VLOG_DBG("Unsetting BGP fast external failover flag");
+        bgp_flag_set (bgp_cfg, BGP_FLAG_NO_FAST_EXT_FAILOVER);
+    }
+}
+
+void
+modify_bgp_log_neighbor_changes_config (struct bgp *bgp_cfg,
+                                        const struct ovsrec_bgp_router *bgp_mod_row)
+{
+    if (bgp_mod_row->n_log_neighbor_changes && bgp_mod_row->log_neighbor_changes[0]) {
+        VLOG_DBG("Setting BGP log neighbor changes flag");
+        bgp_flag_set(bgp_cfg, BGP_FLAG_LOG_NEIGHBOR_CHANGES);
+    } else {
+        VLOG_DBG("Unsetting BGP log neighbor changes flag");
+        bgp_flag_unset(bgp_cfg, BGP_FLAG_LOG_NEIGHBOR_CHANGES);
+    }
+}
+
+void
 modify_bgp_router_config (struct ovsdb_idl *idl,
     const struct ovsrec_bgp_router *bgp_first, int asn)
 {
@@ -679,6 +707,18 @@ modify_bgp_router_config (struct ovsdb_idl *idl,
     /* Check if bgp timers are modified */
     if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_bgp_router_col_timers, idl_seqno)) {
         modify_bgp_timers_config(bgp_cfg,bgp_mod_row);
+    }
+
+    /* Check if bgp fast external failover is set */
+    if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_bgp_router_col_fast_external_failover,
+                                      idl_seqno)) {
+        modify_bgp_fast_external_failover_config(bgp_cfg, bgp_mod_row);
+    }
+
+    /* Check if bgp log neighbor changes is set */
+    if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_bgp_router_col_log_neighbor_changes,
+                                      idl_seqno)) {
+        modify_bgp_log_neighbor_changes_config(bgp_cfg, bgp_mod_row);
     }
 }
 

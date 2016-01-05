@@ -718,4 +718,4 @@ References
 ----------
 * [Reference 3 OpenSwitch Archiecture](http://www.openswitch.net/documents/user/architecture)
 * [Reference 1 Quagga Documents](http://www.nongnu.org/quagga)
-* [Reference 2 OpenSwitch L3 Archiecture](http://git.openswitch.net/cgit/openswitch/ops/tree/docs/layer3_design.md)
+* [Reference 2 OpenSwitch L3 Archiecture](http://openswitch.net/documents/user/layer3_design)

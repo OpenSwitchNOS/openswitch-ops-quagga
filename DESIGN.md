@@ -423,7 +423,7 @@ GR restart time: Restart time is received from restarting a peer previously adve
 * [BGP](https://www.ietf.org/rfc/rfc4271.txt)
 * [OpenSwitch](http://www.openswitch.net/documents/dev/ops-openvswitch/DESIGN)
 * [Quagga](http://www.nongnu.org/quagga/docs.html)
-* [Archtecture](http://www.openswitch.net/documents/user/architecture)
+* [Architecture](http://www.openswitch.net/documents/user/architecture)
 
 High level design of OPS-ZEBRA
 ==============================
@@ -716,6 +716,6 @@ One example of using the command to set the zebra kernel debugs is :
 
 References
 ----------
-* [Reference 3 OpenSwitch Archiecture](http://www.openswitch.net/documents/user/architecture)
 * [Reference 1 Quagga Documents](http://www.nongnu.org/quagga)
-* [Reference 2 OpenSwitch L3 Archiecture](http://openswitch.net/documents/user/layer3_design)
+* [Reference 2 OpenSwitch L3 Architecture](http://openswitch.net/documents/user/layer3_design)
+* [Reference 3 OpenSwitch Architecture](http://www.openswitch.net/documents/user/architecture)

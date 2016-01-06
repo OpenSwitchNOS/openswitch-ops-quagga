@@ -1328,6 +1328,18 @@ bgp_nbr_password_ovsdb_apply_changes (const struct ovsrec_bgp_neighbor *ovs_nbr,
 }
 
 static void
+bgp_nbr_advertisement_interval_ovsdb_apply_changes (const struct ovsrec_bgp_neighbor *ovs_nbr,
+    const struct ovsrec_bgp_router *ovs_bgp,
+    char * name,
+    struct bgp *bgp_instance)
+{
+    if (COL_CHANGED(ovs_nbr, ovsrec_bgp_neighbor_col_advertisement_interval, idl_seqno)) {
+        daemon_neighbor_advertisement_interval_cmd_execute(bgp_instance,
+            name, ovs_nbr->advertisement_interval);
+    }
+}
+
+static void
 bgp_nbr_shutdown_ovsdb_apply_changes (const struct ovsrec_bgp_neighbor *ovs_nbr,
     const struct ovsrec_bgp_router *ovs_bgp,
     char * name,
@@ -1535,6 +1547,10 @@ bgp_nbr_read_ovsdb_apply_changes (struct ovsdb_idl *idl)
 
             /* remove_private_as */
             bgp_nbr_remove_private_as_ovsdb_apply_changes(ovs_nbr, ovs_bgp,
+                ovs_bgp->key_bgp_neighbors[j], bgp_instance);
+
+            /* advertisement_interval */
+            bgp_nbr_advertisement_interval_ovsdb_apply_changes(ovs_nbr, ovs_bgp,
                 ovs_bgp->key_bgp_neighbors[j], bgp_instance);
          }
       }

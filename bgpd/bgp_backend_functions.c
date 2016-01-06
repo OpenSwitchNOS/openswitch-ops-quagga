@@ -2094,6 +2094,33 @@ daemon_neighbor_description_cmd_execute (struct bgp *bgp, char *peer_str, char *
 }
 
 int
+daemon_neighbor_advertisement_interval_cmd_execute (struct bgp *bgp,
+                                                     char *peer_str,
+                                                      int64_t *interval)
+{
+    struct peer *peer;
+    int64_t advertisement_interval;
+    peer= bgp_peer_and_group_lookup (bgp, peer_str);
+    if (! peer) return 1;
+
+    if (!(0 <= advertisement_interval <= 600)) {
+        VLOG_DBG("Invalid range for advertisement interval \n");
+        return 1;
+    }
+
+    if (interval != NULL) {
+        advertisement_interval = *interval;
+        VLOG_DBG("neighbor %s set advertisement interval %d \n",
+                                     peer_str, (u_int32_t)advertisement_interval);
+        peer_advertise_interval_set (peer, (u_int32_t)advertisement_interval);
+    } else {
+        VLOG_DBG("neighbor %s unset advertisement interval \n", peer_str);
+        peer_advertise_interval_unset (peer);
+    }
+    return 0;
+}
+
+int
 daemon_neighbor_password_cmd_execute (struct bgp *bgp, char *peer_str, char *password)
 {
     struct peer *peer;

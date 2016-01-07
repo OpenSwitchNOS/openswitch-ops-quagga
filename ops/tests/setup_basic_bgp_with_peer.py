@@ -18,8 +18,8 @@
 # 02111-1307, USA.
 
 import pytest
-from vtyshutils import *
-from bgpconfig import *
+from opsvsiutils.vtyshutils import *
+from opsvsiutils.bgpconfig import *
 
 #
 # This case tests the most basic configuration between two BGP instances by

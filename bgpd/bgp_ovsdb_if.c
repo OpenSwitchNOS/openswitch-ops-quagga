@@ -235,6 +235,9 @@ bgp_ovsdb_tables_init (struct ovsdb_idl *idl)
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_status);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_external_ids);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_other_config);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_ebgp_multihop);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_ttl_security_hops);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_update_source);
 
     /* BGP policy */
     bgp_policy_ovsdb_init(idl);
@@ -1435,6 +1438,45 @@ bgp_nbr_remove_private_as_ovsdb_apply_changes(
     }
 }
 
+static void
+bgp_nbr_ebgp_multihop_ovsdb_apply_changes (const struct ovsrec_bgp_neighbor *ovs_nbr,
+    const struct ovsrec_bgp_router *ovs_bgp,
+    char * name,
+    struct bgp *bgp_instance)
+
+{
+    /* ebgp-multihop */
+    if (COL_CHANGED(ovs_nbr, ovsrec_bgp_neighbor_col_ebgp_multihop, idl_seqno)) {
+        bool ebgp = ovs_nbr->n_ebgp_multihop && ovs_nbr->ebgp_multihop[0];
+        daemon_neighbor_ebgp_multihop_cmd_execute(bgp_instance,
+            name, ebgp);
+    }
+}
+
+static void
+bgp_nbr_ttl_security_hops_ovsdb_apply_changes (const struct ovsrec_bgp_neighbor *ovs_nbr,
+    const struct ovsrec_bgp_router *ovs_bgp,
+    char * name,
+    struct bgp *bgp_instance)
+{
+    if (COL_CHANGED(ovs_nbr, ovsrec_bgp_neighbor_col_ttl_security_hops, idl_seqno)) {
+        daemon_neighbor_ttl_security_hops_cmd_execute(bgp_instance,
+            name, ovs_nbr->ttl_security_hops);
+    }
+}
+
+static void
+bgp_nbr_update_source_ovsdb_apply_changes (const struct ovsrec_bgp_neighbor *ovs_nbr,
+    const struct ovsrec_bgp_router *ovs_bgp,
+    char * name,
+    struct bgp *bgp_instance)
+{
+    if (COL_CHANGED(ovs_nbr, ovsrec_bgp_neighbor_col_update_source, idl_seqno)) {
+        daemon_neighbor_update_source_cmd_execute(bgp_instance,
+            name, ovs_nbr->update_source);
+    }
+}
+
 /*
  * Do bgp nbr changes according to ovsdb changes
  */
@@ -1536,6 +1578,19 @@ bgp_nbr_read_ovsdb_apply_changes (struct ovsdb_idl *idl)
             /* remove_private_as */
             bgp_nbr_remove_private_as_ovsdb_apply_changes(ovs_nbr, ovs_bgp,
                 ovs_bgp->key_bgp_neighbors[j], bgp_instance);
+
+	    /* ebgp_multihop */
+            bgp_nbr_ebgp_multihop_ovsdb_apply_changes(ovs_nbr, ovs_bgp,
+                ovs_bgp->key_bgp_neighbors[j], bgp_instance);
+
+	    /* ttl_security_hops */
+            bgp_nbr_ttl_security_hops_ovsdb_apply_changes(ovs_nbr, ovs_bgp,
+                ovs_bgp->key_bgp_neighbors[j], bgp_instance);
+
+	    /* update_source */
+            bgp_nbr_update_source_ovsdb_apply_changes(ovs_nbr, ovs_bgp,
+                ovs_bgp->key_bgp_neighbors[j], bgp_instance);
+
          }
       }
    }

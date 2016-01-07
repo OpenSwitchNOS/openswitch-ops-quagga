@@ -3165,6 +3165,27 @@ DEFUN_DEPRECATED (neighbor_transparent_nexthop,
 }
 
 /* EBGP multihop configuration. */
+int
+daemon_neighbor_ebgp_multihop_cmd_execute(struct bgp *bgp, const char *peer_str, bool is_set)
+{
+  struct peer *peer;
+  int64_t ttl = 255;
+
+  peer = bgp_peer_and_group_lookup (bgp, peer_str);
+  if(!peer) return CMD_WARNING;
+
+  if(is_set) {
+    if(!peer_ebgp_multihop_set (peer, &ttl))
+      VLOG_DBG("%% neighbor %s ebgp-multihop set %ld\n", peer_str, ttl);
+  }
+  else {
+    if(!peer_ebgp_multihop_unset (peer))
+      VLOG_DBG("%% neighbor %s ebgp-multihop unset\n", peer_str);
+  }
+
+  return CMD_SUCCESS;
+}
+
 static int
 peer_ebgp_multihop_set_vty (struct vty *vty, const char *ip_str,
                             const char *ttl_str)
@@ -3337,6 +3358,33 @@ ALIAS (no_neighbor_description,
 #endif /* !ENABLE_OVSDB */
 
 /* Neighbor update-source. */
+int
+daemon_neighbor_update_source_cmd_execute(struct bgp *bgp, const char *peer_str, const char *source_str)
+{
+  struct peer *peer;
+
+  peer = bgp_peer_and_group_lookup (bgp, peer_str);
+  if(!peer) return CMD_WARNING;
+
+  if (source_str) {
+    union sockunion su;
+    int ret = str2sockunion(source_str, &su);
+
+    if (ret == 0) {
+      VLOG_DBG("%% neighbor %s update-source set %s\n", peer_str, source_str);
+      return peer_update_source_addr_set(peer, &su);
+    }
+    else {
+      VLOG_DBG("%% neighbor %s update-source set with peer-group name %s\n", peer_str, source_str);
+      return peer_update_source_if_set(peer, source_str);
+    }
+  }
+  else {
+    VLOG_DBG("%% neighbor %s update-source unset\n", peer_str);
+    return peer_update_source_unset(peer);
+  }
+}
+
 static int
 peer_update_source_vty (struct vty *vty, const char *peer_str,
                         const char *source_str)
@@ -4514,6 +4562,24 @@ DEFUN (no_neighbor_allowas_in,
 }
 
 #endif /* !ENABLE_OVSDB */
+
+int
+daemon_neighbor_ttl_security_hops_cmd_execute(struct bgp *bgp, const char *peer_str, int64_t *ttl)
+{
+  struct peer *peer;
+
+  peer = bgp_peer_and_group_lookup (bgp, peer_str);
+  if(!peer) return CMD_WARNING;
+
+  if (ttl) {
+    VLOG_DBG("%% neighbor %s ttl-security-hops set %ld\n", peer_str, *ttl);
+    return peer_ttl_security_hops_set(peer, *ttl);
+  }
+  else {
+    VLOG_DBG("%% neighbor %s ttl-security-hops unset\n", peer_str);
+    return peer_ttl_security_hops_unset(peer);
+  }
+}
 
 DEFUN (neighbor_ttl_security,
        neighbor_ttl_security_cmd,

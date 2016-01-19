@@ -424,6 +424,7 @@ bgp_ovsdb_set_local_rib_nexthop(struct ovsdb_idl_txn *txn,
 {
     struct bgp_info *mpinfo;
     struct in_addr *nexthop;
+    struct in6_addr *nexthop6;
     struct ovsrec_bgp_nexthop **nexthop_list;
     char nexthop_buf[INET6_ADDRSTRLEN];
     const struct ovsrec_bgp_nexthop *pnexthop = NULL;
@@ -436,15 +437,31 @@ bgp_ovsdb_set_local_rib_nexthop(struct ovsdb_idl_txn *txn,
         VLOG_ERR ("Invalid sub-address family %s for nexthop\n", safi_str);
         return -1;
     }
-    nexthop = &info->attr->nexthop;
-    if (nexthop->s_addr == 0) {
-        VLOG_INFO("%s: Nexthop address is 0 for route %s\n",
-                  __FUNCTION__, pr);
-        return -1;
+
+    if (p->family == AF_INET) {
+        nexthop = &info->attr->nexthop;
+        if (nexthop->s_addr == 0) {
+            VLOG_INFO("%s: Nexthop address is 0 for route %s\n",
+                      __FUNCTION__, pr);
+            return -1;
+        }
+        inet_ntop(p->family, nexthop, nexthop_buf, sizeof(nexthop_buf));
+    } else if (p->family == AF_INET6) {
+        nexthop6 = &info->attr->extra->mp_nexthop_global;
+        if (((uint32_t)(nexthop6->s6_addr[0] == 0)) &&
+            ((uint32_t)(nexthop6->s6_addr[4] == 0)) &&
+            ((uint32_t)(nexthop6->s6_addr[8] == 0)) &&
+            ((uint32_t)(nexthop6->s6_addr[12] == 0))) {
+            VLOG_INFO("%s: Nexthop6 address is 0 for route %s\n",
+                      __FUNCTION__, pr);
+            return -1;
+        }
+        inet_ntop(p->family, nexthop6, nexthop_buf, sizeof(nexthop_buf));
     }
+
     nexthop_list = xmalloc(sizeof *rib->bgp_nexthops * nexthop_num);
+
     /* Set first nexthop */
-    inet_ntop(p->family, nexthop, nexthop_buf, sizeof(nexthop_buf));
     pnexthop = bgp_ovsdb_lookup_local_nexthop(nexthop_buf);
     if (!pnexthop) {
         pnexthop = ovsrec_bgp_nexthop_insert(txn);
@@ -807,27 +824,18 @@ bgp_ovsdb_add_local_rib_entry(struct prefix *p,
     VLOG_INFO("%s: setting prefix %s\n", __FUNCTION__, pr);
     ovsrec_bgp_route_set_address_family(rib, afi);
     ovsrec_bgp_route_set_sub_address_family(rib, safi_str);
+
     /* Set Peer */
     ovsrec_bgp_route_set_peer(rib, info->peer->host);
-
-    distance = bgp_distance_apply (p, info, bgp);
-    VLOG_DBG("distance %d\n", distance);
-    if (distance) {
-        ovsrec_bgp_route_set_distance(rib, (const int64_t *)&distance, 1);
-    }
     ovsrec_bgp_route_set_metric(rib, (const int64_t *)&info->attr->med, 1);
+
     /* Nexthops */
-    struct in_addr *nexthop = &info->attr->nexthop;
-    if (nexthop->s_addr == 0) {
-        VLOG_INFO("%s: Nexthop address is 0 for route %s\n",
-                  __FUNCTION__, pr);
-    } else {
-        nexthop_num = 1 + bgp_info_mpath_count (info);
-        VLOG_DBG("Setting nexthop num %d, metric %d, bgp_info_flags 0x%x\n",
-                 nexthop_num, info->attr->med, info->flags);
-        /* Nexthop list */
-        bgp_ovsdb_set_local_rib_nexthop(txn, rib, p, info, nexthop_num, safi);
-    }
+    nexthop_num = 1 + bgp_info_mpath_count (info);
+    VLOG_DBG("Setting nexthop num %d, metric %d, bgp_info_flags 0x%x\n",
+             nexthop_num, info->attr->med, info->flags);
+    /* Nexthop list */
+    bgp_ovsdb_set_local_rib_nexthop(txn, rib, p, info, nexthop_num, safi);
+
     /* Set VRF */
     ovsrec_bgp_route_set_vrf(rib, vrf);
     /* Set path attributes */

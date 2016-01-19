@@ -1506,7 +1506,7 @@ bgp_mp_reach_parse (struct bgp_attr_parser_args *args,
 		 __func__, peer->host, attre->mp_nexthop_len);
       return BGP_ATTR_PARSE_ERROR_NOTIFYPLS;
     }
-  
+
   /* Nexthop length check. */
   switch (attre->mp_nexthop_len)
     {

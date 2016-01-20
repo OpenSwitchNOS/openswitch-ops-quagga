@@ -70,6 +70,10 @@ Static routes are important in the absence of routing layer3 protocols or when t
 When the static routes are configured using one of the management interfaces such as the CLI or the REST, this information is written to the OVSDB.
 A static route has a configurable distance and has a default distance of 1 (highest preference), which is the least distance compared to the routes advertised by the routing protocols. So for the same destination prefix, a static next hop is preferred and selected as an active route over any other protocol next hop. Zebra picks the static routes from the OVSDB and programs them into the kernel.
 
+Static routes with VRF
+----------------------
+For every new VRF configured, a network namespace is created and a zebra daemon is started in that namespace. Since OVSDB is common, zebra needs to listen to notifications belonging to that VRF where it belongs and ignore other notifications.
+
 BGP / Routing protocols
 -----------------------
 BGP selects the best routes from all routes and publishes them in the OVSDB. Similary other routing protocols update the active routes in the OVSDB. Zebra gets these active protocol routes from OSVDB and programs them into the kernel.

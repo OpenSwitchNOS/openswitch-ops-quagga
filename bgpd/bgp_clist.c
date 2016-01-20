@@ -230,7 +230,11 @@ community_list_get (struct community_list_handler *ch,
   return list;
 }
 
+#ifdef ENABLE_OVSDB
+void
+#else
 static void
+#endif
 community_list_delete (struct community_list *list)
 {
   struct community_list_list *clist;

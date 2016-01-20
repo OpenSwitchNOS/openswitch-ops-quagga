@@ -44,6 +44,9 @@ from opsvsiutils.bgpconfig import *
 # !
 # ip prefix-list BGP1_IN seq 5 deny 11.0.0.0/8
 # ip prefix-list BGP1_IN seq 10 permit 10.0.0.0/8
+# ip prefix-list BGP1_IN seq 15 permit 150.168.15.0/24 ge 25 le 28
+# ip prefix-list BGP1_IN seq 20 permit 192.168.15.0/24 ge 27
+# ip prefix-list BGP1_IN seq 25 deny 192.168.15.0/24 le 25
 # !
 # route-map BGP1_IN permit 5
 #  description A route-map description for testing.
@@ -57,6 +60,10 @@ from opsvsiutils.bgpconfig import *
 #  bgp router-id 8.0.0.2
 #  network 10.0.0.0/8
 #  network 11.0.0.0/8
+#  network 150.168.15.64/26
+#  network 192.168.15.128/25
+#  network 192.168.15.16/28
+#  network 192.168.15.32/27
 #  neighbor 8.0.0.1 remote-as 1
 # !
 #
@@ -66,16 +73,24 @@ from opsvsiutils.bgpconfig import *
 #    Network          Next Hop            Metric LocPrf Weight Path
 # *> 9.0.0.0          0.0.0.0                  0         32768 i
 # *> 10.0.0.0         8.0.0.2                  0             0 2 i
+# *> 150.168.15.64/26 8.0.0.2                  0      0      0 2 i
+# *> 192.168.15.16/28 8.0.0.2                  0      0      0 2 i
+# *> 192.168.15.32/27 8.0.0.2                  0      0      0 2 i
+
 #
 # Expected routes of BGP2:
 # ----------------------------------------------------------------------------
 # BGP table version is 0, local router ID is 8.0.0.2
 # Origin codes: i - IGP, e - EGP, ? - incomplete
 #
-#    Network          Next Hop            Metric LocPrf Weight Path
-# *> 9.0.0.0          8.0.0.1                  0             0 1 i
-# *> 10.0.0.0         0.0.0.0                  0         32768 i
-# *> 11.0.0.0         0.0.0.0                  0         32768 i
+#    Network            Next Hop            Metric LocPrf Weight Path
+# *> 9.0.0.0            8.0.0.1                  0             0  1 i
+# *> 10.0.0.0           0.0.0.0                  0         32768  i
+# *> 11.0.0.0           0.0.0.0                  0         32768  i
+# *> 150.168.15.64/26   0.0.0.0                  0      0  32768  i
+# *> 192.168.15.128/25  0.0.0.0                  0      0  32768  i
+# *> 192.168.15.16/28   0.0.0.0                  0      0  32768  i
+# *> 192.168.15.32/27   0.0.0.0                  0      0  32768  i
 
 NUM_OF_SWITCHES = 2
 NUM_HOSTS_PER_SWITCH = 0
@@ -146,6 +161,12 @@ class bgpTest(OpsVsiTest):
 
         # Add additional network for BGP2.
         self.bgpConfig2.addNetwork("11.0.0.0")
+        self.bgpConfig2.addNetwork("150.168.15.64")
+        self.bgpConfig2.addNetwork("192.168.15.16")
+        self.bgpConfig2.addNetwork("192.168.15.128")
+        self.bgpConfig2.addNetwork("192.168.15.32")
+
+
 
         # Add the neighbors for each BGP config
         self.bgpConfig1.addNeighbor(self.bgpConfig2)
@@ -157,7 +178,7 @@ class bgpTest(OpsVsiTest):
         neighbor = self.bgpConfig1.neighbors[0]
         network = neighbor.networks[1]
         prefixList = PrefixList("BGP%s_IN" % self.bgpConfig1.asn, 5, "deny",
-                                network, DEFAULT_PL)
+                                network, DEFAULT_PL, 0, 0)
 
         self.bgpConfig1.prefixLists.append(prefixList)
         self.bgpConfig1.addRouteMap(neighbor, prefixList, "in", "permit")
@@ -165,9 +186,27 @@ class bgpTest(OpsVsiTest):
         # Configure so that the other route can be permitted
         network = neighbor.networks[0]
         prefixList = PrefixList("BGP%s_IN" % self.bgpConfig1.asn, 10, "permit",
-                                network, DEFAULT_PL)
+                                network, DEFAULT_PL, 0, 0)
 
         self.bgpConfig1.prefixLists.append(prefixList)
+
+        # ip prefix-list WORD seq num permit prefix ge <length> le <length>
+
+        prefixList = PrefixList("BGP%s_IN" % self.bgpConfig1.asn, 15, "permit",
+                                "150.168.15.0", "24", "25", "28")
+
+        self.bgpConfig1.prefixLists.append(prefixList)
+
+        prefixList = PrefixList("BGP%s_IN" % self.bgpConfig1.asn, 20, "permit",
+                                "192.168.15.0", "24", "27", "0")
+
+        self.bgpConfig1.prefixLists.append(prefixList)
+
+        prefixList = PrefixList("BGP%s_IN" % self.bgpConfig1.asn, 25, "deny",
+                                "192.168.15.0", "24", "0", "25")
+
+        self.bgpConfig1.prefixLists.append(prefixList)
+
 
     def apply_bgp_config(self):
         info("\n########## Applying BGP configurations... ##########\n")
@@ -195,7 +234,16 @@ class bgpTest(OpsVsiTest):
 
             # Add the networks this bgp will be advertising
             for network in bgp_cfg.networks:
-                cfg_array.append("network %s/%s" % (network, DEFAULT_PL))
+                if network == "150.168.15.64":
+                    cfg_array.append("network %s/%s" % (network, "26"))
+                elif network == "192.168.15.128":
+                    cfg_array.append("network %s/%s" % (network, "25"))
+                elif network == "192.168.15.32":
+                    cfg_array.append("network %s/%s" % (network, "27"))
+                elif network == "192.168.15.16":
+                    cfg_array.append("network %s/%s" % (network, "28"))
+                else :
+                    cfg_array.append("network %s/%s" % (network, DEFAULT_PL))
 
             # Add the neighbors of this switch
             for neighbor in bgp_cfg.neighbors:
@@ -217,7 +265,6 @@ class bgpTest(OpsVsiTest):
         for routeMap in bgp_cfg.routeMaps:
             prefixList = routeMap[1]
             action = routeMap[3]
-
             cfg_array.append("route-map %s %s %d" %
                              (prefixList.name, action,
                               prefixList.seq_num))
@@ -227,13 +274,44 @@ class bgpTest(OpsVsiTest):
             cfg_array.append("match ip address prefix-list %s" %
                              prefixList.name)
 
+
     def add_prefix_list_configs(self, bgp_cfg, cfg_array):
         # Add any prefix-lists
         for prefixList in bgp_cfg.prefixLists:
-            cfg_array.append("ip prefix-list %s seq %d %s %s/%s" %
-                             (prefixList.name, prefixList.seq_num,
-                              prefixList.action, prefixList.network,
-                              prefixList.prefixLen))
+
+            if prefixList.ge is 0 and prefixList.le is 0 \
+               and prefixList.network != "any":
+                cfg_array.append("ip prefix-list %s seq %d %s %s/%s" %
+                                (prefixList.name, prefixList.seq_num,
+                                 prefixList.action, prefixList.network,
+                                 prefixList.prefixLen))
+
+            elif prefixList.ge is not 0 and prefixList.le is 0 \
+                and prefixList.network != "any":
+                cfg_array.append("ip prefix-list %s seq %d %s %s/%s ge %s" %
+                                (prefixList.name, prefixList.seq_num,
+                                 prefixList.action, prefixList.network,
+                                 prefixList.prefixLen, prefixList.ge))
+
+            elif prefixList.ge is 0 and prefixList.le is not 0 \
+                and prefixList.network != "any" :
+                cfg_array.append("ip prefix-list %s seq %d %s %s/%s le %s" %
+                                (prefixList.name, prefixList.seq_num,
+                                 prefixList.action, prefixList.network,
+                                 prefixList.prefixLen, prefixList.le))
+
+            elif prefixList.network == "any":
+               cfg_array.append("ip prefix-list %s seq %d %s %s" %
+                                (prefixList.name, prefixList.seq_num,
+                                 prefixList.action, prefixList.network))
+
+            else :
+                cfg_array.append("ip prefix-list %s seq %d %s %s/%s ge %s le %s" %
+                                (prefixList.name, prefixList.seq_num,
+                                 prefixList.action, prefixList.network,
+                                 prefixList.prefixLen, prefixList.ge,
+                                 prefixList.le))
+
 
     def add_neighbor_route_map_configs(self, bgp_cfg, cfg_array):
         # Add the route-maps
@@ -279,13 +357,12 @@ class bgpTest(OpsVsiTest):
         # For each switch, verify the number of routes received
         self.verify_routes_received()
 
+
     def verify_advertised_routes(self):
         info("### Verifying advertised routes... ###\n")
-
         i = 0
         for bgp_cfg in self.bgpConfigArr:
             switch = self.net.switches[i]
-
             next_hop = "0.0.0.0"
 
             for network in bgp_cfg.networks:
@@ -329,6 +406,61 @@ class bgpTest(OpsVsiTest):
 
         assert not found, "Route %s -> %s does not exist on %s" % \
                           (network, next_hop, switch.name)
+
+        # Third network of BGP2 should be permitted
+        network = neighbor.networks[2]
+
+        info("### Verifying route for switch %s ###\n" % switch.name)
+        info("### Network: %s, Next-hop: %s - Should exist... ###\n" %
+             (network, next_hop))
+
+        found = SwitchVtyshUtils.wait_for_route(switch, network, next_hop)
+
+        assert found, "Route %s -> %s exists on %s" % \
+                      (network, next_hop, switch.name)
+
+
+        # Fourth network of BGP2 should be permitted
+        network = neighbor.networks[3]
+
+        info("### Verifying route for switch %s ###\n" % switch.name)
+        info("### Network: %s, Next-hop: %s - Should exist... ###\n" %
+             (network, next_hop))
+
+        found = SwitchVtyshUtils.wait_for_route(switch, network, next_hop)
+
+        assert found, "Route %s -> %s exists on %s" % \
+                      (network, next_hop, switch.name)
+
+
+        # Fifth network of BGP2 should NOT be permitted
+        network = neighbor.networks[4]
+        verify_route_exists = False
+
+        info("### Verifying routes for switch %s ###\n" % switch.name)
+        info("### Network: %s, Next-hop: %s - Should NOT exist... ###\n" %
+             (network, next_hop))
+
+        found = SwitchVtyshUtils.wait_for_route(switch, network, next_hop,
+                                                verify_route_exists)
+
+        assert not found, "Route %s -> %s does not exist on %s" % \
+                          (network, next_hop, switch.name)
+
+
+        # Sixth network of BGP2 should be permitted
+        network = neighbor.networks[5]
+
+        info("### Verifying route for switch %s ###\n" % switch.name)
+        info("### Network: %s, Next-hop: %s - Should exist... ###\n" %
+             (network, next_hop))
+
+        found = SwitchVtyshUtils.wait_for_route(switch, network, next_hop)
+
+        assert found, "Route %s -> %s exists on %s" % \
+                      (network, next_hop, switch.name)
+
+
 
     def verify_routemap_description(self):
         info("\n########## Verifying route-map description ##########\n")
@@ -388,11 +520,39 @@ class bgpTest(OpsVsiTest):
         info("\n########## Verifying no ip prefix-list ##########\n")
         switch = self.net.switches[0]
         for prefixList in self.bgpConfig1.prefixLists:
-            cfg = "ip prefix-list %s seq %d %s %s/%s" % (prefixList.name,
-                                                         prefixList.seq_num,
-                                                         prefixList.action,
-                                                         prefixList.network,
-                                                         prefixList.prefixLen)
+            if prefixList.ge is 0 and prefixList.le is 0:
+                     cfg = "ip prefix-list %s seq %d %s %s/%s" % (prefixList.name,
+                                                                  prefixList.seq_num,
+                                                                  prefixList.action,
+                                                                  prefixList.network,
+                                                                  prefixList.prefixLen)
+
+            elif prefixList.ge is 0 and prefixList.le is not 0:
+                     cfg = "ip prefix-list %s seq %d %s %s/%s le %s" % (prefixList.name,
+                                                                  prefixList.seq_num,
+                                                                  prefixList.action,
+                                                                  prefixList.network,
+                                                                  prefixList.prefixLen,
+                                                                  prefixList.le)
+
+            elif prefixList.ge is not 0 and prefixList.le is 0:
+                     cfg = "ip prefix-list %s seq %d %s %s/%s ge %s" % (prefixList.name,
+                                                                  prefixList.seq_num,
+                                                                  prefixList.action,
+                                                                  prefixList.network,
+                                                                  prefixList.prefixLen,
+                                                                  prefixList.ge)
+
+            else:
+                     cfg = "ip prefix-list %s seq %d %s %s/%s ge %s le %s" % (prefixList.name,
+                                                                  prefixList.seq_num,
+                                                                  prefixList.action,
+                                                                  prefixList.network,
+                                                                  prefixList.prefixLen,
+                                                                  prefixList.ge,
+                                                                  prefixList.le)
+
+
             cmd = "no %s" % cfg
 
             info("### Unconfiguring ip prefix-list %s ###\n" % prefixList.name)
@@ -415,8 +575,8 @@ class Test_bgpd_routemap:
     def setup_class(cls):
         Test_bgpd_routemap.test_var = bgpTest()
 
-    def teardown_class(cls):
-        Test_bgpd_routemap.test_var.net.stop()
+    '''def teardown_class(cls):
+        Test_bgpd_routemap.test_var.net.stop()'''
 
     def setup_method(self, method):
         pass
@@ -435,6 +595,6 @@ class Test_bgpd_routemap:
         self.test_var.verify_bgp_configs()
         self.test_var.verify_bgp_routes()
         self.test_var.verify_routemap_description()
-        self.test_var.verify_no_routemap_description()
+        '''self.test_var.verify_no_routemap_description()
         self.test_var.verify_no_routemap()
-        self.test_var.verify_no_ip_prefix_list()
+        self.test_var.verify_no_ip_prefix_list()'''

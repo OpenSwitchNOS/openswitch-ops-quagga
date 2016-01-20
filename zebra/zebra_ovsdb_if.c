@@ -105,7 +105,94 @@ rib_add_ipv6_multipath (struct prefix_ipv6 *p, struct rib *rib, safi_t safi);
  * Start of the set of debugging functions for OVSDB zebra interface.
  ********************************************************************
  */
+#ifdef VRF_ENABLE
+char *zebra_vrf = NULL;
 
+/*
+ * Given the uuid of a vrf row, get its vrf name.
+ */
+static bool get_vrf_from_uuid(char *uuid, char *vrf)
+{
+  char buff[UUID_LEN + 1];
+  const struct ovsrec_vrf *vrf_row = NULL;
+
+  if (!vrf || !ovsrec_vrf_first(idl))
+    return false;
+
+  OVSREC_VRF_FOR_EACH (vrf_row, idl)
+    {
+      memset(buff,0,UUID_LEN + 1);
+      sprintf(buff, UUID_FMT, UUID_ARGS(&(vrf_row->header_.uuid)));
+      if (!strncmp(buff,uuid,UUID_LEN + 1))
+        {
+          /* vrf row found. break */
+          break;
+        }
+    }
+
+  if (!vrf_row)
+    return false;
+
+  /* copy the vrf name */
+  strcpy(vrf,vrf_row->name);
+
+  return true;
+}
+
+/*
+ * Get the network namespace name for this daemon
+ */
+static void get_my_netns_name (char *netns)
+{
+  pid_t pid;
+  FILE* fp;
+  char command[100] = {0, };
+  if(!netns)
+    return;
+  memset(netns,0,UUID_LEN + 1);
+  pid = getpid();
+  sprintf(command, "ip netns identify %d", pid);
+  fp = popen(command,"r");
+  fscanf(fp,"%s",netns);
+  return;
+}
+
+/*
+ * Read the vrf name for this daemon
+ */
+static char* get_my_vrf_name (void)
+{
+  char vrf_s[] = "swns";
+  char vrf_d[] = DEFAULT_VRF_NAME;
+  char netns[UUID_LEN+1];
+  char *vrf_name = NULL;
+
+  vrf_name = (char*) malloc (OVSDB_VRF_NAME_MAXLEN * sizeof(char));
+  if(!vrf_name)
+    return NULL;
+  memset(vrf_name, 0, OVSDB_VRF_NAME_MAXLEN);
+
+  get_my_netns_name(netns);
+
+  /* if netns is "swns" mark the vrf_name as vrf_default */
+  if (strncmp(netns,vrf_s,OVSDB_VRF_NAME_MAXLEN) == 0) {
+      strncpy(vrf_name,vrf_d,strlen(vrf_d));
+      return vrf_name;
+  }
+
+  /* if vrf name can't be retrived, cleanup and return */
+  if (!get_vrf_from_uuid(netns,vrf_name))
+    {
+      if (vrf_name)
+        free(vrf_name);
+      zebra_vrf = NULL;
+      return NULL;
+    }
+
+  VLOG_DBG("\nVRF name for this daemon is %s\n",vrf_name);
+  return vrf_name;
+}
+#endif
 /*
  * This function dumps the details of the next-hops for a given route row in
  * OVSDB route table.
@@ -394,6 +481,10 @@ zebra_if_ovsrec_port_is_l3 (const struct ovsrec_port* port)
 
   OVSREC_VRF_FOR_EACH (vrf_row, idl)
     {
+      #ifdef VRF_ENABLE
+      if (strncmp(vrf_row->name,zebra_vrf,OVSDB_VRF_NAME_MAXLEN))
+        continue;
+      #endif
       for (port_index = 0; port_index < vrf_row->n_ports; ++port_index)
        {
          if (port->name && vrf_row->ports[port_index] &&
@@ -2320,10 +2411,31 @@ zebra_unixctl_set_debug_level (struct unixctl_conn *conn, int argc OVS_UNUSED,
 static void
 ovsdb_init (const char *db_path)
 {
+  #ifdef VRF_ENABLE
+  char lock_name[64] = {0, };
+  char netns_name[UUID_LEN + 1];
+  #endif
   /* Initialize IDL through a new connection to the dB. */
   idl = ovsdb_idl_create(db_path, &ovsrec_idl_class, false, true);
   idl_seqno = ovsdb_idl_get_seqno(idl);
+
+  #ifdef VRF_ENABLE
+  get_my_netns_name(netns_name);
+
+  if (strncmp(netns_name, "swns", OVSDB_VRF_NAME_MAXLEN))
+    {
+      sprintf(lock_name, "%s_%d", "ops_zebra", getpid());
+    }
+  else
+    {
+      sprintf(lock_name, "%s", "ops_zebra");
+    }
+
+  ovsdb_idl_set_lock(idl, lock_name);
+  #else
   ovsdb_idl_set_lock(idl, "ops_zebra");
+  #endif
+
   ovsdb_idl_verify_write_only(idl);
 
   /* Cache OpenVSwitch table */
@@ -2341,6 +2453,7 @@ ovsdb_init (const char *db_path)
   ovsdb_idl_add_column(idl, &ovsrec_route_col_metric);
   ovsdb_idl_add_column(idl, &ovsrec_route_col_from);
   ovsdb_idl_add_column(idl, &ovsrec_route_col_sub_address_family);
+  ovsdb_idl_add_column(idl, &ovsrec_route_col_vrf);
   ovsdb_idl_add_column(idl, &ovsrec_route_col_nexthops);
   ovsdb_idl_omit_alert(idl, &ovsrec_route_col_nexthops);
 
@@ -2764,6 +2877,25 @@ zebra_route_list_free_data (struct zebra_route_del_data *data)
 {
   XFREE (MTYPE_TMP, data);
 }
+
+#ifdef VRF_ENABLE
+boolean is_route_in_my_vrf (const struct ovsrec_route *ovs_route)
+{
+  char *vrf_name = NULL;
+  char *ovs_rt_vrf = NULL;
+
+  if (ovs_route->vrf == NULL)
+    {
+      ovs_rt_vrf = DEFAULT_VRF_NAME;
+    }
+  else
+    {
+      ovs_rt_vrf = ovs_route->vrf->name;
+    }
+
+  return(!strncmp(ovs_rt_vrf,zebra_vrf,OVSDB_VRF_NAME_MAXLEN));
+}
+#endif
 
 /* Add delated route to list */
 void
@@ -3556,6 +3688,14 @@ zebra_ovs_run (void)
 {
   ovsdb_idl_run(idl);
   unixctl_server_run(appctl);
+#ifdef VRF_ENABLE
+  /* Check if zebra_vrf is set; */
+  if (!zebra_vrf || !strlen(zebra_vrf))
+    {
+      zebra_vrf = get_my_vrf_name();
+      VLOG_DBG("\nzebra_ovs_run for vrf %s\n",zebra_vrf);
+    }
+#endif
 
   if (ovsdb_idl_is_lock_contended(idl))
     {
@@ -3694,6 +3834,13 @@ ovsdb_exit (void)
 void
 zebra_ovsdb_exit (void)
 {
+  #ifdef VRF_ENABLE
+  if (zebra_vrf)
+    {
+      free(zebra_vrf);
+      zebra_vrf = NULL;
+    }
+  #endif
   ovsdb_exit();
 }
 
@@ -4012,9 +4159,11 @@ zebra_update_selected_route_to_db (struct route_node *rn, struct rib *route,
 
 	  OVSREC_ROUTE_FOR_EACH (ovs_route, idl)
 	    {
-	      /*
-	       * TODO: Need to add support to check vrf
-	       */
+              #ifdef VRF_ENABLE
+              if (!(is_route_in_my_vrf(ovs_route)))
+                continue;
+              #endif
+
 	      VLOG_DBG("DB Entry: Prefix %s family %s from %s",
 		       ovs_route->prefix, ovs_route->address_family,
 		       ovs_route->from);
@@ -4044,9 +4193,11 @@ zebra_update_selected_route_to_db (struct route_node *rn, struct rib *route,
 
           OVSREC_ROUTE_FOR_EACH (ovs_route, idl)
 	    {
-	      /*
-	       * TODO: Need to add support to check vrf
-	       */
+              #ifdef VRF_ENABLE
+              if (!(is_route_in_my_vrf(ovs_route)))
+                continue;
+              #endif
+
 	      VLOG_DBG("DB Entry: Prefix %s family %s from %s",
 		       ovs_route->prefix, ovs_route->address_family,
 		       ovs_route->from);

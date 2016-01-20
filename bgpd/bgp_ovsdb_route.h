@@ -59,14 +59,27 @@ enum
 enum
 {
   PREFIX_LIST_NAME,
+  PREFIX_LIST_DESCRIPTION,
   PREFIX_LIST_ACTION,
   PREFIX_LIST_PREFIX,
+  PREFIX_LIST_GE,
+  PREFIX_LIST_LE,
   PREFIX_LIST_MAX,
 } prefix_list;
+
+enum
+{
+  COMMUNITY_FILTER_NAME,
+  COMMUNITY_FILTER_ACTION,
+  COMMUNITY_FILTER_TYPE,
+  COMMUNITY_FILTER_DESCRIPTION,
+  COMMUNITY_FILTER_MAX,
+} community_filter;
 
 
 extern struct ovsdb_idl *idl;
 
+extern int policy_ovsdb_community_filter_get(struct ovsdb_idl *idl);
 extern int policy_ovsdb_prefix_list_get (struct ovsdb_idl *idl);
 extern int policy_ovsdb_rt_map(struct ovsdb_idl *idl);
 

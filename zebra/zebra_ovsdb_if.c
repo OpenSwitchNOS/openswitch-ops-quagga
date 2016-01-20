@@ -105,6 +105,29 @@ rib_add_ipv6_multipath (struct prefix_ipv6 *p, struct rib *rib, safi_t safi);
  * Start of the set of debugging functions for OVSDB zebra interface.
  ********************************************************************
  */
+char *my_netns = NULL;
+static char* get_my_netns() {
+  pid_t pid;
+  FILE* fp;
+  char command[100] = {0, };
+  char vrf_s[] = "swns";
+  char vrf_d[] = DEFAULT_VRF_NAME;
+  char *line = (char*) malloc (OVSDB_VRF_NAME_MAXLEN * sizeof(char));
+
+  if(!line)
+    return NULL;
+
+  memset(line, 0, OVSDB_VRF_NAME_MAXLEN);
+  pid = getpid();
+  sprintf(command, "ip netns identify %d", pid);
+  fp = popen(command,"r");
+  fscanf(fp,"%s",line);
+  if (strncmp(line,vrf_s,OVSDB_VRF_NAME_MAXLEN) == 0) {
+      memset(line, 0, OVSDB_VRF_NAME_MAXLEN);
+      strncpy(line,vrf_d,strlen(vrf_d));
+  }
+  return line;
+}
 
 /*
  * This function dumps the details of the next-hops for a given route row in
@@ -394,6 +417,10 @@ zebra_if_ovsrec_port_is_l3 (const struct ovsrec_port* port)
 
   OVSREC_VRF_FOR_EACH (vrf_row, idl)
     {
+      #ifdef VRF_ENABLE
+      if (strncmp(vrf_row->name,my_netns,OVSDB_VRF_NAME_MAXLEN))
+        continue;
+      #endif
       for (port_index = 0; port_index < vrf_row->n_ports; ++port_index)
        {
          if (port->name && vrf_row->ports[port_index] &&
@@ -2320,10 +2347,35 @@ zebra_unixctl_set_debug_level (struct unixctl_conn *conn, int argc OVS_UNUSED,
 static void
 ovsdb_init (const char *db_path)
 {
+  #ifdef VRF_ENABLE
+  char lock_name[64] = {0, };
+  #endif
   /* Initialize IDL through a new connection to the dB. */
   idl = ovsdb_idl_create(db_path, &ovsrec_idl_class, false, true);
   idl_seqno = ovsdb_idl_get_seqno(idl);
+
+  #ifdef VRF_ENABLE
+  my_netns = get_my_netns();
+  if (!my_netns)
+    {
+      VLOG_ERR("\nNo memory in Heap to allocate VRF name\n");
+      return;
+    }
+
+  if (strncmp(my_netns, DEFAULT_VRF_NAME, OVSDB_VRF_NAME_MAXLEN))
+    {
+      sprintf(lock_name, "%s_%s", "ops_zebra", my_netns);
+    }
+  else
+    {
+      sprintf(lock_name, "%s", "ops_zebra");
+    }
+
+  ovsdb_idl_set_lock(idl, lock_name);
+  #else
   ovsdb_idl_set_lock(idl, "ops_zebra");
+  #endif
+
   ovsdb_idl_verify_write_only(idl);
 
   /* Cache OpenVSwitch table */
@@ -2341,6 +2393,7 @@ ovsdb_init (const char *db_path)
   ovsdb_idl_add_column(idl, &ovsrec_route_col_metric);
   ovsdb_idl_add_column(idl, &ovsrec_route_col_from);
   ovsdb_idl_add_column(idl, &ovsrec_route_col_sub_address_family);
+  ovsdb_idl_add_column(idl, &ovsrec_route_col_vrf);
   ovsdb_idl_add_column(idl, &ovsrec_route_col_nexthops);
   ovsdb_idl_omit_alert(idl, &ovsrec_route_col_nexthops);
 
@@ -2764,6 +2817,25 @@ zebra_route_list_free_data (struct zebra_route_del_data *data)
 {
   XFREE (MTYPE_TMP, data);
 }
+
+#ifdef VRF_ENABLE
+boolean is_route_in_my_vrf (const struct ovsrec_route *ovs_route)
+{
+  char *vrf_name = NULL;
+  char *ovs_rt_vrf = NULL;
+
+  if (ovs_route->vrf == NULL)
+    {
+      ovs_rt_vrf = DEFAULT_VRF_NAME;
+    }
+  else
+    {
+      ovs_rt_vrf = ovs_route->vrf->name;
+    }
+
+  return(!strncmp(ovs_rt_vrf,my_netns,OVSDB_VRF_NAME_MAXLEN));
+}
+#endif
 
 /* Add delated route to list */
 void
@@ -3694,6 +3766,13 @@ ovsdb_exit (void)
 void
 zebra_ovsdb_exit (void)
 {
+  #ifdef VRF_ENABLE
+  if (my_netns)
+    {
+      free(my_netns);
+      my_netns = NULL;
+    }
+  #endif
   ovsdb_exit();
 }
 
@@ -3956,6 +4035,7 @@ zebra_ovs_update_selected_route (const struct ovsrec_route *ovs_route,
   return 0;
 }
 
+#ifndef VRF_ENABLE
 /*
  * When zebra is ready to update the kernel with the selected route,
  * update the DB with the same information. This function will take care
@@ -4085,6 +4165,127 @@ zebra_update_selected_route_to_db (struct route_node *rn, struct rib *route,
     }
   return 0;
 }
+#else
+/*
+ * When zebra is ready to update the kernel with the selected route,
+ * update the DB with the same information. This function will take care
+ * of updating the DB
+ */
+static int
+zebra_update_selected_route_to_db (struct route_node *rn, struct rib *route,
+                                   int action)
+{
+  char prefix_str[256];
+  const struct ovsrec_route *ovs_route = NULL;
+  bool selected = (action == ZEBRA_RT_INSTALL) ? true:false;
+  struct prefix *p = NULL;
+  rib_table_info_t *info = NULL;
+
+  /*
+   * Fetch the rib entry from the DB and update the selected field based
+   * on action:
+   * action == ZEBRA_RT_INSTALL => selected = 1
+   * action == ZEBRA_RT_UNINSTALL => selected = 0
+   *
+   * If the 'route' has a valid 'ovsdb_route_row_ptr' pointer,
+   * then reference the 'ovsrec_route' structure directly from
+   * 'ovsdb_route_row_ptr' pointer. Otherwise iterate through the
+   * OVSDB route to find out the relevant 'ovsrec_route' structure. We
+   * need to investigate more on how to set the route selected bit
+   * in cases when zebra adds/update/deletes the route from the kernel.
+   */
+   p = &rn->p;
+   info = rib_table_info(rn->table);
+   memset(prefix_str, 0, sizeof(prefix_str));
+   prefix2str(p, prefix_str, sizeof(prefix_str));
+
+   VLOG_DBG("Prefix %s Family %d\n",prefix_str, PREFIX_FAMILY(p));
+
+   switch (PREFIX_FAMILY (p))
+     {
+       case AF_INET:
+
+         VLOG_DBG("Walk the OVSDB route DB to find the relevant row for"
+                  " prefix %s\n", prefix_str);
+
+         OVSREC_ROUTE_FOR_EACH (ovs_route, idl)
+           {
+             if (!(is_route_in_my_vrf(ovs_route)))
+               continue;
+
+             VLOG_DBG("DB Entry: Prefix %s family %s from %s",
+                       ovs_route->prefix, ovs_route->address_family,
+                       ovs_route->from);
+
+             if (!strcmp(ovs_route->address_family,
+                  OVSREC_ROUTE_ADDRESS_FAMILY_IPV4))
+               {
+                  if (!strcmp(ovs_route->prefix, prefix_str))
+                    {
+                      if (route->type ==
+                          ovsdb_proto_to_zebra_proto(ovs_route->from))
+                        {
+                          if (info->safi ==
+                              ovsdb_safi_to_zebra_safi(
+                                        ovs_route->sub_address_family))
+                            break;
+                        }
+                    }
+                }
+            }
+          break;
+#ifdef HAVE_IPV6
+        case AF_INET6:
+
+          VLOG_DBG("Walk the OVSDB route DB to find the relevant row for"
+                   " prefix %s\n", prefix_str);
+
+          OVSREC_ROUTE_FOR_EACH (ovs_route, idl)
+            {
+               if (!(is_route_in_my_vrf(ovs_route)))
+                 continue;
+
+              /*
+               * TODO: Need to add support to check vrf
+               */
+              VLOG_DBG("DB Entry: Prefix %s family %s from %s",
+                       ovs_route->prefix, ovs_route->address_family,
+                       ovs_route->from);
+
+              if (!strcmp(ovs_route->address_family,
+                                  OVSREC_ROUTE_ADDRESS_FAMILY_IPV6))
+                {
+                  if (!strcmp(ovs_route->prefix, prefix_str))
+                    {
+                      if (route->type ==
+                              ovsdb_proto_to_zebra_proto(ovs_route->from))
+                        {
+                          if (info->safi ==
+                              ovsdb_safi_to_zebra_safi(
+                                        ovs_route->sub_address_family))
+                            break;
+                        }
+                    }
+                }
+            }
+          break;
+#endif
+        default:
+          /* Unsupported protocol family! */
+          VLOG_ERR("Unsupported protocol in route update");
+          return 0;
+     }
+
+  if (ovs_route)
+    {
+        VLOG_DBG("Updating the selected flag for the non-private routes. "
+                 "Setting selected %s for prefix %s",
+                 selected ? "true":"false", ovs_route->prefix);
+        zebra_ovs_update_selected_route(ovs_route, &selected);
+    }
+  return 0;
+}
+#endif
 
 /*
  * This function takes a zebra rn, zebra rib entry, the next-hop

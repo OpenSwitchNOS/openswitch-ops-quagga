@@ -11836,7 +11836,11 @@ bgp_distance_apply (struct prefix *p, struct bgp_info *rinfo, struct bgp *bgp)
   if (! bgp)
     return 0;
 
+#ifdef ENABLE_OVSDB
+  if (p->family != AF_INET && p->family != AF_INET6)
+#else
   if (p->family != AF_INET)
+#endif
     return 0;
 
   peer = rinfo->peer;

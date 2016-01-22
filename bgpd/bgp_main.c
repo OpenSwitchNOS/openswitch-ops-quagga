@@ -359,11 +359,19 @@ main (int argc, char **argv)
   conf_bgp_debug_packet = -1UL;
   conf_bgp_debug_normal = -1UL;
   conf_bgp_debug_as4 = -1UL;
+  conf_bgp_debug_filter = -1UL;
+  conf_bgp_debug_keepalive = -1UL;
+  conf_bgp_debug_update = -1UL;
+  conf_bgp_debug_zebra = -1UL;
   term_bgp_debug_fsm = -1UL;
   term_bgp_debug_events = -1UL;
   term_bgp_debug_packet = -1UL;
   term_bgp_debug_normal = -1UL;
   term_bgp_debug_as4 = -1UL;
+  term_bgp_debug_filter = -1UL;
+  term_bgp_debug_keepalive = -1UL;
+  term_bgp_debug_update = -1UL;
+  term_bgp_debug_zebra = -1UL;
 #endif
   /* BGP master init. */
   bgp_master_init ();

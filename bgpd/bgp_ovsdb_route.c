@@ -56,6 +56,7 @@
 #include "bgpd/bgp_mpath.h"
 #include "bgpd/bgp_ovsdb_route.h"
 #include "openvswitch/vlog.h"
+#include "bgpd/bgp_ovsdb_if.h"
 
 #define MAX_ARGC         10
 #define MAX_ARG_LEN     256
@@ -378,9 +379,11 @@ bgp_ovsdb_set_rib_nexthop(struct ovsdb_idl_txn *txn,
     nexthop_list[0]->ip_address = xstrdup(nexthop_buf);
 
     int ii = 1;
-    /* Set multipath nexthops */
-    for(mpinfo = bgp_info_mpath_first (info); mpinfo;
-        mpinfo = bgp_info_mpath_next (mpinfo))
+    if(get_global_ecmp_status())
+    {
+        /* Set multipath nexthops */
+        for(mpinfo = bgp_info_mpath_first (info); mpinfo;
+            mpinfo = bgp_info_mpath_next (mpinfo))
         {
             /* Update the nexthop table. */
             nexthop = &mpinfo->attr->nexthop;
@@ -399,6 +402,7 @@ bgp_ovsdb_set_rib_nexthop(struct ovsdb_idl_txn *txn,
             nexthop_list[ii]->ip_address = xstrdup(nexthop_buf);
             ii++;
         }
+    }
     ovsrec_route_set_nexthops(rib, nexthop_list, nexthop_num);
     for (ii = 0; ii < nexthop_num; ii++)
         free(nexthop_list[ii]->ip_address);
@@ -420,6 +424,7 @@ bgp_ovsdb_set_local_rib_nexthop(struct ovsdb_idl_txn *txn,
 {
     struct bgp_info *mpinfo;
     struct in_addr *nexthop;
+    struct in6_addr *nexthop6;
     struct ovsrec_bgp_nexthop **nexthop_list;
     char nexthop_buf[INET6_ADDRSTRLEN];
     const struct ovsrec_bgp_nexthop *pnexthop = NULL;
@@ -432,15 +437,31 @@ bgp_ovsdb_set_local_rib_nexthop(struct ovsdb_idl_txn *txn,
         VLOG_ERR ("Invalid sub-address family %s for nexthop\n", safi_str);
         return -1;
     }
-    nexthop = &info->attr->nexthop;
-    if (nexthop->s_addr == 0) {
-        VLOG_INFO("%s: Nexthop address is 0 for route %s\n",
-                  __FUNCTION__, pr);
-        return -1;
+
+    if (p->family == AF_INET) {
+        nexthop = &info->attr->nexthop;
+        if (nexthop->s_addr == 0) {
+            VLOG_INFO("%s: Nexthop address is 0 for route %s\n",
+                      __FUNCTION__, pr);
+            return -1;
+        }
+        inet_ntop(p->family, nexthop, nexthop_buf, sizeof(nexthop_buf));
+    } else if (p->family == AF_INET6) {
+        nexthop6 = &info->attr->extra->mp_nexthop_global;
+        if (((uint32_t)(nexthop6->s6_addr[0] == 0)) &&
+            ((uint32_t)(nexthop6->s6_addr[4] == 0)) &&
+            ((uint32_t)(nexthop6->s6_addr[8] == 0)) &&
+            ((uint32_t)(nexthop6->s6_addr[12] == 0))) {
+            VLOG_INFO("%s: Nexthop6 address is 0 for route %s\n",
+                      __FUNCTION__, pr);
+            return -1;
+        }
+        inet_ntop(p->family, nexthop6, nexthop_buf, sizeof(nexthop_buf));
     }
+
     nexthop_list = xmalloc(sizeof *rib->bgp_nexthops * nexthop_num);
+
     /* Set first nexthop */
-    inet_ntop(p->family, nexthop, nexthop_buf, sizeof(nexthop_buf));
     pnexthop = bgp_ovsdb_lookup_local_nexthop(nexthop_buf);
     if (!pnexthop) {
         pnexthop = ovsrec_bgp_nexthop_insert(txn);
@@ -683,6 +704,9 @@ bgp_ovsdb_announce_rib_entry(struct prefix *p,
 
     prefix2str(p, pr, sizeof(pr));
     afi= get_str_from_afi(p->family);
+    VLOG_DBG(" AS %d, %s: route %s\n",bgp->as,
+             __FUNCTION__, pr);
+
     if (!afi) {
         VLOG_ERR ("Invalid address family for route %s\n", pr);
         return -1;
@@ -728,11 +752,21 @@ bgp_ovsdb_announce_rib_entry(struct prefix *p,
         VLOG_INFO("%s: Nexthop address is 0 for route %s\n",
                   __FUNCTION__, pr);
     } else {
-        nexthop_num = 1 + bgp_info_mpath_count (info);
-        VLOG_DBG("Setting nexthop num %d, metric %d, bgp_info_flags 0x%x\n",
+        /* If global ECMP is disabled, only publish 1 path to rib */
+        if(!get_global_ecmp_status()) {
+            if(bgp_info_mpath_count (info)) {
+                nexthop_num = 1;
+                VLOG_DBG("Ecmp disable, Setting nexthop num %d, metric %d, bgp_info_flags 0x%x\n",
+                          nexthop_num, info->attr->med, info->flags);
+                bgp_ovsdb_set_rib_nexthop(txn, rib, p, info, nexthop_num, safi);
+           }
+        } else {
+            nexthop_num = 1 + bgp_info_mpath_count (info);
+            VLOG_DBG("Ecmp enabled, Setting nexthop num %d, metric %d, bgp_info_flags 0x%x\n",
                  nexthop_num, info->attr->med, info->flags);
-        /* Nexthop list */
-        bgp_ovsdb_set_rib_nexthop(txn, rib, p, info, nexthop_num, safi);
+            /* Nexthop list */
+            bgp_ovsdb_set_rib_nexthop(txn, rib, p, info, nexthop_num, safi);
+        }
     }
 
     smap_init(&smap);
@@ -762,6 +796,9 @@ bgp_ovsdb_add_local_rib_entry(struct prefix *p,
 
     prefix2str(p, pr, sizeof(pr));
     afi= get_str_from_afi(p->family);
+    VLOG_DBG(" AS %d, %s ENTER: route %s\n",bgp->as,
+             __FUNCTION__, pr);
+
     if (!afi) {
         VLOG_ERR ("Invalid address family for route %s\n", pr);
         return -1;
@@ -787,6 +824,7 @@ bgp_ovsdb_add_local_rib_entry(struct prefix *p,
     VLOG_INFO("%s: setting prefix %s\n", __FUNCTION__, pr);
     ovsrec_bgp_route_set_address_family(rib, afi);
     ovsrec_bgp_route_set_sub_address_family(rib, safi_str);
+
     /* Set Peer */
     ovsrec_bgp_route_set_peer(rib, info->peer->host);
 
@@ -796,18 +834,14 @@ bgp_ovsdb_add_local_rib_entry(struct prefix *p,
         ovsrec_bgp_route_set_distance(rib, (const int64_t *)&distance, 1);
     }
     ovsrec_bgp_route_set_metric(rib, (const int64_t *)&info->attr->med, 1);
+
     /* Nexthops */
-    struct in_addr *nexthop = &info->attr->nexthop;
-    if (nexthop->s_addr == 0) {
-        VLOG_INFO("%s: Nexthop address is 0 for route %s\n",
-                  __FUNCTION__, pr);
-    } else {
-        nexthop_num = 1 + bgp_info_mpath_count (info);
-        VLOG_DBG("Setting nexthop num %d, metric %d, bgp_info_flags 0x%x\n",
-                 nexthop_num, info->attr->med, info->flags);
-        /* Nexthop list */
-        bgp_ovsdb_set_local_rib_nexthop(txn, rib, p, info, nexthop_num, safi);
-    }
+    nexthop_num = 1 + bgp_info_mpath_count (info);
+    VLOG_DBG("Setting nexthop num %d, metric %d, bgp_info_flags 0x%x\n",
+             nexthop_num, info->attr->med, info->flags);
+    /* Nexthop list */
+    bgp_ovsdb_set_local_rib_nexthop(txn, rib, p, info, nexthop_num, safi);
+
     /* Set VRF */
     ovsrec_bgp_route_set_vrf(rib, vrf);
     /* Set path attributes */
@@ -1889,4 +1923,36 @@ policy_prefix_list_read_ovsdb_apply_changes(struct ovsdb_idl *idl)
     policy_ovsdb_free_arg_list(&argv1, MAX_ARGC);
     policy_ovsdb_free_arg_list(&argvseq, MAX_ARGC);
     return CMD_SUCCESS;
+}
+int
+bgp_ovsdb_republish_route(const struct ovsrec_bgp_router *bgp_first, int asn)
+{
+    struct bgp_node *rn;
+    struct bgp_info *ri;
+    struct bgp * bgp;
+    char pr[20];
+    bgp = bgp_lookup((as_t)asn, NULL);
+    if(!bgp)
+    {
+       VLOG_ERR("%s Invalid bgp ",__FUNCTION__ );
+       return -1;
+    }
+    VLOG_INFO("%s for AS %d",__FUNCTION__, asn );
+    for (rn = bgp_table_top (bgp->rib[AFI_IP][SAFI_UNICAST]); rn;
+         rn = bgp_route_next (rn))
+    {
+        for (ri = rn->info;ri;ri = ri->next)
+        {
+            if( CHECK_FLAG (ri->flags, BGP_INFO_SELECTED) && bgp_info_mpath_count(ri))
+            {
+                prefix2str(&rn->p, pr, sizeof(pr));
+                VLOG_DBG("%s del route %s, has mpaths = %d\n",__FUNCTION__,
+                         pr, bgp_info_mpath_count(ri));
+                bgp_ovsdb_withdraw_rib_entry(&rn->p, ri,bgp, SAFI_UNICAST);
+                VLOG_DBG("%s re-announce route %s\n",__FUNCTION__, pr);
+                bgp_ovsdb_announce_rib_entry(&rn->p, ri,bgp, SAFI_UNICAST);
+            }
+        }
+    }
+    return 0;
 }

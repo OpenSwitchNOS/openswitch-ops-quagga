@@ -97,6 +97,9 @@ bgp_ovsdb_lookup_local_rib_entry(struct prefix *p,
                                  struct bgp_info *info,
                                  struct bgp *bgp,
                                  safi_t safi);
+extern int
+bgp_ovsdb_republish_route(const struct ovsrec_bgp_router *bgp_first, int asn);
+
 extern void
 bgp_txn_complete_processing(void);
 #endif /* BGP_OVSDB_RIB_H */

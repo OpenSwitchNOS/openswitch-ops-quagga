@@ -163,6 +163,13 @@ object_is_peer_group (const struct ovsrec_bgp_neighbor *db_bgpn_p)
 static void
 bgp_policy_ovsdb_init (struct ovsdb_idl *idl)
 {
+
+    ovsdb_idl_add_table(idl, &ovsrec_table_community_filter);
+    ovsdb_idl_add_column(idl, &ovsrec_community_filter_col_name);
+    ovsdb_idl_add_column(idl, &ovsrec_community_filter_col_action);
+    ovsdb_idl_add_column(idl, &ovsrec_community_filter_col_match);
+    ovsdb_idl_add_column(idl, &ovsrec_community_filter_col_type);
+
     ovsdb_idl_add_table(idl, &ovsrec_table_prefix_list);
     ovsdb_idl_add_column(idl, &ovsrec_prefix_list_col_name);
     ovsdb_idl_add_column(idl, &ovsrec_prefix_list_col_prefix_list_entries);
@@ -625,6 +632,89 @@ delete_bgp_router_config (struct ovsdb_idl *idl)
 }
 
 void
+delete_redistribute_config(struct ovsdb_idl *idl,
+                           const struct ovsrec_bgp_router *bgp_mod_row,
+                           struct bgp *bgp)
+{
+    const struct ovsrec_bgp_router *ovs_first;
+    int i,j,type;
+    int ret;
+    bool match_found = false;
+    for (j = 0; j < ZEBRA_ROUTE_MAX; j++) {
+        match_found = false;
+        ret = 0;
+        if (bgp->redist[AFI_IP][j] && j != ZEBRA_ROUTE_BGP) {
+            OVSREC_BGP_ROUTER_FOR_EACH(bgp_mod_row, idl) {
+                for (i=0; i< bgp_mod_row->n_redistribute; i++) {
+                    if (strcmp(bgp_mod_row->key_redistribute[i],
+                               zebra_route_string(j)) ==0 ) {
+                        match_found = true;
+                        break;
+                    }
+                }
+                if (match_found == true) {
+                    break;
+                }
+            }
+            if ( match_found == false ) {
+                    ret = bgp_redistribute_unset (bgp, AFI_IP, j);
+                    if (!ret) {
+                        VLOG_DBG("Deleted redistribute %s",
+                                  zebra_route_string(j));
+                    }
+            }
+        }
+    }
+    return;
+}
+
+void
+modify_bgp_redistribute_config(struct ovsdb_idl *idl,struct bgp *bgp_cfg,
+    const struct ovsrec_bgp_router *bgp_mod_row)
+{
+    int i=0;
+    int type;
+    int rmap;
+    int ret_status = -1;
+
+    /* Handle redistribute deletions. */
+    delete_redistribute_config(idl,bgp_mod_row, bgp_cfg);
+
+    VLOG_DBG("Setting  BGP Redistribute protocol configuration");
+    OVSREC_BGP_ROUTER_FOR_EACH(bgp_mod_row, idl) {
+        for (i = 0; i<bgp_mod_row->n_redistribute; i++) {
+            if (strlen(bgp_mod_row->value_redistribute[i]->name) == 0) {
+                type = proto_redistnum (AFI_IP, bgp_mod_row->
+                                        key_redistribute[i]);
+                if (type < 0 || type == ZEBRA_ROUTE_BGP) {
+                    VLOG_DBG("Invalid route type");
+                }
+                ret_status = bgp_redistribute_set(bgp_cfg, AFI_IP, type);
+                if (!ret_status) {
+                    VLOG_DBG("redistribute %s is set",bgp_mod_row->
+                             key_redistribute[i]);
+                }
+            } else {
+                type = proto_redistnum (AFI_IP, bgp_mod_row->
+                                        key_redistribute[i]);
+                if (type < 0 || type == ZEBRA_ROUTE_BGP) {
+                    VLOG_DBG("Invalid route type");
+                }
+
+                rmap=bgp_redistribute_rmap_set (bgp_cfg, AFI_IP, type,
+                                      bgp_mod_row->value_redistribute[i]->name);
+                ret_status = bgp_redistribute_set(bgp_cfg, AFI_IP, type);
+                if (!rmap && !ret_status) {
+                    VLOG_DBG("redistribute %s route-map %s is set",
+                              bgp_mod_row->key_redistribute[i],
+                              bgp_mod_row->value_redistribute[i]->name);
+                }
+            }
+        }
+    }
+}
+
+void
 insert_bgp_router_config (struct ovsdb_idl *idl,
     const struct ovsrec_bgp_router *bgp_first, int asn)
 {
@@ -723,7 +813,14 @@ modify_bgp_router_config (struct ovsdb_idl *idl,
                                       idl_seqno)) {
         modify_bgp_log_neighbor_changes_config(bgp_cfg, bgp_mod_row);
     }
+
+    /* Check redistribute configuration is modified*/
+    if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_bgp_router_col_redistribute, idl_seqno)) {
+        VLOG_DBG("Redistribute configuration  modified");
+        modify_bgp_redistribute_config(idl, bgp_cfg, bgp_mod_row);
+    }
 }
+
 
 int
 modify_bgp_router_id_config (struct bgp *bgp_cfg,
@@ -1673,9 +1770,10 @@ bgp_reconfigure (struct ovsdb_idl *idl)
     }
 
     /*
-     * Apply route map changes
+     * Apply prefix list, community filter and route map changes
      */
     policy_prefix_list_read_ovsdb_apply_changes(idl);
+    policy_community_filter_read_ovsdb_apply_changes(idl);
     policy_rt_map_read_ovsdb_apply_changes(idl);
 
     /* Apply the changes */

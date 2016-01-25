@@ -153,4 +153,9 @@ extern int community_list_exact_match (struct community *,
 extern struct community *
 community_list_match_delete (struct community *, struct community_list *);
 
+extern struct community_list_master *
+community_list_master_lookup (struct community_list_handler *ch, int master);
+
+extern void
+community_list_delete (struct community_list *list);
 #endif /* _QUAGGA_BGP_CLIST_H */

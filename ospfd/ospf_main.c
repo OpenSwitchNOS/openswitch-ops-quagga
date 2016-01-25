@@ -1,6 +1,7 @@
 /*
  * OSPFd main routine.
  *   Copyright (C) 1998, 99 Kunihiro Ishiguro, Toshiaki Takada
+ *   Copyright (C) 2015 Hewlett Packard Enterprise Development LP
  *
  * This file is part of GNU Zebra.
  *
@@ -52,9 +53,6 @@
 
 #ifdef ENABLE_OVSDB
 #include "ospfd/ospf_ovsdb_if.h"
-#endif
-
-#ifdef ENABLE_OVSDB
 extern boolean exiting;
 #endif
 
@@ -289,6 +287,11 @@ main (int argc, char **argv)
   zlog_default = openzlog (progname, ZLOG_OSPF,
 			   LOG_CONS|LOG_NDELAY|LOG_PID, LOG_DAEMON);
 
+#ifdef ENABLE_OVSDB
+  zlog_set_level(NULL, ZLOG_DEST_SYSLOG, LOG_DEBUG);
+  zlog_set_level (NULL, ZLOG_DEST_STDOUT, LOG_DEBUG);
+#endif
+
   /* OSPF master init. */
   ospf_master_init ();
 
@@ -310,14 +313,17 @@ main (int argc, char **argv)
   ospf_if_init ();
   ospf_zebra_init ();
 
+#ifndef ENABLE_OVSDB
   /* OSPF vty inits. */
   ospf_vty_init ();
   ospf_vty_show_init ();
+#endif
 
   ospf_route_map_init ();
 #ifdef HAVE_SNMP
   ospf_snmp_init ();
 #endif /* HAVE_SNMP */
+
 #ifdef HAVE_OPAQUE_LSA
   ospf_opaque_init ();
 #endif /* HAVE_OPAQUE_LSA */

@@ -1,5 +1,6 @@
 /* OSPF version 2 daemon program.
    Copyright (C) 1999, 2000 Toshiaki Takada
+   Copyright (C) 2015 Hewlett Packard Enterprise Development LP
 
 This file is part of GNU Zebra.
 
@@ -34,6 +35,10 @@ Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 #include "zclient.h"
 #include "plist.h"
 #include "sockopt.h"
+
+#ifdef ENABLE_OVSDB
+#include "ospf_ovsdb_if.h"
+#endif
 
 #include "ospfd/ospfd.h"
 #include "ospfd/ospf_network.h"
@@ -72,8 +77,8 @@ static void ospf_network_run (struct prefix *, struct ospf_area *);
 static void ospf_network_run_interface (struct prefix *, struct ospf_area *,
                                         struct interface *);
 static int ospf_network_match_iface (const struct connected *,
-				     const struct prefix *);
-static void ospf_finish_final (struct ospf *);
+                     const struct prefix *);
+void ospf_finish_final (struct ospf *);
 
 #define OSPF_EXTERNAL_LSA_ORIGINATE_DELAY 1
 
@@ -105,15 +110,21 @@ ospf_router_id_update (struct ospf *ospf)
     router_id = router_id_zebra;
 
   ospf->router_id = router_id;
-  
+
   if (IS_DEBUG_OSPF_EVENT)
     zlog_debug ("Router-ID[NEW:%s]: Update", inet_ntoa (ospf->router_id));
 
   if (!IPV4_ADDR_SAME (&router_id_old, &router_id))
     {
       for (ALL_LIST_ELEMENTS_RO (ospf->oiflist, node, oi))
+      {
         /* Update self-neighbor's router_id. */
         oi->nbr_self->router_id = router_id;
+#ifdef ENABLE_OVSDB
+        ovsdb_ospf_set_nbr_self_router_id (oi->ifp->name, oi->nbr_self->src,
+                                      oi->nbr_self->router_id);
+#endif
+       }
 
       /* If AS-external-LSA is queued, then flush those LSAs. */
       if (router_id_old.s_addr == 0 && ospf->external_origin)
@@ -133,7 +144,7 @@ ospf_router_id_update (struct ospf *ospf)
 
       /* update router-lsa's for each area */
       ospf_router_lsa_update (ospf);
-      
+
       /* update ospf_interface's */
       for (ALL_LIST_ELEMENTS_RO (om->iflist, node, ifp))
         ospf_if_update (ospf, ifp);
@@ -152,7 +163,7 @@ ospf_area_id_cmp (struct ospf_area *a1, struct ospf_area *a2)
 }
 
 /* Allocate new ospf structure. */
-static struct ospf *
+struct ospf *
 ospf_new (void)
 {
   int i;
@@ -175,11 +186,11 @@ ospf_new (void)
   new->default_originate = DEFAULT_ORIGINATE_NONE;
 
   new->passive_interface_default = OSPF_IF_ACTIVE;
-  
+
   new->new_external_route = route_table_init ();
   new->old_external_route = route_table_init ();
   new->external_lsas = route_table_init ();
-  
+
   new->stub_router_startup_time = OSPF_STUB_ROUTER_UNCONFIGURED;
   new->stub_router_shutdown_time = OSPF_STUB_ROUTER_UNCONFIGURED;
   new->stub_router_admin_set     = OSPF_STUB_ROUTER_ADMINISTRATIVE_UNSET;
@@ -233,7 +244,7 @@ ospf_new (void)
     }
   new->t_read = thread_add_read (master, ospf_read, new, new->fd);
   new->oi_write_q = list_new ();
-  
+
   return new;
 }
 
@@ -246,13 +257,34 @@ ospf_lookup ()
   return listgetdata (listhead (om->ospf));
 }
 
-static void
+#ifdef ENABLE_OVSDB
+struct ospf *
+ospf_lookup_by_instance (int64_t ospf_instance)
+{
+  struct listnode* ospf_list = NULL;
+  struct ospf* ospf = NULL;
+
+  if (listcount (om->ospf) == 0)
+    return NULL;
+
+  for (ospf_list = listhead (om->ospf) ; ospf_list != NULL ; ospf_list = listnextnode(ospf_list))
+  {
+    ospf = (struct ospf*)listgetdata (ospf_list);
+    if (ospf && (ospf->ospf_inst == ospf_instance))
+        return ospf;
+  }
+
+  return NULL;
+}
+#endif
+
+void
 ospf_add (struct ospf *ospf)
 {
   listnode_add (om->ospf, ospf);
 }
 
-static void
+void
 ospf_delete (struct ospf *ospf)
 {
   listnode_delete (om->ospf, ospf);
@@ -267,6 +299,9 @@ ospf_get ()
   if (ospf == NULL)
     {
       ospf = ospf_new ();
+#ifdef ENABLE_OVSDB
+      ospf->ospf_inst = 1;
+#endif
       ospf_add (ospf);
 
       if (ospf->router_id_static.s_addr == 0)
@@ -291,13 +326,13 @@ ospf_get ()
 static void
 ospf_deferred_shutdown_finish (struct ospf *ospf)
 {
-  ospf->stub_router_shutdown_time = OSPF_STUB_ROUTER_UNCONFIGURED;  
+  ospf->stub_router_shutdown_time = OSPF_STUB_ROUTER_UNCONFIGURED;
   OSPF_TIMER_OFF (ospf->t_deferred_shutdown);
-  
+
   ospf_finish_final (ospf);
-  
+
   /* *ospf is now invalid */
-  
+
   /* ospfd being shut-down? If so, was this the last ospf instance? */
   if (CHECK_FLAG (om->options, OSPF_MASTER_SHUTDOWN)
       && (listcount (om->ospf) == 0))
@@ -311,9 +346,9 @@ static int
 ospf_deferred_shutdown_timer (struct thread *t)
 {
   struct ospf *ospf = THREAD_ARG(t);
-  
+
   ospf_deferred_shutdown_finish (ospf);
-  
+
   return 0;
 }
 
@@ -326,18 +361,18 @@ ospf_deferred_shutdown_check (struct ospf *ospf)
   unsigned long timeout;
   struct listnode *ln;
   struct ospf_area *area;
-  
+
   /* deferred shutdown already running? */
   if (ospf->t_deferred_shutdown)
     return;
-  
+
   /* Should we try push out max-metric LSAs? */
   if (ospf->stub_router_shutdown_time != OSPF_STUB_ROUTER_UNCONFIGURED)
     {
       for (ALL_LIST_ELEMENTS_RO (ospf->areas, ln, area))
         {
           SET_FLAG (area->stub_router_state, OSPF_AREA_ADMIN_STUB_ROUTED);
-          
+
           if (!CHECK_FLAG (area->stub_router_state, OSPF_AREA_IS_STUB_ROUTED))
             ospf_router_lsa_update_area (area);
         }
@@ -349,7 +384,7 @@ ospf_deferred_shutdown_check (struct ospf *ospf)
       ospf_deferred_shutdown_finish (ospf);
       return;
     }
-  
+
   OSPF_TIMER_ON (ospf->t_deferred_shutdown, ospf_deferred_shutdown_timer,
                  timeout);
   return;
@@ -361,11 +396,11 @@ ospf_terminate (void)
 {
   struct ospf *ospf;
   struct listnode *node, *nnode;
-  
+
   /* shutdown already in progress */
   if (CHECK_FLAG (om->options, OSPF_MASTER_SHUTDOWN))
     return;
-  
+
   SET_FLAG (om->options, OSPF_MASTER_SHUTDOWN);
 
   /* exit immediately if OSPF not actually running */
@@ -386,7 +421,7 @@ ospf_finish (struct ospf *ospf)
 {
   /* let deferred shutdown decide */
   ospf_deferred_shutdown_check (ospf);
-      
+
   /* if ospf_deferred_shutdown returns, then ospf_finish_final is
    * deferred to expiry of G-S timer thread. Return back up, hopefully
    * to thread scheduler.
@@ -395,7 +430,7 @@ ospf_finish (struct ospf *ospf)
 }
 
 /* Final cleanup of ospf instance */
-static void
+void
 ospf_finish_final (struct ospf *ospf)
 {
   struct route_node *rn;
@@ -410,10 +445,10 @@ ospf_finish_final (struct ospf *ospf)
 #ifdef HAVE_OPAQUE_LSA
   ospf_opaque_type11_lsa_term (ospf);
 #endif /* HAVE_OPAQUE_LSA */
-  
+
   /* be nice if this worked, but it doesn't */
   /*ospf_flush_self_originated_lsas_now (ospf);*/
-  
+
   /* Unregister redistribution */
   for (i = 0; i < ZEBRA_ROUTE_MAX; i++)
     ospf_redistribute_unset (ospf, i);
@@ -421,10 +456,10 @@ ospf_finish_final (struct ospf *ospf)
 
   for (ALL_LIST_ELEMENTS (ospf->areas, node, nnode, area))
     ospf_remove_vls_through_area (ospf, area);
-  
+
   for (ALL_LIST_ELEMENTS (ospf->vlinks, node, nnode, vl_data))
     ospf_vl_delete (ospf, vl_data);
-  
+
   list_delete (ospf->vlinks);
 
   /* Reset interface. */
@@ -491,7 +526,7 @@ ospf_finish_final (struct ospf *ospf)
 
   close (ospf->fd);
   stream_free(ospf->ibuf);
-   
+
 #ifdef HAVE_OPAQUE_LSA
   LSDB_LOOP (OPAQUE_AS_LSDB (ospf), rn, lsa)
     ospf_discard_from_db (ospf, ospf->lsdb, lsa);
@@ -542,14 +577,14 @@ ospf_finish_final (struct ospf *ospf)
     }
 
   list_delete (ospf->areas);
-  
+
   for (i = ZEBRA_ROUTE_SYSTEM; i <= ZEBRA_ROUTE_MAX; i++)
     if (EXTERNAL_INFO (i) != NULL)
       for (rn = route_top (EXTERNAL_INFO (i)); rn; rn = route_next (rn))
 	{
 	  if (rn->info == NULL)
 	    continue;
-	  
+
 	  XFREE (MTYPE_OSPF_EXTERNAL_INFO, rn->info);
 	  rn->info = NULL;
 	  route_unlock_node (rn);
@@ -565,7 +600,7 @@ ospf_finish_final (struct ospf *ospf)
 
 
 /* allocate new OSPF Area object */
-static struct ospf_area *
+struct ospf_area *
 ospf_area_new (struct ospf *ospf, struct in_addr area_id)
 {
   struct ospf_area *new;
@@ -580,7 +615,7 @@ ospf_area_new (struct ospf *ospf, struct in_addr area_id)
   new->external_routing = OSPF_AREA_DEFAULT;
   new->default_cost = 1;
   new->auth_type = OSPF_AUTH_NULL;
-  
+
   /* New LSDB init. */
   new->lsdb = ospf_lsdb_new ();
 
@@ -606,6 +641,11 @@ ospf_area_free (struct ospf_area *area)
   struct route_node *rn;
   struct ospf_lsa *lsa;
 
+/* Delete area from OVSDB */
+#ifdef ENABLE_OVSDB
+ovsdb_ospf_remove_area_from_router (area->ospf->ospf_inst,
+                              area->area_id);
+#endif
   /* Free LSDBs. */
   LSDB_LOOP (ROUTER_LSDB (area), rn, lsa)
     ospf_discard_from_db (area->ospf, area->lsdb, lsa);
@@ -629,7 +669,7 @@ ospf_area_free (struct ospf_area *area)
   ospf_lsdb_free (area->lsdb);
 
   ospf_lsa_unlock (&area->router_lsa_self);
-  
+
   route_table_finish (area->ranges);
   list_delete (area->oiflist);
 
@@ -644,7 +684,7 @@ ospf_area_free (struct ospf_area *area)
 #ifdef HAVE_OPAQUE_LSA
   OSPF_TIMER_OFF (area->t_opaque_lsa_self);
 #endif /* HAVE_OPAQUE_LSA */
-  
+
   if (OSPF_IS_AREA_BACKBONE (area))
     area->ospf->backbone = NULL;
 
@@ -677,18 +717,21 @@ struct ospf_area *
 ospf_area_get (struct ospf *ospf, struct in_addr area_id, int format)
 {
   struct ospf_area *area;
-  
+
   area = ospf_area_lookup_by_area_id (ospf, area_id);
   if (!area)
     {
       area = ospf_area_new (ospf, area_id);
       area->format = format;
       listnode_add_sort (ospf->areas, area);
-      ospf_check_abr_status (ospf);  
+      ospf_check_abr_status (ospf);
       if (ospf->stub_router_admin_set == OSPF_STUB_ROUTER_ADMINISTRATIVE_SET)
         {
           SET_FLAG (area->stub_router_state, OSPF_AREA_ADMIN_STUB_ROUTED);
         }
+#ifdef ENABLE_OVSDB
+      ovsdb_ospf_add_area_to_router (ospf->ospf_inst, area_id);
+#endif
     }
 
   return area;
@@ -711,6 +754,9 @@ void
 ospf_area_add_if (struct ospf_area *area, struct ospf_interface *oi)
 {
   listnode_add (area->oiflist, oi);
+#ifdef ENABLE_OVSDB
+  ovsdb_area_set_interface(area->ospf->ospf_inst,area->area_id,oi->ifp->name);
+#endif
 }
 
 void
@@ -729,7 +775,7 @@ ospf_network_new (struct in_addr area_id, int format)
 
   new->area_id = area_id;
   new->format = format;
-  
+
   return new;
 }
 
@@ -809,15 +855,15 @@ ospf_network_unset (struct ospf *ospf, struct prefix_ipv4 *p,
     {
       int found = 0;
       struct connected *co = oi->connected;
-      
+
       if (oi->type == OSPF_IFTYPE_VIRTUALLINK)
         continue;
-      
+
       for (rn = route_top (ospf->networks); rn; rn = route_next (rn))
         {
           if (rn->info == NULL)
             continue;
-          
+
           if (ospf_network_match_iface(co,&rn->p))
             {
               found = 1;
@@ -832,7 +878,7 @@ ospf_network_unset (struct ospf *ospf, struct prefix_ipv4 *p,
 	  ospf_area_check_free (ospf, area_id);
 	}
     }
-  
+
   /* Update connected redistribute. */
   if (ospf_is_type_redistributed (ZEBRA_ROUTE_CONNECT))
     if (EXTERNAL_INFO (ZEBRA_ROUTE_CONNECT))
@@ -862,10 +908,10 @@ ospf_network_run_interface (struct prefix *p, struct ospf_area *area,
 {
   struct listnode *cnode;
   struct connected *co;
-  
+
   if (memcmp (ifp->name, "VLINK", 5) == 0)
     return;
-  
+
   /* if interface prefix is match specified prefix,
      then create socket and join multicast group. */
   for (ALL_LIST_ELEMENTS_RO (ifp->connected, cnode, co))
@@ -874,20 +920,20 @@ ospf_network_run_interface (struct prefix *p, struct ospf_area *area,
       if (CHECK_FLAG(co->flags,ZEBRA_IFA_SECONDARY))
         continue;
 
-      if (p->family == co->address->family 
+      if (p->family == co->address->family
 	  && ! ospf_if_table_lookup(ifp, co->address)
           && ospf_network_match_iface(co,p))
         {
            struct ospf_interface *oi;
-            
+
             oi = ospf_if_new (area->ospf, ifp, co->address);
             oi->connected = co;
-            
+
             oi->area = area;
 
             oi->params = ospf_lookup_if_params (ifp, oi->address->u.prefix4);
             oi->output_cost = ospf_if_get_output_cost (oi);
-            
+
             /* Add pseudo neighbor. */
             ospf_nbr_add_self (oi);
 
@@ -898,16 +944,21 @@ ospf_network_run_interface (struct prefix *p, struct ospf_area *area,
             /* If network type is specified previously,
                skip network type setting. */
             oi->type = IF_DEF_PARAMS (ifp)->type;
-            
+
             ospf_area_add_if (oi->area, oi);
-            
+
+#ifdef ENABLE_OVSDB
+            /* Add after adding interface, otherwise interface will be NULL */
+            ovsdb_ospf_add_nbr_self (oi->nbr_self, oi->ifp->name);
+#endif
+
             /* if router_id is not configured, dont bring up
              * interfaces.
              * ospf_router_id_update() will call ospf_if_update
              * whenever r-id is configured instead.
              */
             if ((area->ospf->router_id.s_addr != 0)
-                && if_is_operative (ifp)) 
+                && if_is_operative (ifp))
               ospf_if_up (oi);
           }
     }
@@ -922,7 +973,7 @@ ospf_network_run (struct prefix *p, struct ospf_area *area)
   /* Schedule Router ID Update. */
   if (area->ospf->router_id.s_addr == 0)
     ospf_router_id_update (area->ospf);
-  
+
   /* Get target interface. */
   for (ALL_LIST_ELEMENTS_RO (om->iflist, node, ifp))
     ospf_network_run_interface (p, area, ifp);
@@ -946,7 +997,7 @@ ospf_ls_upd_queue_empty (struct ospf_interface *oi)
 	list_free (lst);
 	rn->info = NULL;
       }
-  
+
   /* remove update event */
   if (oi->t_ls_upd_event)
     {
@@ -961,14 +1012,14 @@ ospf_if_update (struct ospf *ospf, struct interface *ifp)
   struct route_node *rn;
   struct ospf_network *network;
   struct ospf_area *area;
-  
+
   if (!ospf)
     ospf = ospf_lookup ();
 
   /* OSPF must be on and Router-ID must be configured. */
   if (!ospf || ospf->router_id.s_addr == 0)
     return;
-  
+
   /* Run each netowrk for this interface. */
   for (rn = route_top (ospf->networks); rn; rn = route_next (rn))
     if (rn->info != NULL)
@@ -1270,14 +1321,14 @@ ospf_area_export_list_unset (struct ospf *ospf, struct ospf_area * area)
   EXPORT_NAME (area) = NULL;
 
   ospf_area_check_free (ospf, area->area_id);
-  
+
   ospf_schedule_abr_task (ospf);
 
   return 1;
 }
 
 int
-ospf_area_import_list_set (struct ospf *ospf, struct ospf_area *area, 
+ospf_area_import_list_set (struct ospf *ospf, struct ospf_area *area,
                            const char *name)
 {
   struct access_list *list;
@@ -1320,7 +1371,7 @@ ospf_timers_refresh_set (struct ospf *ospf, int interval)
 
   time_left = ospf->lsa_refresh_interval -
     (quagga_time (NULL) - ospf->lsa_refresher_started);
-  
+
   if (time_left > interval)
     {
       OSPF_TIMER_OFF (ospf->t_lsa_refresher);
@@ -1425,7 +1476,7 @@ ospf_nbr_nbma_add (struct ospf_nbr_nbma *nbr_nbma,
 
   if (IPV4_ADDR_SAME (&oi->nbr_self->address.u.prefix4, &nbr_nbma->addr))
     return;
-      
+
   nbr_nbma->oi = oi;
   listnode_add (oi->nbr_nbma, nbr_nbma);
 

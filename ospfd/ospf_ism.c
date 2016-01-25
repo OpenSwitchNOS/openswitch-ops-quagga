@@ -1,7 +1,8 @@
 /*
  * OSPF version 2  Interface State Machine
- *   From RFC2328 [OSPF Version 2] 
+ *   From RFC2328 [OSPF Version 2]
  * Copyright (C) 1999, 2000 Toshiaki Takada
+ * Copyright (C) 2015 Hewlett Packard Enterprise Development LP
  *
  * This file is part of GNU Zebra.
  *
@@ -44,6 +45,9 @@
 #include "ospfd/ospf_flood.h"
 #include "ospfd/ospf_abr.h"
 #include "ospfd/ospf_snmp.h"
+#ifdef ENABLE_OVSDB
+#include "ospf_ovsdb_if.h"
+#endif
 
 /* elect DR and BDR. Refer to RFC2319 section 9.4 */
 static struct ospf_neighbor *
@@ -227,7 +231,7 @@ ospf_dr_election (struct ospf_interface *oi)
       !(new_state == ISM_DROther && old_state < ISM_DROther))
     {
       ospf_elect_bdr (oi, el_list);
-      ospf_elect_dr (oi, el_list); 
+      ospf_elect_dr (oi, el_list);
 
       new_state = ospf_ism_state (oi);
 
@@ -240,7 +244,12 @@ ospf_dr_election (struct ospf_interface *oi)
   /* if DR or BDR changes, cause AdjOK? neighbor event. */
   if (!IPV4_ADDR_SAME (&old_dr, &DR (oi)) ||
       !IPV4_ADDR_SAME (&old_bdr, &BDR (oi)))
-    ospf_dr_change (oi->ospf, oi->nbrs);
+    {
+#ifdef ENABLE_OVSDB
+      ovsdb_update_nbr_dr_bdr(oi->nbr_self->src,DR (oi),BDR (oi));
+#endif
+       ospf_dr_change (oi->ospf, oi->nbrs);
+    }
 
   return new_state;
 }
@@ -263,7 +272,30 @@ ospf_hello_timer (struct thread *thread)
 
   /* Hello timer set. */
   OSPF_HELLO_TIMER_ON (oi);
-  
+#ifdef ENABLE_OVSDB
+   struct timeval ovsdb_hello;
+   long hello_due_at = 0;
+   long hello_msec = 0;
+   memset (&ovsdb_hello,0,sizeof (ovsdb_hello));
+   quagga_gettime (QUAGGA_CLK_MONOTONIC,&ovsdb_hello);
+
+   /* Increment by Hello timer interval
+    * Check if fast hello is enabled
+    */
+   if (OSPF_IF_PARAM ((oi), fast_hello))
+   {
+    /* This will be in milisecond */
+       hello_msec = OSPF_IF_PARAM ((oi), fast_hello);
+       ovsdb_hello.tv_sec += hello_msec / 1000;
+       ovsdb_hello.tv_usec += 1000*(hello_msec % 1000);
+   }
+   else
+       ovsdb_hello.tv_sec += OSPF_IF_PARAM ((oi), v_hello);
+   /* Hello due time in miliseconds */
+   hello_due_at = (1000000 * ovsdb_hello.tv_sec + ovsdb_hello.tv_usec)/1000;
+   ovsdb_ospf_set_hello_time_intervals (oi->ifp->name, OSPF_TIME_INTERVAL_HELLO_DUE,hello_due_at);
+#endif
+
   return 0;
 }
 
@@ -321,7 +353,7 @@ ism_timer_set (struct ospf_interface *oi)
 	 virtual link. The router attempts to form an adjacency with
 	 neighboring router. Hello packets are also sent. */
       /* send first hello immediately */
-      OSPF_ISM_TIMER_MSEC_ON (oi->t_hello, ospf_hello_timer, 1);      
+      OSPF_ISM_TIMER_MSEC_ON (oi->t_hello, ospf_hello_timer, 1);
       OSPF_ISM_TIMER_OFF (oi->t_wait);
       OSPF_ISM_TIMER_ON (oi->t_ls_ack, ospf_ls_ack_timer, oi->v_ls_ack);
       break;
@@ -517,7 +549,7 @@ struct {
     { ism_ignore,          ISM_DR },            /* UnloopInd      */
     { ism_interface_down,  ISM_Down },          /* InterfaceDown  */
   },
-};  
+};
 
 static const char *ospf_ism_event_str[] =
 {
@@ -548,7 +580,7 @@ ism_change_state (struct ospf_interface *oi, int state)
   oi->state_change++;
 
 #ifdef HAVE_SNMP
-  /* Terminal state or regression */ 
+  /* Terminal state or regression */
   if ((state == ISM_DR) || (state == ISM_Backup) || (state == ISM_DROther) ||
       (state == ISM_PointToPoint) || (state < old_state))
     {
@@ -625,7 +657,12 @@ ospf_ism_event (struct thread *thread)
 
   /* If state is changed. */
   if (next_state != oi->state)
+  {
     ism_change_state (oi, next_state);
+#ifdef ENABLE_OVSDB
+     ovsdb_update_ifsm_state(oi->ifp->name,oi->state);
+#endif
+  }
 
   /* Make sure timer is set. */
   ism_timer_set (oi);

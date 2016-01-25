@@ -1145,6 +1145,9 @@ struct lookup_entry {
  */
 const struct lookup_entry match_table[]={
   {MATCH_PREFIX, "ip address prefix-list", "prefix_list"},
+  {MATCH_IPV6_PREFIX, "ipv6 address prefix-list", "ipv6_prefix_list"},
+  {MATCH_COMMUNITY, "community", "community"},
+  {MATCH_EXTCOMMUNITY, "extcommunity", "extcommunity"},
   {0, NULL, NULL},
 };
 

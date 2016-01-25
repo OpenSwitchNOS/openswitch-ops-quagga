@@ -57,6 +57,7 @@
 #include "bgpd/bgp_ovsdb_route.h"
 #include "openvswitch/vlog.h"
 #include "bgpd/bgp_ovsdb_if.h"
+#include "bgpd/bgp_clist.h"
 
 #define MAX_ARGC         10
 #define MAX_ARG_LEN     256
@@ -132,6 +133,27 @@ txn_command_result(enum ovsdb_idl_txn_status status, char *msg, char *pr)
     VLOG_DBG("%s %s txn sent, rc = %d\n",
              msg, pr, status);
     return 0;
+}
+
+/* Display error string.  */
+static void
+community_list_error (int ret)
+{
+  switch (ret)
+    {
+    case COMMUNITY_LIST_ERR_CANT_FIND_LIST:
+      VLOG_ERR ("Can't find community-list");
+      break;
+    case COMMUNITY_LIST_ERR_MALFORMED_VAL:
+      VLOG_ERR ("Malformed community-list value");
+      break;
+    case COMMUNITY_LIST_ERR_STANDARD_CONFLICT:
+      VLOG_ERR ("Community name conflict, previously defined as standard community");
+      break;
+    case COMMUNITY_LIST_ERR_EXPANDED_CONFLICT:
+      VLOG_ERR ("Community name conflict, previously defined as expanded community");
+      break;
+    }
 }
 
 /* Allocate a transaction recovery node, set it up and add to hmap */
@@ -1613,71 +1635,137 @@ prefix_list_type_str_to_enum(char *typestr, enum prefix_list_type *type)
     return CMD_SUCCESS;
 }
 
+static int
+invalid_prefix_range (const char *prefix)
+{
+  VLOG_DBG("Invalid prefix range for i %s, make sure:"
+             " len < ge-value <= le-value",prefix);
+
+  return CMD_SUCCESS;
+}
+
+int
+prefix_list_desc_unset ( char *name)
+{
+    struct prefix_list *plist;
+    plist = prefix_list_lookup (AFI_IP6, name);
+
+    VLOG_DBG("Deleting prefix list %s description %s",plist->name,plist->desc);
+
+    if (plist->desc) {
+        XFREE (MTYPE_TMP, plist->desc);
+        plist->desc = NULL;
+    }
+
+    if (plist->head == NULL && plist->tail == NULL && plist->desc == NULL) {
+        prefix_list_delete (plist);
+    }
+
+    return CMD_SUCCESS;
+}
+
 /*
- * ip prefix-list PL_ADVERTISE_DOWNSTREAM seq 5 permit {{ dummy0.network }}
- *
  * Get prefix configuration from ovsdb database
  */
 int
-policy_prefix_list_apply_changes (struct ovsdb_idl *idl,
+policy_prefix_list_apply_changes (struct ovsdb_idl *idl, afi_t afi,
                         char **argv1, char **argvseq,
                         int argc1, int argcseq,
                         unsigned long seqnum)
 {
-  int ret;
-  enum prefix_list_type type;
-  struct prefix_list *plist;
-  struct prefix_list_entry *pentry;
-  struct prefix_list_entry *dup;
-  struct prefix p;
-  int any = 0;
-  int lenum = 0;
-  int genum = 0;
-  afi_t afi = AFI_IP;
+    int ret;
+    enum prefix_list_type type;
+    struct prefix_list *plist;
+    struct prefix_list_entry *pentry;
+    struct prefix_list_entry *dup;
+    struct prefix p;
+    int any = 0;
+    int lenum = 0;
+    int genum = 0;
 
-  if (!argc1)
+
+    if (!argc1) {
         return CMD_SUCCESS;
+    }
+    /* Get prefix_list with name. */
+    plist = prefix_list_get (afi, argv1[PREFIX_LIST_NAME]);
 
-  /* Get prefix_list with name. */
-  plist = prefix_list_get (afi, argv1[PREFIX_LIST_NAME]);
-
-  if (prefix_list_type_str_to_enum(argv1[PREFIX_LIST_ACTION],
+    if (prefix_list_type_str_to_enum(argv1[PREFIX_LIST_ACTION],
                                    &type) != CMD_SUCCESS) {
-    VLOG_ERR("Invalid prefix-list type");
-    return CMD_SUCCESS;
-  }
+        VLOG_ERR("Invalid prefix-list type");
+        return CMD_SUCCESS;
+    }
 
-  /* "any" is special token for matching any IPv4 addresses.  */
-  if (afi == AFI_IP) {
-      if (strncmp ("any", argv1[PREFIX_LIST_PREFIX],
+    /* ge and le number */
+    if (argv1[PREFIX_LIST_GE]) {
+        genum = atoi (argv1[PREFIX_LIST_GE]);
+    }
+    if (argv1[PREFIX_LIST_LE]){
+        lenum = atoi (argv1[PREFIX_LIST_LE]);
+    }
+
+
+    if (afi == AFI_IP) {
+        if (strncmp ("any", argv1[PREFIX_LIST_PREFIX],
                  strlen (argv1[PREFIX_LIST_PREFIX])) == 0) {
-          ret = str2prefix_ipv4 ("0.0.0.0/0", (struct prefix_ipv4 *) &p);
-          genum = 0;
-          lenum = IPV4_MAX_BITLEN;
-          any = 1;
-      } else
-        ret = str2prefix_ipv4 (argv1[PREFIX_LIST_PREFIX], (struct prefix_ipv4 *) &p);
+            ret = str2prefix_ipv4 ("0.0.0.0/0", (struct prefix_ipv4 *) &p);
+            genum = 0;
+            lenum = IPV4_MAX_BITLEN;
+            any = 1;
+        } else {
+            ret = str2prefix_ipv4 (argv1[PREFIX_LIST_PREFIX],
+                              (struct prefix_ipv4 *) &p);
+        }
+        if (ret <= 0) {
+            VLOG_DBG("Malformed IPv4 prefix");
+            return CMD_SUCCESS;
+        }
+    }
+#ifdef HAVE_IPV6
+    else if (afi == AFI_IP6) {
+        if (strncmp ("any", argv1[PREFIX_LIST_PREFIX],
+                 strlen(argv1[PREFIX_LIST_PREFIX])) == 0) {
+            ret = str2prefix_ipv6 ("::/0", (struct prefix_ipv6 *) &p);
+            genum = 0;
+            lenum = IPV6_MAX_BITLEN;
+            any = 1;
+        } else {
+            ret = str2prefix_ipv6 (argv1[PREFIX_LIST_PREFIX],
+                             (struct prefix_ipv6 *) &p);
+        } if (ret <= 0) {
+            VLOG_DBG("Malformed IPv6 prefix");
+            return CMD_SUCCESS;
+        }
+    }
+#endif
 
-      if (ret <= 0) {
-           return CMD_SUCCESS;
-      }
- }
+    if (genum && (genum <= p.prefixlen)) {
+        return invalid_prefix_range (argv1[PREFIX_LIST_PREFIX]);
+    }
+    if (lenum && (lenum <= p.prefixlen)) {
+        return invalid_prefix_range (argv1[PREFIX_LIST_PREFIX]);
+    }
+    if (lenum && (genum > lenum)) {
+        return invalid_prefix_range (argv1[PREFIX_LIST_PREFIX]);
+    }
+    if (genum && (lenum == (afi == AFI_IP ? 32 : 128))) {
+        lenum = 0;
+    }
+    /* Make prefix entry. */
+    pentry = prefix_list_entry_make (&p, type, seqnum, lenum, genum, any);
 
-  /* Make prefix entry. */
-  pentry = prefix_list_entry_make (&p, type, seqnum, lenum, genum, any);
+    /* Check same policy. */
+    dup = prefix_entry_dup_check (plist, pentry);
 
-  /* Check same policy. */
-  dup = prefix_entry_dup_check (plist, pentry);
+    if (dup) {
+        prefix_list_entry_free (pentry);
+        return CMD_SUCCESS;
+    }
 
-  if (dup) {
-      prefix_list_entry_free (pentry);
-      return CMD_SUCCESS;
-  }
+    /* Install new filter to the access_list. */
+    prefix_list_entry_add (plist, pentry);
 
-  /* Install new filter to the access_list. */
-  prefix_list_entry_add (plist, pentry);
-
-  return CMD_SUCCESS;
+    return CMD_SUCCESS;
 }
 
 const struct ovsrec_prefix_list *
@@ -1704,6 +1792,7 @@ prefix_list_read_ovsdb_delete_from_master(struct prefix_list *plist_head)
 {
     struct prefix_list * plist;
 
+    int ret = -1; /*delet this*/
     if (!plist_head) {
         VLOG_DBG("Prefix List head is NULL.");
         return;
@@ -1711,8 +1800,15 @@ prefix_list_read_ovsdb_delete_from_master(struct prefix_list *plist_head)
 
     for (plist = plist_head; plist; plist = plist->next) {
         if (!lookup_prefix_list_from_ovsdb(plist->name)) {
-            VLOG_DBG("Deleting prefix list: %s", plist->name);
-            prefix_list_delete(plist);
+            if (plist->desc) {
+                ret = prefix_list_desc_unset(plist->name);
+                if (!ret) {
+                    VLOG_DBG("Deleted prefix_list description");
+                }
+            } else {
+               VLOG_DBG("Deleting prefix list: %s", plist->name);
+               prefix_list_delete(plist);
+            }
         }
     }
 }
@@ -1812,34 +1908,40 @@ void
 policy_prefix_list_read_ovsdb_apply_deletion(struct ovsdb_idl *idl)
 {
     const struct ovsrec_prefix_list *ovs_first;
-    struct prefix_master *master;
-    afi_t afi = AFI_IP;
-
+    struct prefix_master *master_ipv4;;
+    struct prefix_master *master_ipv6;
     ovs_first = ovsrec_prefix_list_first(idl);
+    VLOG_DBG("Checking for prefix list deletions");
     if (ovs_first && !OVSREC_IDL_ANY_TABLE_ROWS_DELETED(ovs_first, idl_seqno)) {
         VLOG_DBG("No prefix list deletions detected.");
         return;
     }
 
-    master = prefix_master_get (afi);
-    if (master == NULL) {
+    master_ipv4 = prefix_master_get (AFI_IP);
+    master_ipv6 = prefix_master_get (AFI_IP6);
+    if (master_ipv4 == NULL && master_ipv6 == NULL) {
         VLOG_DBG("No prefix list to delete");
         return;
     }
-
     /* Check number based name list */
-    prefix_list_read_ovsdb_delete_from_master(master->num.head);
+    prefix_list_read_ovsdb_delete_from_master(master_ipv4->num.head);
 
     /* Check string based name list */
-    prefix_list_read_ovsdb_delete_from_master(master->str.head);
+    prefix_list_read_ovsdb_delete_from_master(master_ipv4->str.head);
+
+    /* Check number based name list */
+    prefix_list_read_ovsdb_delete_from_master(master_ipv6->num.head);
+
+    /* Check string based name list */
+    prefix_list_read_ovsdb_delete_from_master(master_ipv6->str.head);
 }
 
 void
 policy_prefix_list_entry_read_ovsdb_apply_deletion (struct ovsdb_idl *idl)
 {
     const struct ovsrec_prefix_list_entry *ovs_first;
-    struct prefix_master *master;
-    afi_t afi = AFI_IP;
+    struct prefix_master *master_ipv4;
+    struct prefix_master *master_ipv6;
 
     /* prefix list */
     ovs_first = ovsrec_prefix_list_entry_first(idl);
@@ -1848,17 +1950,25 @@ policy_prefix_list_entry_read_ovsdb_apply_deletion (struct ovsdb_idl *idl)
         return;
     }
 
-    master = prefix_master_get (afi);
-    if (master == NULL) {
+    master_ipv4 = prefix_master_get (AFI_IP);
+    master_ipv6 = prefix_master_get (AFI_IP6);
+    if (master_ipv4  == NULL && master_ipv6 == NULL) {
         VLOG_DBG("No prefix list to delete");
         return;
     }
 
     /* Check number based name list */
-    prefix_list_entry_read_ovsdb_delete_from_master(master->num.head);
+    prefix_list_entry_read_ovsdb_delete_from_master(master_ipv4->num.head);
 
     /* Check string based name list */
-    prefix_list_entry_read_ovsdb_delete_from_master(master->str.head);
+    prefix_list_entry_read_ovsdb_delete_from_master(master_ipv4->str.head);
+
+    /* Check number based name list */
+    prefix_list_entry_read_ovsdb_delete_from_master(master_ipv6->num.head);
+
+    /* Check string based name list */
+    prefix_list_entry_read_ovsdb_delete_from_master(master_ipv6->str.head);
+
 }
 
 int
@@ -1869,10 +1979,14 @@ policy_prefix_list_read_ovsdb_apply_changes(struct ovsdb_idl *idl)
     char **argv1;
     char **argvseq;
     int argc1 = -1 , argcseq = -1;
-    const struct ovsrec_prefix_list_entry * prefix_first;
+    const struct ovsrec_prefix_list * prefix_list_first;
+    const struct ovsrec_prefix_list_entry * prefix_list_entry_first;
     const struct ovsrec_prefix_list * ovs_plist;
     struct ovsrec_prefix_list_entry * ovs_entry;
     int i;
+    struct in6_addr addrv6;
+    char *temp_prefix;
+    struct prefix_list *plist;
 
     /* Handle prefix list deletions. */
     policy_prefix_list_read_ovsdb_apply_deletion (idl);
@@ -1880,14 +1994,18 @@ policy_prefix_list_read_ovsdb_apply_changes(struct ovsdb_idl *idl)
     /* Handle prefix list entry deletions. */
     policy_prefix_list_entry_read_ovsdb_apply_deletion (idl);
 
-    prefix_first = ovsrec_prefix_list_entry_first(idl);
-    if (prefix_first == NULL) {
+    prefix_list_first = ovsrec_prefix_list_first(idl);
+    prefix_list_entry_first = ovsrec_prefix_list_entry_first(idl);
+
+    if (prefix_list_first == NULL && prefix_list_entry_first == NULL) {
         VLOG_DBG("No prefix list configured");
         return CMD_SUCCESS;
     }
 
-    if (!(OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED(prefix_first, idl_seqno)) &&
-        !(OVSREC_IDL_ANY_TABLE_ROWS_INSERTED(prefix_first, idl_seqno))) {
+    if ((!(OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED(prefix_list_first, idl_seqno)) &&
+        !(OVSREC_IDL_ANY_TABLE_ROWS_INSERTED(prefix_list_first, idl_seqno))) &&
+        (!(OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED(prefix_list_entry_first, idl_seqno)) &&
+        !(OVSREC_IDL_ANY_TABLE_ROWS_INSERTED(prefix_list_entry_first, idl_seqno)))) {
         VLOG_DBG("No changes for prefix list");
         return CMD_SUCCESS;
     }
@@ -1900,23 +2018,88 @@ policy_prefix_list_read_ovsdb_apply_changes(struct ovsdb_idl *idl)
 
     /* Read ovsdb and apply changes */
     OVSREC_PREFIX_LIST_FOR_EACH(ovs_plist, idl) {
+
         strcpy(argv1[PREFIX_LIST_NAME], ovs_plist->name);
+
+       if (strlen(ovs_plist->description) !=0) {
+            plist = prefix_list_get (AFI_IP6, argv1[PREFIX_LIST_NAME]);
+            plist->desc = (char *)malloc(sizeof(ovs_plist->description));
+            strcpy(plist->desc,ovs_plist->description);
+            VLOG_DBG("Setting prefix list: %s description: %s",
+                       plist->name,plist->desc);
+        }
         argc1 = PREFIX_LIST_NAME;
         for (i = 0; i < ovs_plist->n_prefix_list_entries; i ++) {
             ovs_entry = ovs_plist->value_prefix_list_entries[i];
             if (!(OVSREC_IDL_IS_ROW_INSERTED(ovs_entry, idl_seqno)) &&
-                !(OVSREC_IDL_IS_ROW_MODIFIED(ovs_entry, idl_seqno))) {
+                   !(OVSREC_IDL_IS_ROW_MODIFIED(ovs_entry, idl_seqno))) {
                 continue;
             }
             VLOG_DBG("prefix list config modified");
             strcpy(argv1[PREFIX_LIST_ACTION], ovs_entry->action);
             strcpy(argv1[PREFIX_LIST_PREFIX], ovs_entry->prefix);
+
+
+            sprintf(argv1[PREFIX_LIST_GE], "%d" ,ovs_entry->ge[0]);
+            sprintf(argv1[PREFIX_LIST_LE], "%d" ,ovs_entry->le[0]);
             argc1 = PREFIX_LIST_PREFIX + 1;
             seqnum = ovs_plist->key_prefix_list_entries[i];
             argcseq =1 ;
 
-            policy_prefix_list_apply_changes(idl, argv1, argvseq,
-                                             argc1, argcseq, seqnum);
+            temp_prefix = (char *)malloc(sizeof(ovs_entry->prefix));
+
+            strcpy(temp_prefix,ovs_entry->prefix);
+            strtok(temp_prefix,"/");
+
+            if (strcmp(ovs_entry->prefix,"any") == 0
+                   || (ovs_entry->ge[0] == 0
+                   && ovs_entry->le[0] == 0 )) {
+
+                if (ovs_entry->le[0] == 128) {
+                    policy_prefix_list_apply_changes(idl, AFI_IP6, argv1,
+                                 argvseq,argc1, argcseq, seqnum);
+
+                } else if (inet_pton(AF_INET6,temp_prefix,
+                           &addrv6) == 1) {
+                    policy_prefix_list_apply_changes(idl, AFI_IP6, argv1,
+                                  argvseq,argc1, argcseq, seqnum);
+
+                } else {
+                    policy_prefix_list_apply_changes(idl, AFI_IP, argv1,
+                                  argvseq,argc1, argcseq, seqnum);
+
+                }
+            } else if (strcmp(ovs_entry->prefix,"any") != 0
+                       && ovs_entry->le[0] == 0 ) {
+
+                if (inet_pton(AF_INET6,temp_prefix,&addrv6) == 1) {
+                        policy_prefix_list_apply_changes(idl, AFI_IP6, argv1,
+                                 argvseq,argc1, argcseq, seqnum);
+                } else {
+                        policy_prefix_list_apply_changes(idl, AFI_IP, argv1,
+                                 argvseq,argc1, argcseq, seqnum);
+                }
+            } else if (strcmp(ovs_entry->prefix,"any") != 0
+                       && ovs_entry->ge[0] == 0 ) {
+                if (inet_pton(AF_INET6,temp_prefix,&addrv6) == 1) {
+                        policy_prefix_list_apply_changes(idl, AFI_IP6, argv1,
+                                 argvseq,argc1, argcseq, seqnum);
+
+                } else {
+                        policy_prefix_list_apply_changes(idl, AFI_IP, argv1,
+                                 argvseq,argc1, argcseq, seqnum);
+                }
+
+            } else {
+                if (inet_pton(AF_INET6,temp_prefix,&addrv6) == 1) {
+                        policy_prefix_list_apply_changes(idl, AFI_IP6, argv1,
+                                 argvseq,argc1, argcseq, seqnum);
+                } else {
+                        policy_prefix_list_apply_changes(idl, AFI_IP, argv1,
+                                 argvseq,argc1, argcseq, seqnum);
+                }
+            }
+            free(temp_prefix);
         }
     }
 
@@ -1924,6 +2107,171 @@ policy_prefix_list_read_ovsdb_apply_changes(struct ovsdb_idl *idl)
     policy_ovsdb_free_arg_list(&argvseq, MAX_ARGC);
     return CMD_SUCCESS;
 }
+
+
+const struct ovsrec_community_filter *
+lookup_community_filter_from_ovsdb(const char *name)
+{
+    const struct ovsrec_community_filter *ovs_cfilter;
+
+    if (!name) {
+        VLOG_ERR("Community Filter name is NULL.");
+        return NULL;
+    }
+
+    OVSREC_COMMUNITY_FILTER_FOR_EACH(ovs_cfilter, idl) {
+        if (strcmp (name, ovs_cfilter->name) == 0) {
+            return ovs_cfilter;
+        }
+    }
+
+    return NULL;
+}
+
+
+void
+policy_community_filter_read_ovsdb_apply_deletion (struct ovsdb_idl *idl)
+{
+    const struct ovsrec_community_filter *ovs_first;
+    struct community_list *list;
+    struct community_list_master *cm;
+
+    int ret;
+    int direct = 0;
+    char *str = NULL;
+
+    ovs_first = ovsrec_community_filter_first(idl);
+    VLOG_DBG("Checking for community filter deletions");
+    if (ovs_first && !OVSREC_IDL_ANY_TABLE_ROWS_DELETED
+                                 (ovs_first, idl_seqno)) {
+        VLOG_DBG("No community filter deletions detected.");
+        return;
+    }
+    cm = community_list_master_lookup (bgp_clist, EXTCOMMUNITY_LIST_MASTER);
+    for (list = cm->str.head; list; list = list->next) {
+        if (!lookup_community_filter_from_ovsdb(list->name)) {
+            VLOG_DBG("Deleting Extended Community List: %s",list->name);
+            community_list_delete (list);
+        }
+    }
+
+    cm = community_list_master_lookup (bgp_clist, COMMUNITY_LIST_MASTER);
+    for (list = cm->str.head; list; list = list->next) {
+        if (!lookup_community_filter_from_ovsdb(list->name)) {
+            VLOG_DBG("Deleting Community List : %s",list->name);
+            community_list_delete (list);
+        }
+    }
+
+}
+
+
+int
+policy_community_filter_apply_changes (struct ovsdb_idl *idl,
+                             char **argv1, char **argvseq,
+                             int argc1, int argcseq)
+{
+    int ret;
+    int direct;
+    char *str;
+    int reject_all_digit_name = 0;
+
+    /* Check the list type. */
+    if (strncmp (argv1[COMMUNITY_FILTER_ACTION], "p", 1) == 0) {
+        direct = COMMUNITY_PERMIT;
+    }
+    else if (strncmp (argv1[COMMUNITY_FILTER_ACTION], "d", 1) == 0) {
+        direct = COMMUNITY_DENY;
+    }
+    else {
+        VLOG_ERR("Matching condition must be permit or deny");
+        return CMD_WARNING;
+    }
+
+    /* All digit name check.  */
+    if (reject_all_digit_name && all_digit (argv1[COMMUNITY_FILTER_NAME])) {
+        VLOG_ERR ("Community name cannot have all digits");
+        return CMD_WARNING;
+    }
+
+    if (strcmp(argv1[COMMUNITY_FILTER_TYPE],"extcommunity-list") == 0) {
+        ret = extcommunity_list_set (bgp_clist,
+                          argv1[COMMUNITY_FILTER_NAME],
+                          argv1[COMMUNITY_FILTER_DESCRIPTION],
+                          direct,
+                          EXTCOMMUNITY_LIST_EXPANDED);
+    }
+    else if (strcmp(argv1[COMMUNITY_FILTER_TYPE],"community-list") == 0) {
+        ret = community_list_set (bgp_clist,
+                          argv1[COMMUNITY_FILTER_NAME],
+                          argv1[COMMUNITY_FILTER_DESCRIPTION],
+                          direct,
+                          COMMUNITY_LIST_EXPANDED);
+    }
+    if (ret < 0) {
+        community_list_error (ret);
+        return CMD_WARNING;
+    }
+    return ret;
+
+}
+
+int
+policy_community_filter_read_ovsdb_apply_changes(struct ovsdb_idl *idl)
+{
+    int ret;
+    char **argv1;
+    char **argvseq;
+    int argc1 =-1, argcseq = -1;
+    const struct ovsrec_community_filter *ovs_cfilter;
+    const struct ovsrec_community_filter *community_filter_first;
+    int i;
+
+    /*Handle Community Filter deletions*/
+    policy_community_filter_read_ovsdb_apply_deletion (idl);
+
+    community_filter_first =  ovsrec_community_filter_first(idl);
+    if (community_filter_first == NULL) {
+        VLOG_DBG("No community filter configuration");
+        return CMD_SUCCESS;
+    }
+
+    if (!(OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED(community_filter_first, idl_seqno)) &&
+        !(OVSREC_IDL_ANY_TABLE_ROWS_INSERTED(community_filter_first, idl_seqno))) {
+        VLOG_DBG("No changes for community filter list");
+        return CMD_SUCCESS;
+    }
+
+    /* Allocate two argv lists. */
+    if (!(argv1 = policy_ovsdb_alloc_arg_list(MAX_ARGC, MAX_ARG_LEN)) ||
+        !(argvseq = policy_ovsdb_alloc_arg_list(MAX_ARGC, MAX_ARG_LEN))) {
+        return CMD_SUCCESS;
+    }
+
+    /* Read ovsdb and apply changes */
+    VLOG_DBG("community filter config modified");
+    OVSREC_COMMUNITY_FILTER_FOR_EACH(ovs_cfilter, idl) {
+        strcpy(argv1[COMMUNITY_FILTER_NAME], ovs_cfilter->name);
+        argc1 = COMMUNITY_FILTER_NAME;
+        strcpy(argv1[COMMUNITY_FILTER_TYPE], ovs_cfilter->type);
+        strcpy(argv1[COMMUNITY_FILTER_ACTION], ovs_cfilter->action);
+        strcpy(argv1[COMMUNITY_FILTER_DESCRIPTION], ovs_cfilter->match);
+        argcseq =1;
+
+        ret = policy_community_filter_apply_changes(idl, argv1, argvseq,
+                                                    argc1, argcseq);
+        if (!ret) {
+             VLOG_DBG("community filter configuration changes set");
+        }
+    }
+
+
+    policy_ovsdb_free_arg_list(&argv1, MAX_ARGC);
+    policy_ovsdb_free_arg_list(&argvseq, MAX_ARGC);
+    return CMD_SUCCESS;
+
+}
+
 int
 bgp_ovsdb_republish_route(const struct ovsrec_bgp_router *bgp_first, int asn)
 {

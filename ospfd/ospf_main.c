@@ -1,6 +1,7 @@
 /*
  * OSPFd main routine.
  *   Copyright (C) 1998, 99 Kunihiro Ishiguro, Toshiaki Takada
+ *   Copyright (C) 2015 Hewlett Packard Enterprise Development LP
  *
  * This file is part of GNU Zebra.
  *
@@ -50,8 +51,13 @@
 #include "ospfd/ospf_zebra.h"
 #include "ospfd/ospf_vty.h"
 
+#ifdef ENABLE_OVSDB
+#include "ospfd/ospf_ovsdb_if.h"
+extern boolean exiting;
+#endif
+
 /* ospfd privileges */
-zebra_capabilities_t _caps_p [] = 
+zebra_capabilities_t _caps_p [] =
 {
   ZCAP_NET_RAW,
   ZCAP_BIND,
@@ -76,7 +82,7 @@ struct zebra_privs_t ospfd_privs =
 char config_default[] = SYSCONFDIR OSPF_DEFAULT_CONFIG;
 
 /* OSPFd options. */
-struct option longopts[] = 
+struct option longopts[] =
 {
   { "daemon",      no_argument,       NULL, 'd'},
   { "config_file", required_argument, NULL, 'f'},
@@ -112,7 +118,7 @@ usage (char *progname, int status)
   if (status != 0)
     fprintf (stderr, "Try `%s --help' for more information.\n", progname);
   else
-    {    
+    {
       printf ("Usage : %s [OPTION...]\n\
 Daemon which manages OSPF.\n\n\
 -d, --daemon       Runs in daemon mode\n\
@@ -134,7 +140,7 @@ Report bugs to %s\n", progname, ZEBRA_BUG_ADDRESS);
 }
 
 /* SIGHUP handler. */
-static void 
+static void
 sighup (void)
 {
   zlog (NULL, LOG_INFO, "SIGHUP received");
@@ -164,7 +170,7 @@ struct quagga_signal_t ospf_signals[] =
   {
     .signal = SIGUSR1,
     .handler = &sigusr1,
-  },  
+  },
   {
     .signal = SIGINT,
     .handler = &sigint,
@@ -188,6 +194,10 @@ main (int argc, char **argv)
   struct thread thread;
   int dryrun = 0;
 
+#ifdef ENABLE_OVSDB
+  ospf_ovsdb_init(argc, argv);
+#endif
+
   /* Set umask before anything for security */
   umask (0027);
 
@@ -199,16 +209,16 @@ main (int argc, char **argv)
   /* get program name */
   progname = ((p = strrchr (argv[0], '/')) ? ++p : argv[0]);
 
-  while (1) 
+  while (1)
     {
       int opt;
 
       opt = getopt_long (argc, argv, "df:i:z:hA:P:u:g:avC", longopts, 0);
-    
+
       if (opt == EOF)
 	break;
 
-      switch (opt) 
+      switch (opt)
 	{
 	case 0:
 	  break;
@@ -230,11 +240,11 @@ main (int argc, char **argv)
 	case 'P':
           /* Deal with atoi() returning 0 on failure, and ospfd not
              listening on ospfd port... */
-          if (strcmp(optarg, "0") == 0) 
+          if (strcmp(optarg, "0") == 0)
             {
               vty_port = 0;
               break;
-            } 
+            }
           vty_port = atoi (optarg);
           if (vty_port <= 0 || vty_port > 0xffff)
             vty_port = OSPF_VTY_PORT;
@@ -277,6 +287,11 @@ main (int argc, char **argv)
   zlog_default = openzlog (progname, ZLOG_OSPF,
 			   LOG_CONS|LOG_NDELAY|LOG_PID, LOG_DAEMON);
 
+#ifdef ENABLE_OVSDB
+  zlog_set_level(NULL, ZLOG_DEST_SYSLOG, LOG_DEBUG);
+  zlog_set_level (NULL, ZLOG_DEST_STDOUT, LOG_DEBUG);
+#endif
+
   /* OSPF master init. */
   ospf_master_init ();
 
@@ -298,18 +313,21 @@ main (int argc, char **argv)
   ospf_if_init ();
   ospf_zebra_init ();
 
+#ifndef ENABLE_OVSDB
   /* OSPF vty inits. */
   ospf_vty_init ();
   ospf_vty_show_init ();
+#endif
 
   ospf_route_map_init ();
 #ifdef HAVE_SNMP
   ospf_snmp_init ();
 #endif /* HAVE_SNMP */
+
 #ifdef HAVE_OPAQUE_LSA
   ospf_opaque_init ();
 #endif /* HAVE_OPAQUE_LSA */
-  
+
   /* Need to initialize the default ospf structure, so the interface mode
      commands can be duly processed if they are received before 'router ospf',
      when quagga(ospfd) is restarted */
@@ -319,13 +337,18 @@ main (int argc, char **argv)
       exit (1);
     }
 
+#ifdef ENABLE_OVSDB
+  ospf_ovsdb_init_poll_loop(om);
+#else
   /* Get configuration file. */
   vty_read_config (config_file, config_default);
+#endif
 
   /* Start execution only if not in dry-run mode */
   if (dryrun)
     return(0);
-  
+
+#ifndef ENABLE_OVSDB
   /* Change to the daemon program. */
   if (daemon_mode && daemon (0, 0) < 0)
     {
@@ -335,6 +358,7 @@ main (int argc, char **argv)
 
   /* Process id file create. */
   pid_output (pid_file);
+#endif
 
   /* Create VTY socket */
   vty_serv_sock (vty_addr, vty_port, OSPF_VTYSH_PATH);
@@ -343,8 +367,15 @@ main (int argc, char **argv)
   zlog_notice ("OSPFd %s starting: vty@%d", QUAGGA_VERSION, vty_port);
 
   /* Fetch next active thread. */
+#ifdef ENABLE_OVSDB
+  while (!exiting && thread_fetch (master, &thread))
+    thread_call (&thread);
+
+  ospf_ovsdb_exit();
+#else
   while (thread_fetch (master, &thread))
     thread_call (&thread);
+#endif
 
   /* Not reached. */
   return (0);

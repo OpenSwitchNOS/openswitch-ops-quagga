@@ -2203,6 +2203,37 @@ daemon_neighbor_route_map_cmd_execute(struct bgp *bgp, char *peer_str,
     }
 }
 
+int
+daemon_neighbor_prefix_list_cmd_execute(struct bgp *bgp, char *peer_str,
+                                      afi_t afi, safi_t safi,
+                                      const char *name_str,
+                                      const char *direct_str) {
+    struct peer *peer;
+    int direct = FILTER_IN;
+
+    peer = bgp_peer_and_group_lookup(bgp, peer_str);
+    if (!peer || !(direct_str && direct_str[0])) {
+        VLOG_ERR("Peer %s not found or NULL direction string.", peer_str);
+        return CMD_WARNING;
+    }
+
+    /* Check filter direction. */
+    if (strncmp(direct_str, "i", 1) == 0)
+        direct = FILTER_IN;
+    else if (strncmp(direct_str, "o", 1) == 0)
+        direct = FILTER_OUT;
+
+    if (name_str && direct_str) {
+        VLOG_DBG("neighbor %s prefix-list %s %s\n",
+                 peer_str, name_str, direct_str);
+
+        return peer_prefix_list_set(peer, afi, safi, direct, name_str);
+    } else {
+        // name was NULL, which means this is a "no" command
+        return peer_prefix_list_unset(peer, afi, safi, direct);
+    }
+}
+
 #if 0
 /* neighbor shutdown. */
 DEFUN (neighbor_shutdown,

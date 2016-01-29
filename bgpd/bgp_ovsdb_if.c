@@ -233,6 +233,7 @@ bgp_ovsdb_tables_init (struct ovsdb_idl *idl)
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_password);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_timers);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_route_maps);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_prefix_lists);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_statistics);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_status);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_external_ids);
@@ -512,6 +513,34 @@ modify_bgp_neighbor_route_map (const struct ovsrec_bgp_neighbor *ovs_bgpn,
         afi, safi, name, direction);
 }
 
+static void
+modify_bgp_neighbor_prefix_list (const struct ovsrec_bgp_neighbor *ovs_bgpn,
+    struct bgp *bgp_instance,
+    const char *direction,
+    afi_t afi, safi_t safi)
+{
+    /*
+     * If an entry for "direction" is not found in the record, NULL name
+     * will trigger an unset
+     */
+    char *name = NULL;
+
+    int i;
+    char *direct;
+
+    for (i = 0; i < ovs_bgpn->n_prefix_lists; i++) {
+        direct = ovs_bgpn->key_prefix_lists[i];
+        if (!strcmp(direct, direction)) {
+            struct ovsrec_prefix_list *rm = ovs_bgpn->value_prefix_lists[i];
+            name = rm->name;
+            break;
+        }
+    }
+    daemon_neighbor_prefix_list_cmd_execute(bgp_instance,
+        ovsdb_nbr_from_row_to_peer_name(idl, ovs_bgpn, NULL),
+        afi, safi, name, direction);
+}
+
 afi_t
 network2afi (const char *network)
 {
@@ -552,6 +581,38 @@ apply_bgp_neighbor_route_map_changes(const struct ovsrec_bgp_neighbor *ovs_bgpn,
                                       afi, safi);
         direct = OVSREC_BGP_NEIGHBOR_ROUTE_MAPS_OUT;
         modify_bgp_neighbor_route_map(ovs_bgpn, bgp_instance, direct,
+                                      afi, safi);
+    } else {
+        VLOG_ERR("Invalid AFI");
+    }
+}
+
+static void
+apply_bgp_neighbor_prefix_list_changes(const struct ovsrec_bgp_neighbor *ovs_bgpn,
+                                     struct bgp *bgp_instance)
+{
+    afi_t afi;
+    safi_t safi = SAFI_UNICAST;
+
+    /* Attempt to obtain the AFI. If it is a neighbor, then the AFI can be
+     * obtained from the IP address.
+     */
+    if (object_is_peer(ovs_bgpn)) {
+        afi = network2afi(ovsdb_nbr_from_row_to_peer_name(idl, ovs_bgpn, NULL));
+    } else {
+        /* OPS_TODO: For now, until IPv6 is supported, use AFI_IP by default
+         * for peer-groups
+         */
+        afi = AFI_IP;
+    }
+
+    if (afi) {
+        char *direct;
+        direct = OVSREC_BGP_NEIGHBOR_PREFIX_LISTS_IN;
+        modify_bgp_neighbor_prefix_list(ovs_bgpn, bgp_instance, direct,
+                                      afi, safi);
+        direct = OVSREC_BGP_NEIGHBOR_PREFIX_LISTS_OUT;
+        modify_bgp_neighbor_prefix_list(ovs_bgpn, bgp_instance, direct,
                                       afi, safi);
     } else {
         VLOG_ERR("Invalid AFI");
@@ -1431,6 +1492,18 @@ bgp_nbr_route_map_ovsdb_apply_changes (const struct ovsrec_bgp_neighbor *ovs_nbr
     }
 }
 
+
+static void
+bgp_nbr_prefix_list_ovsdb_apply_changes (const struct ovsrec_bgp_neighbor *ovs_nbr,
+    const struct ovsrec_bgp_router *ovs_bgp,
+    char * name,
+    struct bgp *bgp_instance)
+{
+    if (COL_CHANGED(ovs_nbr, ovsrec_bgp_neighbor_col_prefix_lists, idl_seqno)) {
+        apply_bgp_neighbor_prefix_list_changes(ovs_nbr, bgp_instance);
+    }
+}
+
 static void
 bgp_nbr_timers_ovsdb_apply_changes(const struct ovsrec_bgp_neighbor *ovs_nbr,
                                    const struct ovsrec_bgp_router *ovs_bgp,
@@ -1626,6 +1699,10 @@ bgp_nbr_read_ovsdb_apply_changes (struct ovsdb_idl *idl)
 
 	    /* route map */
             bgp_nbr_route_map_ovsdb_apply_changes(ovs_nbr, ovs_bgp,
+                ovs_bgp->key_bgp_neighbors[j], bgp_instance);
+
+        /* prefix list */
+            bgp_nbr_prefix_list_ovsdb_apply_changes(ovs_nbr, ovs_bgp,
                 ovs_bgp->key_bgp_neighbors[j], bgp_instance);
 
 	    /* timers */

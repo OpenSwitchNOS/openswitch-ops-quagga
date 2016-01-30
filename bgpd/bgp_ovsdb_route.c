@@ -734,7 +734,7 @@ bgp_ovsdb_announce_rib_entry(struct prefix *p,
         VLOG_INFO("%s: setting prefix %s\n", __FUNCTION__, pr);
         ovsrec_route_set_address_family(rib, afi);
         ovsrec_route_set_sub_address_family(rib, safi_str);
-        ovsrec_route_set_from(rib, "BGP");
+        ovsrec_route_set_from(rib, "bgp");
         /* Set VRF */
         ovsrec_route_set_vrf(rib, vrf);
         distance = bgp_distance_apply (p, info, bgp);

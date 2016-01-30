@@ -278,7 +278,7 @@ def add_static_bgp_routes(**kwargs):
             \"table\" : \"Route\",\
             \"row\" : {\
                      \"prefix\":\"123.0.0.1/32\",\
-                     \"from\":\"BGP\",\
+                     \"from\":\"bgp\",\
                      \"vrf\":[\"uuid\",\"%s\"],\
                      \"address_family\":\"ipv4\",\
                      \"sub_address_family\":\"unicast\",\
@@ -310,7 +310,7 @@ def add_static_bgp_routes(**kwargs):
     ExpRibDictIpv4BgpRoute1['3.3.3.5'] = dict()
     ExpRibDictIpv4BgpRoute1['3.3.3.5']['Distance'] = '6'
     ExpRibDictIpv4BgpRoute1['3.3.3.5']['Metric'] = '0'
-    ExpRibDictIpv4BgpRoute1['3.3.3.5']['RouteType'] = 'BGP'
+    ExpRibDictIpv4BgpRoute1['3.3.3.5']['RouteType'] = 'bgp'
 
     # Populate the expected FIB ("show ip route") route dictionary for the BGP
     # route 143.0.0.1/32 and its next-hops.
@@ -336,7 +336,7 @@ def add_static_bgp_routes(**kwargs):
             \"table\" : \"Route\",\
             \"row\" : {\
                      \"prefix\":\"143.0.0.1/32\",\
-                     \"from\":\"BGP\",\
+                     \"from\":\"bgp\",\
                      \"vrf\":[\"uuid\",\"%s\"],\
                      \"address_family\":\"ipv4\",\
                      \"sub_address_family\":\"unicast\",\
@@ -369,7 +369,7 @@ def add_static_bgp_routes(**kwargs):
     ExpRibDictIpv4BgpRoute2['3.3.3.5'] = dict()
     ExpRibDictIpv4BgpRoute2['3.3.3.5']['Distance'] = '6'
     ExpRibDictIpv4BgpRoute2['3.3.3.5']['Metric'] = '0'
-    ExpRibDictIpv4BgpRoute2['3.3.3.5']['RouteType'] = 'BGP'
+    ExpRibDictIpv4BgpRoute2['3.3.3.5']['RouteType'] = 'bgp'
 
     # Populate the expected FIB ("show ip route") route dictionary for the
     # route 123.0.0.1/32 and its next-hops. Since static is configured with a
@@ -385,13 +385,13 @@ def add_static_bgp_routes(**kwargs):
     verify_route_in_show_route(switch1, True, ExpRouteDictIpv4StaticRoute1,
                                'static')
     verify_route_in_show_rib(switch1, ExpRibDictIpv4StaticRoute1, 'static')
-    verify_route_in_show_route(switch1, True, ExpRouteDictIpv4BgpRoute1, 'BGP')
-    verify_route_in_show_rib(switch1, ExpRibDictIpv4BgpRoute1, 'BGP')
+    verify_route_in_show_route(switch1, True, ExpRouteDictIpv4BgpRoute1, 'bgp')
+    verify_route_in_show_rib(switch1, ExpRibDictIpv4BgpRoute1, 'bgp')
     verify_route_in_show_route(switch1, True, ExpRouteDictIpv4StaticRoute2,
                                'static')
     verify_route_in_show_rib(switch1, ExpRibDictIpv4StaticRoute2, 'static')
-    verify_route_in_show_route(switch1, True, ExpRouteDictIpv4BgpRoute2, 'BGP')
-    verify_route_in_show_rib(switch1, ExpRibDictIpv4BgpRoute2, 'BGP')
+    verify_route_in_show_route(switch1, True, ExpRouteDictIpv4BgpRoute2, 'bgp')
+    verify_route_in_show_rib(switch1, ExpRibDictIpv4BgpRoute2, 'bgp')
 
     LogOutput('info', "\n\n\n######### Configuration and verification "
               "of IPv4 static and BGP routes on switch 1 passed#########")
@@ -418,7 +418,7 @@ def delete_static_bgp_routes(**kwargs):
         {\
             \"op\" : \"delete\",\
             \"table\" : \"Route\",\
-             \"where\":[[\"prefix\",\"==\",\"123.0.0.1/32\"],[\"from\",\"==\",\"BGP\"]]\
+             \"where\":[[\"prefix\",\"==\",\"123.0.0.1/32\"],[\"from\",\"==\",\"bgp\"]]\
         }\
 ]\'"
 
@@ -494,7 +494,7 @@ def delete_static_bgp_routes(**kwargs):
     ExpRibDictIpv4BgpRoute2['3.3.3.5'] = dict()
     ExpRibDictIpv4BgpRoute2['3.3.3.5']['Distance'] = '6'
     ExpRibDictIpv4BgpRoute2['3.3.3.5']['Metric'] = '0'
-    ExpRibDictIpv4BgpRoute2['3.3.3.5']['RouteType'] = 'BGP'
+    ExpRibDictIpv4BgpRoute2['3.3.3.5']['RouteType'] = 'bgp'
 
     # Populate the expected FIB ("show ip route") route dictionary for the BGP
     # route 123.0.0.1/32 and its next-hops.
@@ -507,13 +507,13 @@ def delete_static_bgp_routes(**kwargs):
     verify_route_in_show_route(switch1, True, ExpRouteDictIpv4StaticRoute1,
                                'static')
     verify_route_in_show_rib(switch1, ExpRibDictIpv4StaticRoute1, 'static')
-    verify_route_in_show_route(switch1, True, ExpRouteDictIpv4BgpRoute1, 'BGP')
-    verify_route_in_show_rib(switch1, ExpRibDictIpv4BgpRoute1, 'BGP')
+    verify_route_in_show_route(switch1, True, ExpRouteDictIpv4BgpRoute1, 'bgp')
+    verify_route_in_show_rib(switch1, ExpRibDictIpv4BgpRoute1, 'bgp')
     verify_route_in_show_route(switch1, True, ExpRouteDictIpv4StaticRoute2,
                                'static')
     verify_route_in_show_rib(switch1, ExpRibDictIpv4StaticRoute2, 'static')
-    verify_route_in_show_route(switch1, True, ExpRouteDictIpv4BgpRoute2, 'BGP')
-    verify_route_in_show_rib(switch1, ExpRibDictIpv4BgpRoute2, 'BGP')
+    verify_route_in_show_route(switch1, True, ExpRouteDictIpv4BgpRoute2, 'bgp')
+    verify_route_in_show_rib(switch1, ExpRibDictIpv4BgpRoute2, 'bgp')
 
 
 # Set the maximum timeout for all the test cases

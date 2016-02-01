@@ -1825,10 +1825,9 @@ bgp_reconfigure (struct ovsdb_idl *idl)
     }
 
     /*
-     * Apply prefix list, community filter and route map changes
+     * Apply prefix list and route map changes
      */
     policy_prefix_list_read_ovsdb_apply_changes(idl);
-    policy_community_filter_read_ovsdb_apply_changes(idl);
     policy_rt_map_read_ovsdb_apply_changes(idl);
 
     /* Apply the changes */

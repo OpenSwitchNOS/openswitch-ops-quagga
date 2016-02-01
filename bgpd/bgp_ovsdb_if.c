@@ -164,12 +164,6 @@ static void
 bgp_policy_ovsdb_init (struct ovsdb_idl *idl)
 {
 
-    ovsdb_idl_add_table(idl, &ovsrec_table_community_filter);
-    ovsdb_idl_add_column(idl, &ovsrec_community_filter_col_name);
-    ovsdb_idl_add_column(idl, &ovsrec_community_filter_col_action);
-    ovsdb_idl_add_column(idl, &ovsrec_community_filter_col_match);
-    ovsdb_idl_add_column(idl, &ovsrec_community_filter_col_type);
-
     ovsdb_idl_add_table(idl, &ovsrec_table_prefix_list);
     ovsdb_idl_add_column(idl, &ovsrec_prefix_list_col_name);
     ovsdb_idl_add_column(idl, &ovsrec_prefix_list_col_prefix_list_entries);
@@ -1825,10 +1819,9 @@ bgp_reconfigure (struct ovsdb_idl *idl)
     }
 
     /*
-     * Apply prefix list, community filter and route map changes
+     * Apply prefix list and route map changes
      */
     policy_prefix_list_read_ovsdb_apply_changes(idl);
-    policy_community_filter_read_ovsdb_apply_changes(idl);
     policy_rt_map_read_ovsdb_apply_changes(idl);
 
     /* Apply the changes */

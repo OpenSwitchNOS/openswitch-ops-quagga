@@ -58,6 +58,7 @@
 #include "openvswitch/vlog.h"
 #include "bgpd/bgp_ovsdb_if.h"
 #include "bgpd/bgp_clist.h"
+#include "bgpd/bgp_filter.h"
 
 #define MAX_ARGC         10
 #define MAX_ARG_LEN     256
@@ -2090,6 +2091,194 @@ policy_prefix_list_read_ovsdb_apply_changes(struct ovsdb_idl *idl)
     return CMD_SUCCESS;
 }
 
+/* ip as-path access-list */
+static bool lookup_aspath_filter_match_from_ovsdb(const struct ovsrec_bgp_aspath_filter *flist,
+                                                  const char *match)
+{
+    int itr;
+    if (match) {
+        for(itr=0; itr < flist->n_permit; itr++) {
+            if(!strcmp(flist->permit[itr], match))
+                return true;
+        }
+        for(itr=0; itr < flist->n_deny; itr++) {
+            if(!strcmp(flist->deny[itr], match))
+                return true;
+        }
+    }
+    return false;
+}
+
+
+const struct ovsrec_bgp_aspath_filter *
+lookup_aspath_filter_from_ovsdb(const char *name, const char *match)
+{
+    const struct ovsrec_bgp_aspath_filter *ovs_flist;
+
+    if (!name || !match) {
+        VLOG_ERR("Filter List name or match is NULL.");
+        return NULL;
+    }
+
+    OVSREC_BGP_ASPATH_FILTER_FOR_EACH(ovs_flist, idl) {
+        if (!strcmp (name, ovs_flist->name)
+            && (lookup_aspath_filter_match_from_ovsdb(ovs_flist, match) == true)) {
+            return ovs_flist;
+        }
+    }
+    return NULL;
+}
+
+void
+aspath_filter_read_ovsdb_delete_from_master(struct as_list *flist_head){
+    struct as_list *aslist;
+    struct as_filter *asfilter;
+
+    if(!flist_head) {
+        VLOG_DBG("Filter List head is NULL");
+        return;
+    }
+
+    for (aslist = flist_head; aslist; aslist = aslist->next) {
+        for (asfilter = aslist->head; asfilter; asfilter = asfilter->next) {
+            if (lookup_aspath_filter_from_ovsdb(aslist->name, asfilter->reg_str) == 0) {
+                VLOG_DBG("Deleting Filter List : %s with match string %s",aslist->name, asfilter->reg_str);
+                as_list_filter_delete (aslist, asfilter);
+            }
+        }
+    }
+}
+
+void
+policy_aspath_filter_read_ovsdb_apply_deletion(struct ovsdb_idl *idl)
+{
+    const struct ovsrec_bgp_aspath_filter *ovs_first;
+    struct as_filter *asfilter;
+    struct as_list *aslist;
+    struct as_list_master *as_list;
+    char *str = NULL;
+
+    ovs_first = ovsrec_bgp_aspath_filter_first(idl);
+    VLOG_DBG("Checking for filter list deletions");
+    if (ovs_first && !OVSREC_IDL_ANY_TABLE_ROWS_DELETED(ovs_first, idl_seqno)) {
+        VLOG_DBG("No filter list deletions detected.");
+        return;
+    }
+
+    as_list = as_list_master_get();
+    if(as_list == NULL) {
+        VLOG_DBG("No filter list to delete");
+        return;
+    }
+
+    aspath_filter_read_ovsdb_delete_from_master(as_list->num.head);
+
+    aspath_filter_read_ovsdb_delete_from_master(as_list->str.head);
+}
+
+int
+policy_aspath_filter_apply_changes(struct ovsdb_idl *idl,
+                                   char **argv1, int argc1)
+{
+    int ret;
+    int direct;
+    char *str;
+    regex_t *regex;
+    struct as_filter *asfilter;
+    struct as_list *aslist;
+
+    /* Check the list type. */
+    if (strncmp (argv1[BGP_ASPATH_FILTER_ACTION], "p", 1) == 0) {
+        direct = AS_FILTER_PERMIT;
+    }
+    else if (strncmp (argv1[BGP_ASPATH_FILTER_ACTION], "d", 1) == 0) {
+        direct = AS_FILTER_DENY;
+    }
+    else {
+        VLOG_ERR("Matching condition must be permit or deny");
+        return CMD_WARNING;
+    }
+
+    regex = bgp_regcomp (argv1[BGP_ASPATH_FILTER_DESCRIPTION]);
+
+    asfilter = as_filter_make(regex, argv1[BGP_ASPATH_FILTER_DESCRIPTION], direct);
+
+    /* Install new filter to the access_list. */
+    aslist = as_list_get (argv1[BGP_ASPATH_FILTER_NAME]);
+
+    /* Duplicate insertion check. */
+    if (as_list_dup_check (aslist, asfilter))
+        as_filter_free (asfilter);
+    else
+        as_list_filter_add (aslist, asfilter);
+
+    return CMD_SUCCESS;
+}
+
+int
+policy_aspath_filter_read_ovsdb_apply_changes(struct ovsdb_idl *idl)
+{
+    int ret;
+    char **argv1;
+    int argc1 =-1;
+    const struct ovsrec_bgp_aspath_filter *ovs_flist;
+    const struct ovsrec_bgp_aspath_filter *aspath_filter_first;
+    int i, itr;
+
+    /* Handle filter list deletions */
+    policy_aspath_filter_read_ovsdb_apply_deletion (idl);
+
+    aspath_filter_first =  ovsrec_bgp_aspath_filter_first(idl);
+    if (aspath_filter_first == NULL) {
+        VLOG_DBG("No filter list configuration");
+        return CMD_SUCCESS;
+    }
+
+    if (!(OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED(aspath_filter_first, idl_seqno)) &&
+        !(OVSREC_IDL_ANY_TABLE_ROWS_INSERTED(aspath_filter_first, idl_seqno))) {
+        VLOG_DBG("No changes for filter list");
+        return CMD_SUCCESS;
+    }
+
+    /* Allocate two argv lists */
+    if (!(argv1 = policy_ovsdb_alloc_arg_list(MAX_ARGC, MAX_ARG_LEN)))
+        return CMD_SUCCESS;
+
+    /* Read ovsdb and apply changes */
+    VLOG_DBG("filter list config modified");
+    OVSREC_BGP_ASPATH_FILTER_FOR_EACH(ovs_flist, idl) {
+        argc1 = BGP_ASPATH_FILTER_NAME;
+        strcpy(argv1[BGP_ASPATH_FILTER_NAME], ovs_flist->name);
+
+        /* Parsing permit column */
+        for(itr=0; itr < ovs_flist->n_permit; itr++) {
+            strcpy(argv1[BGP_ASPATH_FILTER_ACTION], "permit");
+            strcpy(argv1[BGP_ASPATH_FILTER_DESCRIPTION], ovs_flist->permit[itr]);
+            argc1 = BGP_ASPATH_FILTER_MAX;
+
+            ret = policy_aspath_filter_apply_changes(idl, argv1, argc1);
+
+            if (!ret)
+                VLOG_DBG("filter list configuration changes set");
+        }
+
+        /* Parsing deny column */
+        for(itr=0; itr < ovs_flist->n_deny; itr++) {
+            strcpy(argv1[BGP_ASPATH_FILTER_ACTION], "deny");
+            strcpy(argv1[BGP_ASPATH_FILTER_DESCRIPTION], ovs_flist->deny[itr]);
+            argc1 = BGP_ASPATH_FILTER_MAX;
+
+            ret = policy_aspath_filter_apply_changes(idl, argv1, argc1);
+
+            if (!ret)
+                VLOG_DBG("filter list configuration changes set");
+        }
+    }
+
+    policy_ovsdb_free_arg_list(&argv1, MAX_ARGC);
+
+    return CMD_SUCCESS;
+}
 
 int
 bgp_ovsdb_republish_route(const struct ovsrec_bgp_router *bgp_first, int asn)

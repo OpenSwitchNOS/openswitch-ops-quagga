@@ -30,6 +30,12 @@ Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 #include "bgpd/bgp_regex.h"
 #include "bgpd/bgp_filter.h"
 
+/* To-Do: Move the following definitions into the
+ *        ENABLE_OVSDB macro */
+as_list_type_t ACCESS_TYPE_STRING = AS_LIST_TYPE_STRING;
+as_list_type_t ACCESS_TYPE_NUMBER = AS_LIST_TYPE_NUMBER;
+
+#ifndef ENABLE_OVSDB
 /* List of AS filter list. */
 struct as_list_list
 {
@@ -64,26 +70,7 @@ struct as_filter
   regex_t *reg;
   char *reg_str;
 };
-
-enum as_list_type
-{
-  ACCESS_TYPE_STRING,
-  ACCESS_TYPE_NUMBER
-};
-
-/* AS path filter list. */
-struct as_list
-{
-  char *name;
-
-  enum as_list_type type;
-
-  struct as_list *next;
-  struct as_list *prev;
-
-  struct as_filter *head;
-  struct as_filter *tail;
-};
+#endif
 
 /* ip as-path access-list 10 permit AS1. */
 
@@ -95,6 +82,15 @@ static struct as_list_master as_list_master =
   NULL
 };
 
+#ifdef ENABLE_OVSDB
+struct as_list_master *
+#else
+static struct as_list_master *
+#endif
+as_list_master_get() {
+    return &as_list_master;
+}
+
 /* Allocate new AS filter. */
 static struct as_filter *
 as_filter_new (void)
@@ -103,7 +99,11 @@ as_filter_new (void)
 }
 
 /* Free allocated AS filter. */
+#ifdef ENABLE_OVSDB
+void
+#else
 static void
+#endif
 as_filter_free (struct as_filter *asfilter)
 {
   if (asfilter->reg)
@@ -114,7 +114,11 @@ as_filter_free (struct as_filter *asfilter)
 }
 
 /* Make new AS filter. */
+#ifdef ENABLE_OVSDB
+struct as_filter *
+#else
 static struct as_filter *
+#endif
 as_filter_make (regex_t *reg, const char *reg_str, enum as_filter_type type)
 {
   struct as_filter *asfilter;
@@ -139,7 +143,11 @@ as_filter_lookup (struct as_list *aslist, const char *reg_str,
   return NULL;
 }
 
+#ifdef ENABLE_OVSDB
+void
+#else
 static void
+#endif
 as_list_filter_add (struct as_list *aslist, struct as_filter *asfilter)
 {
   asfilter->next = NULL;
@@ -276,7 +284,11 @@ as_list_insert (const char *name)
   return aslist;
 }
 
+#ifdef ENABLE_OVSDB
+struct as_list *
+#else
 static struct as_list *
+#endif
 as_list_get (const char *name)
 {
   struct as_list *aslist;
@@ -347,7 +359,11 @@ as_list_empty (struct as_list *aslist)
     return 0;
 }
 
+#ifdef ENABLE_OVSDB
+void
+#else
 static void
+#endif
 as_list_filter_delete (struct as_list *aslist, struct as_filter *asfilter)
 {
   if (asfilter->next)
@@ -413,7 +429,11 @@ as_list_delete_hook (void (*func) (void))
   as_list_master.delete_hook = func;
 }
 
+#ifdef ENABLE_OVSDB
+int
+#else
 static int
+#endif
 as_list_dup_check (struct as_list *aslist, struct as_filter *new)
 {
   struct as_filter *asfilter;

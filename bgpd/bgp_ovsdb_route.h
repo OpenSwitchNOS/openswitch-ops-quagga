@@ -72,6 +72,13 @@ enum
   PREFIX_LIST_MAX,
 } prefix_list;
 
+enum
+{
+  BGP_ASPATH_FILTER_NAME,
+  BGP_ASPATH_FILTER_ACTION,
+  BGP_ASPATH_FILTER_DESCRIPTION,
+  BGP_ASPATH_FILTER_MAX,
+} aspath_filter;
 
 extern struct ovsdb_idl *idl;
 

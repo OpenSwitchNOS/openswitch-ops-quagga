@@ -1155,6 +1155,8 @@ const struct lookup_entry match_table[]={
 const struct lookup_entry set_table[]={
   {SET_COMMUNITY, "community", "community"},
   {SET_METRIC, "metric", "metric"},
+  {SET_ECOMMUNITY_RT, "extcommunity rt", "extcommunity rt"},
+  {SET_ECOMMUNITY_SOO, "extcommunity soo", "extcommunity soo"},
   {0, NULL, NULL},
 };
 

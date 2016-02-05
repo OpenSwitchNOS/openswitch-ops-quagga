@@ -1,6 +1,6 @@
 /* bgp daemon ovsdb Route table integration.
  *
- * (c) Copyright 2015 Hewlett Packard Enterprise Development LP
+ * (c) Copyright 2015-2016 Hewlett Packard Enterprise Development LP
  *
  * GNU Zebra is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -38,6 +38,8 @@ enum
 {
   SET_COMMUNITY,
   SET_METRIC,
+  SET_ECOMMUNITY_RT,
+  SET_ECOMMUNITY_SOO,
   SET_MAX,
 } set;
 

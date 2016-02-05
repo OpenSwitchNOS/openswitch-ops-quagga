@@ -4,7 +4,7 @@
  * Hewlett-Packard Company Confidential (C)
  * Copyright 2015 Hewlett-Packard Development Company, L.P.
  *
- * (c) Copyright 2015 Hewlett Packard Enterprise Development LP.
+ * (c) Copyright 2015-2016 Hewlett Packard Enterprise Development LP.
  *
  * GNU Zebra is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -1155,6 +1155,8 @@ const struct lookup_entry match_table[]={
 const struct lookup_entry set_table[]={
   {SET_COMMUNITY, "community", "community"},
   {SET_METRIC, "metric", "metric"},
+  {SET_ECOMMUNITY_RT, "extcommunity rt", "extcommunity rt"},
+  {SET_ECOMMUNITY_SOO, "extcommunity soo", "extcommunity soo"},
   {0, NULL, NULL},
 };
 

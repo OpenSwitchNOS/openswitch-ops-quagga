@@ -135,6 +135,7 @@ txn_command_result(enum ovsdb_idl_txn_status status, char *msg, char *pr)
     return 0;
 }
 
+
 /* Allocate a transaction recovery node, set it up and add to hmap */
 #define HASH_DB_TXN(txn, req, p, info, asn, safi)                       \
     do {                                                                \
@@ -2092,6 +2093,156 @@ policy_prefix_list_read_ovsdb_apply_changes(struct ovsdb_idl *idl)
     return CMD_SUCCESS;
 }
 
+const struct ovsrec_bgp_community_filter *
+lookup_community_filter_from_ovsdb(const char *name)
+{
+    const struct ovsrec_bgp_community_filter *ovs_cfilter;
+    if (!name) {
+        VLOG_ERR("Community Filter name is NULL.");
+        return NULL;
+    }
+    OVSREC_BGP_COMMUNITY_FILTER_FOR_EACH(ovs_cfilter, idl) {
+        if (strcmp (name, ovs_cfilter->name) == 0) {
+            return ovs_cfilter;
+        }
+    }
+    return NULL;
+}
+
+/* Community Filter deletions */
+void
+policy_community_filter_read_ovsdb_apply_deletion (struct ovsdb_idl *idl)
+{
+    const struct ovsrec_bgp_community_filter *ovs_first;
+    struct community_list *list;
+    struct community_list_master *cm;
+
+    int ret = -1;
+    int direct = 0;
+    char *str = NULL;
+
+    ovs_first = ovsrec_bgp_community_filter_first(idl);
+    VLOG_DBG("Checking for community filter deletions");
+    if (ovs_first && !OVSREC_IDL_ANY_TABLE_ROWS_DELETED
+                                 (ovs_first, idl_seqno)) {
+        VLOG_DBG("No community filter deletions detected.");
+        return;
+    }
+    cm = community_list_master_lookup (bgp_clist, EXTCOMMUNITY_LIST_MASTER);
+    for (list = cm->str.head; list; list = list->next) {
+        if (!lookup_community_filter_from_ovsdb(list->name)) {
+            VLOG_DBG("Deleting Extended Community List: %s",list->name);
+            community_list_delete (list);
+        }
+    }
+    cm = community_list_master_lookup (bgp_clist, COMMUNITY_LIST_MASTER);
+    for (list = cm->str.head; list; list = list->next) {
+        if (!lookup_community_filter_from_ovsdb(list->name)) {
+            VLOG_DBG("Deleting Community List : %s",list->name);
+            community_list_delete (list);
+        }
+    }
+}
+
+
+int
+policy_community_filter_read_ovsdb_apply_changes(struct ovsdb_idl *idl)
+{
+    int ret;
+    int direct;
+    const struct ovsrec_bgp_community_filter *ovs_cfilter;
+    const struct ovsrec_bgp_community_filter *community_filter_first;
+    int i;
+
+    /*Handle Community Filter deletions*/
+    policy_community_filter_read_ovsdb_apply_deletion (idl);
+
+    community_filter_first =  ovsrec_bgp_community_filter_first(idl);
+    if (community_filter_first == NULL) {
+        VLOG_DBG("No community filter configuration");
+        return CMD_SUCCESS;
+    }
+    if (!(OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED
+                           (community_filter_first, idl_seqno)) &&
+        !(OVSREC_IDL_ANY_TABLE_ROWS_INSERTED
+                           (community_filter_first, idl_seqno))) {
+        VLOG_DBG("No changes for community filter list");
+        return CMD_SUCCESS;
+    }
+    /* Read ovsdb and apply changes */
+    VLOG_DBG("community filter config modified");
+    OVSREC_BGP_COMMUNITY_FILTER_FOR_EACH(ovs_cfilter, idl) {
+        if (ovs_cfilter->n_permit) {
+            direct = COMMUNITY_PERMIT;
+            if (!strcmp(ovs_cfilter->type,"extcommunity-list")) {
+                for (i = 0; i < ovs_cfilter->n_permit; i++) {
+                    ret = extcommunity_list_set (bgp_clist,
+                                 ovs_cfilter->name,
+                                 ovs_cfilter->permit[i],
+                                 direct,
+                                 EXTCOMMUNITY_LIST_EXPANDED);
+                    if (!ret) {
+                        VLOG_DBG("Extcommunity filter permit configuration"
+                                 " changes set");
+                    } else {
+                        VLOG_ERR("Error in setting extcommunity filter"
+                                 " permit configuration");
+                    }
+                }
+            } else if (!strcmp(ovs_cfilter->type,"community-list")) {
+                for (i = 0; i < ovs_cfilter->n_permit; i++) {
+                    ret = community_list_set (bgp_clist,
+                                 ovs_cfilter->name,
+                                 ovs_cfilter->permit[i],
+                                 direct,
+                                 COMMUNITY_LIST_EXPANDED);
+                    if (!ret) {
+                        VLOG_DBG("Community filter permit configuration"
+                                 " changes set");
+                    } else {
+                        VLOG_ERR("Error in setting community filter"
+                                 " permit configuration");
+                    }
+                }
+            }
+        }
+        if (ovs_cfilter->n_deny) {
+            direct = COMMUNITY_DENY;
+            if (!strcmp(ovs_cfilter->type,"extcommunity-list")) {
+                for (i = 0; i < ovs_cfilter->n_deny; i++) {
+                    ret = extcommunity_list_set (bgp_clist,
+                                 ovs_cfilter->name,
+                                 ovs_cfilter->deny[i],
+                                 direct,
+                                 EXTCOMMUNITY_LIST_EXPANDED);
+                    if (!ret) {
+                        VLOG_DBG("Extcommunity filter deny configuration"
+                                 " changes set");
+                    } else {
+                        VLOG_ERR("Error in setting extcommunity filter"
+                                 " deny configuration");
+                    }
+                }
+            } else if (!strcmp(ovs_cfilter->type,"community-list")) {
+                for (i = 0; i < ovs_cfilter->n_deny; i++) {
+                    ret = community_list_set (bgp_clist,
+                                 ovs_cfilter->name,
+                                 ovs_cfilter->deny[i],
+                                 direct,
+                                 COMMUNITY_LIST_EXPANDED);
+                    if (!ret) {
+                        VLOG_DBG("Community filter deny configuration"
+                                 " changes set");
+                    } else {
+                        VLOG_ERR("Error in setting community filter"
+                                 " deny configuration");
+                    }
+                }
+            }
+        }
+    }
+    return CMD_SUCCESS;
+}
 
 int
 bgp_ovsdb_republish_route(const struct ovsrec_bgp_router *bgp_first, int asn)

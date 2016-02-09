@@ -1771,15 +1771,15 @@ ovsdb_ospf_set_nbr_self_router_id  (char* ifname, struct in_addr if_addr,
 void
 ovsdb_ospf_delete_nbr  (struct ospf_neighbor* nbr)
 {
-     struct ovsrec_ospf_interface* ovs_oi = NULL;
+    struct ovsrec_ospf_interface* ovs_oi = NULL;
     struct ovsrec_ospf_neighbor** ovs_nbr = NULL;
     struct ovsrec_ospf_neighbor* old_ovs_nbr = NULL;
     struct ovsdb_idl_txn* nbr_txn = NULL;
     struct interface* intf = NULL;
     int64_t ip_src = 0;
     enum ovsdb_idl_txn_status status;
+    int i = 0,j = 0;
 
-    int i = 0;
     if (NULL == nbr)
     {
         VLOG_DBG ("No neighbor data to delete");
@@ -1827,9 +1827,9 @@ ovsdb_ospf_delete_nbr  (struct ospf_neighbor* nbr)
                                     (ovs_oi->n_neighbors - 1));
 
     ip_src = nbr->src.s_addr;
-    for (i = 0; i < ovs_oi->n_neighbors; i++) {
-       if (ip_src != ovs_oi->neighbors[i]->nbr_if_addr)
-          ovs_nbr[i] = ovs_oi->neighbors[i];
+    for (i = 0,j = 0; i < ovs_oi->n_neighbors; i++) {
+       if (ip_src != ovs_oi->neighbors[i]->nbr_if_addr[0])
+          ovs_nbr[j++] = ovs_oi->neighbors[i];
     }
     ovsrec_ospf_interface_set_neighbors (ovs_oi,ovs_nbr,ovs_oi->n_neighbors - 1);
 
@@ -1849,14 +1849,14 @@ ovsdb_ospf_delete_nbr  (struct ospf_neighbor* nbr)
 void
 ovsdb_ospf_delete_nbr_self  (struct ospf_neighbor* nbr, char* ifname)
 {
-     struct ovsrec_ospf_interface* ovs_oi = NULL;
+    struct ovsrec_ospf_interface* ovs_oi = NULL;
     struct ovsrec_ospf_neighbor** ovs_nbr = NULL;
     struct ovsrec_ospf_neighbor* old_ovs_nbr = NULL;
     struct ovsdb_idl_txn* nbr_txn = NULL;
     int64_t ip_src = 0;
     enum ovsdb_idl_txn_status status;
+    int i = 0,j = 0;
 
-    int i = 0;
     if (NULL == nbr)
     {
         VLOG_DBG ("No neighbor data to delete");
@@ -1903,9 +1903,9 @@ ovsdb_ospf_delete_nbr_self  (struct ospf_neighbor* nbr, char* ifname)
                                     (ovs_oi->n_neighbors - 1));
 
     ip_src = nbr->src.s_addr;
-    for (i = 0; i < ovs_oi->n_neighbors; i++) {
-       if (ip_src != ovs_oi->neighbors[i]->nbr_if_addr)
-          ovs_nbr[i] = ovs_oi->neighbors[i];
+    for (i = 0,j = 0; i < ovs_oi->n_neighbors; i++) {
+       if (ip_src != ovs_oi->neighbors[i]->nbr_if_addr[0])
+          ovs_nbr[j++] = ovs_oi->neighbors[i];
     }
     ovsrec_ospf_interface_set_neighbors (ovs_oi,ovs_nbr,ovs_oi->n_neighbors - 1);
 
@@ -2584,6 +2584,9 @@ modify_ospf_network_config (struct ovsdb_idl *idl, struct ospf *ospf_cfg,
     /* Check if any network is deleted via. no network command */
     for (rn = route_top (ospf_cfg->networks); rn; rn = route_next (rn))
     {
+        /* Continue if no network information is present */
+        if(NULL == rn->info)
+            continue;
         is_network_found = false;
         for (i = 0 ; i < ospf_mod_row->n_networks ; i++)
         {
@@ -2592,7 +2595,6 @@ modify_ospf_network_config (struct ovsdb_idl *idl, struct ospf *ospf_cfg,
             if (0 == strcmp (prefix_str,ospf_mod_row->key_networks[i]))
             {
                  is_network_found = true;
-                 //route_unlock_node (rn);
                  break;
             }
         }

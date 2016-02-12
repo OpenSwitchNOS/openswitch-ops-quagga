@@ -2990,6 +2990,8 @@ ovsdb_proto_to_zebra_proto (char *from_protocol)
     return ZEBRA_ROUTE_STATIC;
   else if (!strcmp(from_protocol, OVSREC_ROUTE_FROM_BGP))
     return ZEBRA_ROUTE_BGP;
+  else if (!strcmp(from_protocol, OVSREC_ROUTE_FROM_OSPF))
+    return ZEBRA_ROUTE_OSPF;
   else
     {
       VLOG_ERR("Unknown protocol. Conversion failed");
@@ -3282,6 +3284,12 @@ zebra_handle_route_change (const struct ovsrec_route *route)
       zebra_handle_static_route_change(route);
       break;
     case ZEBRA_ROUTE_BGP:
+      VLOG_DBG("Adding a Protocol route for prefix %s protocol %s\n",
+                route->prefix, route->from);
+      /* This is a protocol route */
+      zebra_handle_proto_route_change(route, from_protocol);
+      break;
+   case ZEBRA_ROUTE_OSPF:
       VLOG_DBG("Adding a Protocol route for prefix %s protocol %s\n",
                 route->prefix, route->from);
       /* This is a protocol route */

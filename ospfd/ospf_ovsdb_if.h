@@ -35,6 +35,9 @@
 #define OSPF_STAT_NAME_LEN 64
 #define OSPF_MAX_NBR_OPTIONS 7
 
+#define OSPF_MAX_PREFIX_LEN 50
+#define OSPF_NEXTHOP_SAF_UNICAST "unicast"
+
 #define OSPF_KEY_AREA_STATS_ABR_COUNT            "abr_count"
 #define OSPF_KEY_AREA_STATS_ASBR_COUNT            "asbr_count"
 
@@ -126,5 +129,11 @@ ovsdb_ospf_update_full_nbr_count (struct ospf_neighbor* nbr,
 
 extern void
 ovsdb_ospf_update_ifsm_state (char* ifname, int ism_state);
+
+extern void
+ovsdb_ospf_add_rib_entry (struct prefix_ipv4 *p, struct ospf_route *or);
+
+extern void
+ovsdb_ospf_delete_rib_entry (struct prefix_ipv4 *p, struct ospf_route *or);
 
 #endif /* OSPF_OVSDB_IF_H */

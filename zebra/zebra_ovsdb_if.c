@@ -2898,10 +2898,11 @@ zebra_find_ovsdb_deleted_routes (afi_t afi, safi_t safi, u_int32_t id)
 
       RNODE_FOREACH_RIB (rn, rib)
         {
-	  /* Ignore any routes other than static and BGP routes.
+	  /* Ignore any routes other than static. OSPF and BGP routes.
 	   * Other protocols are not supported currently.*/
           if ((rib->type != ZEBRA_ROUTE_STATIC &&
-              rib->type != ZEBRA_ROUTE_BGP) ||
+              rib->type != ZEBRA_ROUTE_BGP &&
+              rib->type != ZEBRA_ROUTE_OSPF) ||
               !rib->nexthop)
             continue;
 
@@ -2990,6 +2991,8 @@ ovsdb_proto_to_zebra_proto (char *from_protocol)
     return ZEBRA_ROUTE_STATIC;
   else if (!strcmp(from_protocol, OVSREC_ROUTE_FROM_BGP))
     return ZEBRA_ROUTE_BGP;
+  else if (!strcmp(from_protocol, OVSREC_ROUTE_FROM_OSPF))
+    return ZEBRA_ROUTE_OSPF;
   else
     {
       VLOG_ERR("Unknown protocol. Conversion failed");
@@ -3282,6 +3285,12 @@ zebra_handle_route_change (const struct ovsrec_route *route)
       zebra_handle_static_route_change(route);
       break;
     case ZEBRA_ROUTE_BGP:
+      VLOG_DBG("Adding a Protocol route for prefix %s protocol %s\n",
+                route->prefix, route->from);
+      /* This is a protocol route */
+      zebra_handle_proto_route_change(route, from_protocol);
+      break;
+   case ZEBRA_ROUTE_OSPF:
       VLOG_DBG("Adding a Protocol route for prefix %s protocol %s\n",
                 route->prefix, route->from);
       /* This is a protocol route */

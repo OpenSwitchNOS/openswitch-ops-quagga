@@ -49,6 +49,10 @@
 #include "ospfd/ospf_snmp.h"
 #endif /* HAVE_SNMP */
 
+#ifdef ENABLE_OVSDB
+#include "ospfd/ospf_ovsdb_if.h"
+#endif
+
 /* Zebra structure to hold current status. */
 struct zclient *zclient = NULL;
 
@@ -327,6 +331,7 @@ ospf_interface_address_delete (int command, struct zclient *zclient,
 void
 ospf_zebra_add (struct prefix_ipv4 *p, struct ospf_route *or)
 {
+#ifndef ENABLE_OVSDB
   u_char message;
   u_char distance;
   u_char flags;
@@ -420,11 +425,16 @@ ospf_zebra_add (struct prefix_ipv4 *p, struct ospf_route *or)
 
       zclient_send_message(zclient);
     }
+#else
+    /* Announce route to Zebra through ovsdb */
+    ovsdb_ospf_add_rib_entry (p,or);
+#endif
 }
 
 void
 ospf_zebra_delete (struct prefix_ipv4 *p, struct ospf_route *or)
 {
+#ifndef ENABLE_OVSDB
   u_char message;
   u_char distance;
   u_char flags;
@@ -507,6 +517,10 @@ ospf_zebra_delete (struct prefix_ipv4 *p, struct ospf_route *or)
 
       zclient_send_message(zclient);
     }
+#else
+    /* Remove entry from RIB table */
+    ovsdb_ospf_delete_rib_entry(p,or);
+#endif
 }
 
 void

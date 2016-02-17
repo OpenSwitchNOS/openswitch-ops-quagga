@@ -274,6 +274,10 @@ ospf_route_install (struct ospf *ospf, struct route_table *rt)
   ospf->old_table = ospf->new_table;
   ospf->new_table = rt;
 
+#ifdef ENABLE_OVSDB
+  ovsdb_ospf_update_network_routes (ospf, ospf->new_table);
+#endif /* ENABLE_OVSDB */
+
   /* Delete old routes. */
   if (ospf->old_table)
     ospf_route_delete_uniq (ospf->old_table, rt);

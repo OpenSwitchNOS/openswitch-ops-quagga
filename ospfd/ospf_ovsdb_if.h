@@ -38,6 +38,36 @@
 #define OSPF_KEY_AREA_STATS_ABR_COUNT            "abr_count"
 #define OSPF_KEY_AREA_STATS_ASBR_COUNT            "asbr_count"
 
+
+/* TODO Many of the below Macro definitions will move to a common file later point in time   */
+#define OSPF_KEY_STUB_ROUTER_STATE_ACTIVE      "stub_router_state_active"
+#define OSPF_KEY_ROUTE_AREA_ID                 "area_id"
+#define OSPF_KEY_ROUTE_TYPE_ABR                "area_type_abr"
+#define OSPF_KEY_ROUTE_TYPE_ASBR               "area_type_asbr"
+#define OSPF_KEY_ROUTE_EXT_TYPE                "ext_type"
+#define OSPF_KEY_ROUTE_EXT_TAG                 "ext_tag"
+#define OSPF_KEY_ROUTE_TYPE2_COST              "type2_cost"
+
+#define OSPF_KEY_ROUTE_COST                    "cost"
+
+#define OSPF_NBR_OPTION_STRING_T               "type_of_service"
+#define OSPF_NBR_OPTION_STRING_E               "external_routing"
+#define OSPF_NBR_OPTION_STRING_MC              "multicast"
+#define OSPF_NBR_OPTION_STRING_NP              "type_7_lsa"
+#define OSPF_NBR_OPTION_STRING_EA              "external_attributes_lsa"
+#define OSPF_NBR_OPTION_STRING_DC              "demand_circuits"
+#define OSPF_NBR_OPTION_STRING_O               "opaque_lsa"
+
+#define OSPF_PATH_TYPE_STRING_INTER_AREA       "inter_area"
+#define OSPF_PATH_TYPE_STRING_INTRA_AREA       "intra_area"
+#define OSPF_PATH_TYPE_STRING_EXTERNAL         "external"
+
+#define OSPF_EXT_TYPE_STRING_TYPE1             "ext_type_1"
+#define OSPF_EXT_TYPE_STRING_TYPE2             "ext_type_2"
+
+#define BOOLEAN_STRING_FALSE                   "false"
+#define BOOLEAN_STRING_TRUE                    "true"
+
 typedef struct
 {
    unsigned char lsa_type;
@@ -126,5 +156,14 @@ ovsdb_ospf_update_full_nbr_count (struct ospf_neighbor* nbr,
 
 extern void
 ovsdb_ospf_update_ifsm_state (char* ifname, int ism_state);
+
+extern void
+ovsdb_ospf_update_network_routes (const struct ospf *, const struct route_table *);
+
+extern void
+ovsdb_ospf_update_router_routes (const struct ospf *, const struct route_table *);
+
+extern void
+ovsdb_ospf_update_ext_routes (const struct ospf *, const struct route_table *);
 
 #endif /* OSPF_OVSDB_IF_H */

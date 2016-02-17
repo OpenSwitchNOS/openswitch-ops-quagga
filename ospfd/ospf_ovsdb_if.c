@@ -51,6 +51,7 @@
 #include "ospfd/ospf_nsm.h"
 #include "ospfd/ospf_ism.h"
 #include "ospfd/ospf_neighbor.h"
+#include "ospfd/ospf_route.h"
 #include "ospfd/ospf_ovsdb_if.h"
 #include "ospfd/ospf_interface.h"
 
@@ -356,7 +357,7 @@ ovsdb_init (const char *db_path)
     idl = ovsdb_idl_create(db_path, &ovsrec_idl_class, false, true);
     idl_seqno = ovsdb_idl_get_seqno(idl);
     ovsdb_idl_set_lock(idl, "OpenSwitch_ospf");
-    ovsdb_idl_verify_write_only(idl);
+    //ovsdb_idl_verify_write_only(idl);
 
     /* Cache OpenVSwitch table */
     ovsdb_idl_add_table(idl, &ovsrec_table_open_vswitch);
@@ -1516,6 +1517,7 @@ ovsdb_ospf_add_nbr  (struct ospf_neighbor* nbr)
         VLOG_DBG ("NBR add transaction commit failed:%d",status);
 
     ovsdb_idl_txn_destroy(nbr_txn);
+    smap_destroy (&nbr_status);
     free (ovs_nbr);
     free (key_nbr_statistics);
     free (value_nbr_statistics);
@@ -1714,6 +1716,7 @@ ovsdb_ospf_add_nbr_self  (struct ospf_neighbor* nbr, char* intf)
         VLOG_DBG ("NBR add transaction commit failed:%d",status);
 
     ovsdb_idl_txn_destroy(nbr_txn);
+    smap_destroy (&nbr_status);
     free (ovs_nbr);
     free (key_nbr_statistics);
     free (value_nbr_statistics);
@@ -2877,7 +2880,540 @@ ospf_apply_route_changes (struct ovsdb_idl *idl)
     return 1;
 }
 
+/*
+ * Update the ospf rib routes in the OSPF_Route table of the OVSDB database *
+*/
+static void
+ospf_route_add_to_area_route_table (struct route_table * oart, struct prefix *p_or, struct ospf_route *or)
+{
+  struct route_table *area_rt_table;
+  struct route_node *rn, *rn_or;
+  struct prefix p_area;
+  struct ospf_route *or_new;
 
+  if (!oart)
+	return;
+
+  p_area.family = AF_INET;
+  p_area.prefixlen = IPV4_MAX_BITLEN;
+  p_area.u.prefix4 = or->u.std.area_id;
+
+  rn = route_node_get (oart, (struct prefix *)&p_area);
+
+  if (!rn->info)
+	rn->info = route_table_init ();
+
+  area_rt_table = (struct  route_table *) (rn->info);
+
+  or_new = ospf_route_new ();
+  or_new->type = or->type;
+  or_new->id = or->id;
+  or_new->mask = or->mask;
+  or_new->path_type = or->path_type;
+  or_new->cost = or->cost;
+  or_new->u = or->u;
+
+  ospf_route_add (area_rt_table, (struct prefix_ipv4 *)p_or, or_new, or);
+}
+
+static void
+ospf_area_route_table_free (struct route_table *oart)
+{
+  struct route_table *area_rt_table;
+  struct route_node *rn, *rn1;
+  struct ospf_route *or;
+
+  if (!oart)
+	return;
+
+  for (rn = route_top (oart); rn; rn = route_next (rn)) {
+    if ((area_rt_table = rn->info) != NULL) {
+      for (rn1 = route_top (area_rt_table); rn1; rn1 = route_next (rn1)) {
+         if ((or = rn1->info) != NULL) {
+           ospf_route_free (or);
+           rn1->info = NULL;
+           route_unlock_node (rn1);
+         }
+      }
+      route_table_finish (area_rt_table);
+      rn->info = NULL;
+      route_unlock_node (rn);
+    }
+  }
+  route_table_finish (oart);
+}
+
+/* TODO This util function can be moved to common utils file */
+static char *
+boolean2string (bool flag)
+{
+  if (flag)
+    return BOOLEAN_STRING_TRUE;
+  else
+    return BOOLEAN_STRING_FALSE;
+}
+
+static char *
+ospf_route_path_type_string (u_char path_type)
+{
+  switch (path_type) {
+    case OSPF_PATH_INTRA_AREA:
+           return OSPF_PATH_TYPE_STRING_INTRA_AREA;
+
+    case OSPF_PATH_INTER_AREA:
+           return OSPF_PATH_TYPE_STRING_INTER_AREA;
+
+    case OSPF_PATH_TYPE1_EXTERNAL:
+    case OSPF_PATH_TYPE2_EXTERNAL:
+           return OSPF_PATH_TYPE_STRING_EXTERNAL;
+
+    default:
+           return "invalid";
+  }
+}
+
+static char *
+ospf_route_path_type_ext_string (u_char path_type)
+{
+  switch (path_type) {
+    case OSPF_PATH_TYPE1_EXTERNAL:
+           return OSPF_EXT_TYPE_STRING_TYPE1;
+    case OSPF_PATH_TYPE2_EXTERNAL:
+           return OSPF_EXT_TYPE_STRING_TYPE2;
+
+    default:
+           return "invalid";
+  }
+}
+
+/*
+ * Update the ospf network routes in the OSPF_Route table of the OVSDB database *
+*/
+void
+ovsdb_ospf_update_network_routes (const struct ospf *ospf, const struct route_table *rt)
+{
+  struct ovsrec_ospf_router *ospf_router_row = NULL;
+  struct ovsrec_ospf_area *ospf_area_row = NULL;
+  struct ovsrec_ospf_route *ospf_route_row = NULL;
+  struct ovsrec_ospf_route **intra_area_rts = NULL, **inter_area_rts = NULL;
+  struct ovsdb_idl_txn* ort_txn = NULL;
+  enum   ovsdb_idl_txn_status txn_status;
+  struct route_node *rn, *rn1;
+  struct ospf_route *or;
+  struct route_table *ospf_area_route_table = NULL, *per_area_rt_table = NULL;
+  int    i = 0, j = 0;
+
+  if (NULL == ospf || NULL == rt)
+  {
+      VLOG_DBG ("No ospf instance or no routes to add");
+      return;
+  }
+
+  ospf_router_row = ovsdb_ospf_get_router_by_instance_num (ospf->ospf_inst);
+  if (!ospf_router_row)
+  {
+      VLOG_DBG ("No OSPF Router in OVSDB could be found");
+      return;
+  }
+
+  if (!ospf_router_row->n_areas)
+  {
+      VLOG_DBG ("No OSPF Area in OSPF Router in OVSDB could be found");
+      return;
+  }
+
+  ort_txn = ovsdb_idl_txn_create(idl);
+  if (!ort_txn)
+  {
+      VLOG_DBG ("Transaction create failed");
+      return;
+  }
+
+  /* Delete all the network routes of all the areas in the ospf router instance */
+  for (i = 0 ; i < ospf_router_row->n_areas ; i++) {
+    ospf_area_row = ospf_router_row->value_areas[i];
+
+    ovsrec_ospf_area_set_intra_area_ospf_routes (ospf_area_row, NULL, 0);
+
+    ovsrec_ospf_area_set_inter_area_ospf_routes (ospf_area_row, NULL, 0);
+  }
+
+  /* Add ospf routes to OVSDB OSPF_Route table */
+
+  /* Generating the per area ospf routing table */
+  ospf_area_route_table = route_table_init ();
+  for (rn = route_top (rt); rn; rn = route_next (rn))
+    if ((or = rn->info))
+      ospf_route_add_to_area_route_table (ospf_area_route_table, &(rn->p), or);
+
+  /* Updating the OVSDB databse from the per area ospf routing table */
+  for (rn = route_top (ospf_area_route_table); rn; rn = route_next (rn))
+    if ((per_area_rt_table = (struct route_table *)(rn->info))) {
+      struct in_addr area_id = rn->p.u.prefix4;
+      if (ospf_area_row = ovsrec_ospf_area_get_area_by_id (ospf_router_row, area_id)) {
+        i = j = 0;
+        if (!(intra_area_rts = xcalloc (per_area_rt_table->count, sizeof (struct ovsrec_ospf_route *)))) {
+          VLOG_ERR ("Memory allocation Failure");
+          ovsdb_idl_txn_abort(ort_txn);
+          route_unlock_node (rn);
+          return;
+        }
+        if (!(inter_area_rts = xcalloc (per_area_rt_table->count, sizeof (struct ovsrec_ospf_route *)))) {
+          VLOG_ERR ("Memory allocation Failure");
+          free (intra_area_rts);
+          ovsdb_idl_txn_abort(ort_txn);
+          route_unlock_node (rn);
+          return;
+        }
+        for (rn1 = route_top (per_area_rt_table); rn1; rn1 = route_next (rn1))
+          if ((or = (struct ospf_route *)(rn1->info))) {
+            char prefix_str[19] = {0};
+            struct listnode *pnode, *pnnode;
+            struct ospf_path *path;
+
+            if (!(ospf_route_row = ovsrec_ospf_route_insert (ort_txn))) {
+              VLOG_ERR ("insert in OSPF_Route Failed.");
+              continue;
+            }
+
+            if (or->path_type == OSPF_PATH_INTRA_AREA) {
+              intra_area_rts[i++] = ospf_route_row;
+              ovsrec_ospf_route_set_path_type (ospf_route_row, OSPF_PATH_TYPE_STRING_INTRA_AREA);
+            }
+            else if (or->path_type == OSPF_PATH_INTER_AREA) {
+              inter_area_rts[j++] = ospf_route_row;
+              ovsrec_ospf_route_set_path_type (ospf_route_row, OSPF_PATH_TYPE_STRING_INTER_AREA);
+            }
+            else
+              continue;
+
+            snprintf (prefix_str, sizeof(prefix_str), "%s/%d", inet_ntoa (rn1->p.u.prefix4), rn1->p.prefixlen);
+            ovsrec_ospf_route_set_prefix (ospf_route_row, prefix_str);
+
+            if (!(or->path_type == OSPF_PATH_INTER_AREA && or->type == OSPF_DESTINATION_DISCARD)) {
+              struct smap route_info;
+              char cost[6] = {0};
+
+              smap_clone (&route_info, &(ospf_route_row->route_info));
+              smap_replace (&route_info, OSPF_KEY_ROUTE_AREA_ID, inet_ntoa (or->u.std.area_id));
+              snprintf (cost, 6, "%d", or->cost);
+              smap_replace (&route_info, OSPF_KEY_ROUTE_COST, cost);
+              ovsrec_ospf_route_set_route_info (ospf_route_row, &route_info);
+              smap_destroy (&route_info);
+            }
+
+            if (or->type == OSPF_DESTINATION_NETWORK) {
+              char pathstr[100] = {0};
+              int k = 0;
+              char **pathstrs = NULL;
+
+              if (or->paths)
+                if (!(pathstrs = xcalloc (or->paths->count, sizeof (char *)))) {
+                  VLOG_ERR ("Memory allocation Failure");
+                  free (intra_area_rts);
+                  free (inter_area_rts);
+                  ovsdb_idl_txn_abort(ort_txn);
+                  route_unlock_node (rn1);
+                  route_unlock_node (rn);
+                  return;
+                }
+
+                for (ALL_LIST_ELEMENTS (or->paths, pnode, pnnode, path)) {
+                  if (if_lookup_by_index(path->ifindex)) {
+                    if (path->nexthop.s_addr == 0)
+                      snprintf (pathstr, 100, "directly attached to %s", ifindex2ifname (path->ifindex));
+                    else
+                      snprintf (pathstr, 100, "via %s, %s", inet_ntoa (path->nexthop), ifindex2ifname (path->ifindex));
+
+                    pathstrs[k++] = pathstr;
+                  }
+                }
+
+                ovsrec_ospf_route_set_paths (ospf_route_row, pathstrs, k);
+                free (pathstrs);
+              }
+          }
+         ovsrec_ospf_area_set_intra_area_ospf_routes (ospf_area_row, intra_area_rts, i);
+         free (intra_area_rts);
+         ovsrec_ospf_area_set_inter_area_ospf_routes (ospf_area_row, inter_area_rts, j);
+         free (inter_area_rts);
+      }
+    }
+
+  ospf_area_route_table_free (ospf_area_route_table);
+
+  txn_status = ovsdb_idl_txn_commit_block(ort_txn);
+  if (TXN_SUCCESS != txn_status && TXN_UNCHANGED != txn_status)
+        VLOG_DBG ("OSPF Route add transaction commit failed:%d",txn_status);
+
+  ovsdb_idl_txn_destroy(ort_txn);
+
+  return;
+}
+
+/*
+ * Update the ospf router routes in the OSPF_Route table of the OVSDB database *
+*/
+void
+ovsdb_ospf_update_router_routes (const struct ospf *ospf, const struct route_table *rt)
+{
+  struct ovsrec_ospf_router *ospf_router_row = NULL;
+  struct ovsrec_ospf_area *ospf_area_row = NULL;
+  struct ovsrec_ospf_route *ospf_route_row = NULL;
+  struct ovsrec_ospf_route **router_rts = NULL;
+  struct ovsdb_idl_txn* ort_txn = NULL;
+  enum   ovsdb_idl_txn_status txn_status;
+  struct route_node *rn, *rn1;
+  struct listnode *node;
+  struct ospf_route *or;
+  struct route_table *ospf_area_route_table = NULL, *per_area_rt_table = NULL;
+  int    i = 0, j = 0;
+
+  if (NULL == ospf || NULL == rt)
+  {
+      VLOG_DBG ("No ospf instance or no routes to add");
+      return;
+  }
+
+  ospf_router_row = ovsdb_ospf_get_router_by_instance_num (ospf->ospf_inst);
+  if (!ospf_router_row)
+  {
+      VLOG_DBG ("No OSPF Router in OVSDB could be found");
+      return;
+  }
+
+  if (!ospf_router_row->n_areas)
+  {
+      VLOG_DBG ("No OSPF Area in OSPF Router in OVSDB could be found");
+      return;
+  }
+
+  ort_txn = ovsdb_idl_txn_create(idl);
+  if (!ort_txn)
+  {
+      VLOG_DBG ("Transaction create failed");
+      return;
+  }
+
+  /* Delete all the network routes of all the areas in the ospf router instance */
+  for (i = 0 ; i < ospf_router_row->n_areas ; i++) {
+    ospf_area_row = ospf_router_row->value_areas[i];
+
+    ovsrec_ospf_area_set_router_ospf_routes (ospf_area_row, NULL, 0);
+  }
+
+  /* Add ospf routes to OVSDB OSPF_Route table */
+
+  /* Generating the per area ospf routing table */
+  ospf_area_route_table = route_table_init ();
+  for (rn = route_top (rt); rn; rn = route_next (rn))
+    if (rn->info)
+      for (ALL_LIST_ELEMENTS_RO ((struct list *)rn->info, node, or))
+        ospf_route_add_to_area_route_table (ospf_area_route_table, &(rn->p), or);
+
+  /* Updating the OVSDB databse from the per area ospf routing table */
+  for (rn = route_top (ospf_area_route_table); rn; rn = route_next (rn))
+    if ((per_area_rt_table = (struct route_table *)(rn->info))) {
+      struct in_addr area_id = rn->p.u.prefix4;
+      if (ospf_area_row = ovsrec_ospf_area_get_area_by_id (ospf_router_row, area_id)) {
+        i = j = 0;
+        if (!(router_rts = xcalloc (per_area_rt_table->count, sizeof (struct ovsrec_ospf_route *)))) {
+          VLOG_ERR ("Memory allocation Failure");
+          ovsdb_idl_txn_abort(ort_txn);
+          route_unlock_node (rn);
+          return;
+        }
+        for (rn1 = route_top (per_area_rt_table); rn1; rn1 = route_next (rn1))
+          if ((or = (struct ospf_route *)(rn1->info))) {
+            char prefix_str[19] = {0};
+            struct listnode *pnode, *pnnode;
+            struct ospf_path *path;
+            struct smap route_info;
+            char cost[6] = {0};
+            char pathstr[100] = {0};
+            int k = 0;
+            char **pathstrs = NULL;
+
+            if (!(ospf_route_row = ovsrec_ospf_route_insert (ort_txn))) {
+              VLOG_ERR ("insert in OSPF_Route Failed.");
+              continue;
+            }
+
+            router_rts[i++] = ospf_route_row;
+
+            snprintf (prefix_str, sizeof(prefix_str), "%s/%d", inet_ntoa (rn1->p.u.prefix4), rn1->p.prefixlen);
+            ovsrec_ospf_route_set_prefix (ospf_route_row, prefix_str);
+
+            ovsrec_ospf_route_set_path_type (ospf_route_row, ospf_route_path_type_string (or->path_type));
+
+            smap_clone (&route_info, &(ospf_route_row->route_info));
+            smap_replace (&route_info, OSPF_KEY_ROUTE_AREA_ID, inet_ntoa (or->u.std.area_id));
+            snprintf (cost, 6, "%d", or->cost);
+            smap_replace (&route_info, OSPF_KEY_ROUTE_COST, cost);
+            smap_replace (&route_info, OSPF_KEY_ROUTE_TYPE_ABR, boolean2string(or->u.std.flags & ROUTER_LSA_BORDER));
+            smap_replace (&route_info, OSPF_KEY_ROUTE_TYPE_ASBR, boolean2string(or->u.std.flags & or->u.std.flags & ROUTER_LSA_EXTERNAL));
+            ovsrec_ospf_route_set_route_info (ospf_route_row, &route_info);
+            smap_destroy (&route_info);
+
+            if (or->paths)
+              if (!(pathstrs = xcalloc (or->paths->count, sizeof (char *)))) {
+                VLOG_ERR ("Memory allocation Failure");
+                free (router_rts);
+                ovsdb_idl_txn_abort(ort_txn);
+                route_unlock_node (rn1);
+                route_unlock_node (rn);
+                return;
+              }
+
+            for (ALL_LIST_ELEMENTS (or->paths, pnode, pnnode, path)) {
+              if (if_lookup_by_index(path->ifindex)) {
+                if (path->nexthop.s_addr == 0)
+                  snprintf (pathstr, 100, "directly attached to %s", ifindex2ifname (path->ifindex));
+                else
+                  snprintf (pathstr, 100, "via %s, %s", inet_ntoa (path->nexthop), ifindex2ifname (path->ifindex));
+
+                pathstrs[k++] = pathstr;
+              }
+            }
+
+            ovsrec_ospf_route_set_paths (ospf_route_row, pathstrs, k);
+            free (pathstrs);
+        }
+        ovsrec_ospf_area_set_router_ospf_routes (ospf_area_row, router_rts, i);
+        free (router_rts);
+      }
+    }
+
+  ospf_area_route_table_free (ospf_area_route_table);
+
+  txn_status = ovsdb_idl_txn_commit_block(ort_txn);
+  if (TXN_SUCCESS != txn_status && TXN_UNCHANGED != txn_status)
+        VLOG_DBG ("OSPF Route add transaction commit failed:%d",txn_status);
+
+  ovsdb_idl_txn_destroy(ort_txn);
+
+  return;
+}
+
+/*
+ * Update the ospf external routes in the OSPF_Route table of the OVSDB database *
+*/
+void
+ovsdb_ospf_update_ext_routes (const struct ospf *ospf, const struct route_table *rt)
+{
+  struct ovsrec_ospf_router *ospf_router_row = NULL;
+  struct ovsrec_ospf_route *ospf_route_row = NULL;
+  struct ovsrec_ospf_route **ext_rts = NULL;
+  struct ovsdb_idl_txn* ort_txn = NULL;
+  enum   ovsdb_idl_txn_status txn_status;
+  struct route_node *rn;
+  struct ospf_route *or;
+  int    i = 0;
+
+  if (NULL == ospf || NULL == rt)
+  {
+      VLOG_DBG ("No ospf instance or no routes to add");
+      return;
+  }
+
+  ospf_router_row = ovsdb_ospf_get_router_by_instance_num (ospf->ospf_inst);
+  if (!ospf_router_row)
+  {
+      VLOG_DBG ("No OSPF Router in OVSDB could be found");
+      return;
+  }
+
+  ort_txn = ovsdb_idl_txn_create(idl);
+  if (!ort_txn)
+  {
+      VLOG_DBG ("Transaction create failed");
+      return;
+  }
+
+  /* Delete all the network routes of all the areas in the ospf router instance */
+
+  ovsrec_ospf_router_set_ext_ospf_routes (ospf_router_row, NULL, 0);
+
+  /* Add ospf routes to OVSDB OSPF_Route table */
+
+  i = 0;
+  if (!(ext_rts = xcalloc (rt->count, sizeof (struct ovsrec_ospf_route *)))) {
+    VLOG_ERR ("Memory allocation Failure");
+    ovsdb_idl_txn_abort(ort_txn);
+    return;
+  }
+
+  for (rn = route_top (rt); rn; rn = route_next (rn))
+    if ((or = (struct ospf_route *)(rn->info))) {
+      char prefix_str[19] = {0};
+      struct listnode *pnode, *pnnode;
+      struct ospf_path *path;
+      struct smap route_info;
+      char buf[20] = {0};
+      char pathstr[100] = {0};
+      int k = 0;
+      char **pathstrs = NULL;
+
+      if (!(ospf_route_row = ovsrec_ospf_route_insert (ort_txn))) {
+        VLOG_ERR ("Insert in OSPF_Route table Failed.");
+        continue;
+      }
+
+      ext_rts[i++] = ospf_route_row;
+
+      snprintf (prefix_str, sizeof(prefix_str), "%s/%d", inet_ntoa (rn->p.u.prefix4), rn->p.prefixlen);
+      ovsrec_ospf_route_set_prefix (ospf_route_row, prefix_str);
+
+      ovsrec_ospf_route_set_path_type (ospf_route_row, ospf_route_path_type_string (or->path_type));
+
+      smap_clone (&route_info, &(ospf_route_row->route_info));
+      smap_replace (&route_info, OSPF_KEY_ROUTE_AREA_ID, inet_ntoa (or->u.std.area_id));
+      snprintf (buf, 11, "%u", or->cost);
+      smap_replace (&route_info, OSPF_KEY_ROUTE_COST, buf);
+      smap_replace (&route_info, OSPF_KEY_ROUTE_TYPE_ABR, boolean2string(or->u.std.flags & ROUTER_LSA_BORDER));
+      smap_replace (&route_info, OSPF_KEY_ROUTE_TYPE_ASBR, boolean2string(or->u.std.flags & or->u.std.flags & ROUTER_LSA_EXTERNAL));
+      smap_replace (&route_info, OSPF_KEY_ROUTE_EXT_TYPE, ospf_route_path_type_ext_string (or->path_type));
+      snprintf (buf, 11, "%u", or->u.ext.tag);
+      smap_replace (&route_info, OSPF_KEY_ROUTE_EXT_TAG, buf);
+      if (or->path_type == OSPF_PATH_TYPE2_EXTERNAL) {
+        snprintf (buf, 11, "%u", or->u.ext.type2_cost);
+        smap_replace (&route_info, OSPF_KEY_ROUTE_TYPE2_COST, buf);
+      }
+      ovsrec_ospf_route_set_route_info (ospf_route_row, &route_info);
+      smap_destroy (&route_info);
+
+      if (or->paths)
+        if (!(pathstrs = xcalloc (or->paths->count, sizeof (char *)))) {
+          VLOG_ERR ("Memory allocation Failure");
+          free (ext_rts);
+          ovsdb_idl_txn_abort(ort_txn);
+          route_unlock_node (rn);
+          return;
+        }
+       for (ALL_LIST_ELEMENTS (or->paths, pnode, pnnode, path)) {
+        if (if_lookup_by_index(path->ifindex)) {
+          if (path->nexthop.s_addr == 0)
+            snprintf (pathstr, 100, "directly attached to %s", ifindex2ifname (path->ifindex));
+          else
+            snprintf (pathstr, 100, "via %s, %s", inet_ntoa (path->nexthop), ifindex2ifname (path->ifindex));
+          pathstrs[k++] = pathstr;
+        }
+      }
+
+      ovsrec_ospf_route_set_paths (ospf_route_row, pathstrs, k);
+      free (pathstrs);
+    }
+  ovsrec_ospf_router_set_ext_ospf_routes (ospf_router_row, ext_rts, i);
+  free (ext_rts);
+
+  txn_status = ovsdb_idl_txn_commit_block(ort_txn);
+  if (TXN_SUCCESS != txn_status && TXN_UNCHANGED != txn_status)
+    VLOG_DBG ("OSPF Route add transaction commit failed:%d",txn_status);
+
+  ovsdb_idl_txn_destroy(ort_txn);
+
+  return;
+}
 
 /* Check idl seqno. to make sure there are updates to the idl
  * and update the local structures accordingly.

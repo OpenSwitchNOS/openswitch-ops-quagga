@@ -1398,6 +1398,10 @@ ospf_spf_calculate_timer (struct thread *thread)
   ospf->old_rtrs = ospf->new_rtrs;
   ospf->new_rtrs = new_rtrs;
 
+#ifdef ENABLE_OVSDB
+  ovsdb_ospf_update_router_routes (ospf, ospf->new_rtrs);
+#endif /* ENABLE_OVSDB */
+
   quagga_gettime (QUAGGA_CLK_MONOTONIC, &start_time);
   if (IS_OSPF_ABR (ospf))
     ospf_abr_task (ospf);

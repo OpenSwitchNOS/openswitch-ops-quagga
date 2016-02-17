@@ -675,6 +675,11 @@ ospf_ase_calculate_timer (struct thread *t)
       /* Delete old external routing table */
       ospf_route_table_free (ospf->old_external_route);
       ospf->old_external_route = ospf->new_external_route;
+
+#ifdef ENABLE_OVSDB
+      ovsdb_ospf_update_ext_routes (ospf, ospf->old_external_route);
+#endif /* ENABLE_OVSDB */
+
       ospf->new_external_route = route_table_init ();
 
       quagga_gettime(QUAGGA_CLK_MONOTONIC, &stop_time);
@@ -848,6 +853,10 @@ ospf_ase_incremental_update (struct ospf *ospf, struct ospf_lsa *lsa)
 	  route_unlock_node (rn);
 	}
     }
+#ifdef ENABLE_OVSDB
+  /* TODO To be optimized for the incremental updates to OVSDB */
+  ovsdb_ospf_update_ext_routes (ospf, ospf->old_external_route);
+#endif /* ENABLE_OVSDB */
 
   if (rn2)
     {

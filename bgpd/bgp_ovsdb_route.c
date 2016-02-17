@@ -1151,6 +1151,11 @@ const struct lookup_entry match_table[]={
   {MATCH_IPV6_PREFIX, "ipv6 address prefix-list", "ipv6_prefix_list"},
   {MATCH_COMMUNITY, "community", "community"},
   {MATCH_EXTCOMMUNITY, "extcommunity", "extcommunity"},
+  {MATCH_ASPATH, "as-path","as_path"},
+  {MATCH_ORIGIN, "origin", "origin"},
+  {MATCH_METRIC, "metric", "metric"},
+  {MATCH_IPV6_NEXTHOP, "ipv6 next-hop", "ipv6_next_hop"},
+  {MATCH_PROBABILITY, "probability","probability"},
   {0, NULL, NULL},
 };
 
@@ -1159,6 +1164,11 @@ const struct lookup_entry set_table[]={
   {SET_METRIC, "metric", "metric"},
   {SET_ECOMMUNITY_RT, "extcommunity rt", "extcommunity rt"},
   {SET_ECOMMUNITY_SOO, "extcommunity soo", "extcommunity soo"},
+  {SET_AS_PATH_EXCLUDE, "as-path exclude", "as_path_exclude"},
+  {SET_AS_PATH_PREPEND, "as-path prepend", "as_path_prepend"},
+  {SET_ORIGIN, "origin", "origin"},
+  {SET_COMM_LIST, "comm-list", "comm_list"},
+  {SET_IPV6_NEXT_HOP_GLOBAL, "ipv6 next-hop global", "ipv6_next_hop_global"},
   {0, NULL, NULL},
 };
 

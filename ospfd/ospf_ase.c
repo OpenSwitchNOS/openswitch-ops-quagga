@@ -842,6 +842,9 @@ ospf_ase_incremental_update (struct ospf *ospf, struct ospf_lsa *lsa)
       if (!rn)
 	rn = route_node_get (ospf->old_external_route, (struct prefix *) &p);
       rn->info = rn2->info;
+#ifdef ENABLE_OVSDB
+      ovsdb_ospf_update_ext_route (ospf, &p, rn->info);
+#endif /* ENABLE_OVSDB */
     }
   else
     {
@@ -850,13 +853,12 @@ ospf_ase_incremental_update (struct ospf *ospf, struct ospf_lsa *lsa)
 	{
 	  rn->info = NULL;
 	  route_unlock_node (rn);
+#ifdef ENABLE_OVSDB
+      ovsdb_ospf_update_ext_route (ospf, &p, rn->info);
+#endif /* ENABLE_OVSDB */
 	  route_unlock_node (rn);
 	}
     }
-#ifdef ENABLE_OVSDB
-  /* TODO To be optimized for the incremental updates to OVSDB */
-  ovsdb_ospf_update_ext_routes (ospf, ospf->old_external_route);
-#endif /* ENABLE_OVSDB */
 
   if (rn2)
     {

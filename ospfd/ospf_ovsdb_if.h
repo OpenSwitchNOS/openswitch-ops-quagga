@@ -177,4 +177,7 @@ ovsdb_ospf_update_router_routes (const struct ospf *, const struct route_table *
 extern void
 ovsdb_ospf_update_ext_routes (const struct ospf *, const struct route_table *);
 
+extern void
+ovsdb_ospf_update_ext_route (const struct ospf *, const struct prefix *, const struct ospf_route *);
+
 #endif /* OSPF_OVSDB_IF_H */

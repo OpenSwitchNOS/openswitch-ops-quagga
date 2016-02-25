@@ -59,6 +59,13 @@
 COVERAGE_DEFINE(ospf_ovsdb_cnt);
 VLOG_DEFINE_THIS_MODULE(ospf_ovsdb_if);
 
+extern int
+ospf_area_vlink_count (struct ospf *ospf, struct ospf_area *area);
+
+extern void
+ospf_area_type_set (struct ospf_area *area, int type);
+
+
 /* Local structure to hold the master thread
  * and counters for read/write callbacks
  */
@@ -127,6 +134,12 @@ const ism_str ospf_ism_state[] =
   { ISM_DROther,    "dr_other" },
   { ISM_Backup,   "backup_dr" },
   { ISM_DR,    "dr" },
+};
+
+const char* nssa_translate_role_str[] = {
+  "never",
+  "candidate",
+  "always"
 };
 
 /* OPS_TODO : For fast look up now only 4 intervals are considered
@@ -242,7 +255,8 @@ ospf_ovsdb_tables_init()
     ovsdb_idl_add_column(idl, &ovsrec_port_col_ospf_if_type);
     ovsdb_idl_omit_alert(idl, &ovsrec_port_col_ospf_if_type);
     ovsdb_idl_add_column(idl, &ovsrec_port_col_ospf_auth_type);
-    ovsdb_idl_omit_alert(idl, &ovsrec_port_col_ospf_auth_type);
+    ovsdb_idl_add_column(idl, &ovsrec_port_col_ospf_auth_text_key);
+    ovsdb_idl_add_column(idl, &ovsrec_port_col_ospf_auth_md5_keys);
     ovsdb_idl_add_column(idl, &ovsrec_port_col_ospf_mtu_ignore);
     ovsdb_idl_omit_alert(idl, &ovsrec_port_col_ospf_mtu_ignore);
     ovsdb_idl_add_column(idl, &ovsrec_port_col_other_config);
@@ -253,9 +267,7 @@ ospf_ovsdb_tables_init()
     ovsdb_idl_add_table(idl, &ovsrec_table_ospf_area);
     ovsdb_idl_add_column(idl, &ovsrec_ospf_area_col_abr_summary_lsas);
     ovsdb_idl_add_column(idl, &ovsrec_ospf_area_col_area_type);
-    ovsdb_idl_omit_alert(idl, &ovsrec_ospf_area_col_area_type);
     ovsdb_idl_add_column(idl, &ovsrec_ospf_area_col_nssa_translator_role);
-    ovsdb_idl_omit_alert(idl, &ovsrec_ospf_area_col_nssa_translator_role);
     ovsdb_idl_add_column(idl, &ovsrec_ospf_area_col_other_config);
     ovsdb_idl_omit_alert(idl, &ovsrec_ospf_area_col_other_config);
     ovsdb_idl_add_column(idl, &ovsrec_ospf_area_col_ospf_area_summary_addresses);
@@ -439,6 +451,14 @@ ops_ospf_lsa_dump(struct unixctl_conn *conn, int argc OVS_UNUSED,
                      ntohs (lsa->data->checksum),lsa->data->type);
                 }
             }
+        }
+        LSDB_LOOP (AS_LSDB (ospf, type), rn, lsa)
+        {
+            sprintf (buf+strlen(buf),"%-15s ", inet_ntoa (lsa->data->id));
+            sprintf (buf+strlen(buf),"%-15s %4d 0x%08lx 0x%04x type%d\n",
+                    inet_ntoa (lsa->data->adv_router), LS_AGE (lsa),
+                    (u_long)ntohl (lsa->data->ls_seqnum),
+                    ntohs (lsa->data->checksum),lsa->data->type);
         }
         unixctl_command_reply(conn,buf);
     }
@@ -2418,7 +2438,7 @@ ovsdb_ospf_is_area_tbl_empty(const struct ovsrec_ospf_area *ospf_area_row)
             return false;
 
     if (0 == strcmp (ospf_area_row->nssa_translator_role,OVSREC_OSPF_AREA_NSSA_TRANSLATOR_ROLE_ALWAYS) ||
-        0 == strcmp (ospf_area_row->nssa_translator_role,OVSREC_OSPF_AREA_NSSA_TRANSLATOR_ROLE_CANDIDATE))
+        0 == strcmp (ospf_area_row->nssa_translator_role,OVSREC_OSPF_AREA_NSSA_TRANSLATOR_ROLE_NEVER))
         return false;
 
     if (ospf_area_row->n_ospf_vlinks > 0)
@@ -2823,6 +2843,34 @@ modify_ospf_network_config (struct ovsdb_idl *idl, struct ospf *ospf_cfg,
     return 0;
 }
 
+static int
+modify_ospf_admin_distance (struct ovsdb_idl *idl, struct ospf *ospf_cfg,
+    const struct ovsrec_ospf_router *ospf_mod_row)
+{
+/* OPS_TODO : Handle when default values are not populated by the CLI */
+    unsigned char distance =
+    (unsigned char)ospf_mod_row->value_distance[OSPF_ROUTER_DISTANCE_ALL];
+    unsigned char distance_intra =
+    (unsigned char)ospf_mod_row->value_distance[OSPF_ROUTER_DISTANCE_INTRA_AREA];
+    unsigned char distance_inter =
+    (unsigned char)ospf_mod_row->value_distance[OSPF_ROUTER_DISTANCE_INTER_AREA];
+    unsigned char distance_external =
+    (unsigned char)ospf_mod_row->value_distance[OSPF_ROUTER_DISTANCE_EXTERNAL];
+
+
+    if (distance != ospf_cfg->distance_all)
+        ospf_cfg->distance_all = distance;
+    if (distance_intra != ospf_cfg->distance_intra)
+        ospf_cfg->distance_intra = distance_intra;
+    if (distance_inter != ospf_cfg->distance_inter)
+        ospf_cfg->distance_inter = distance_inter;
+    if (distance_external != ospf_cfg->distance_external)
+        ospf_cfg->distance_external = distance_external;
+
+    return 0;
+}
+
+
 void
 insert_ospf_router_instance(struct ovsdb_idl *idl, struct ovsrec_ospf_router* ovs_ospf, int64_t instance_number)
 {
@@ -2902,6 +2950,207 @@ modify_ospf_router_instance(struct ovsdb_idl *idl,
     else
         VLOG_DBG("OSPF router network not set");
 
+    /* Check if distance is modified */
+    if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_ospf_router_col_distance, idl_seqno)) {
+        ret_status = modify_ospf_admin_distance (idl,ospf_instance, ovs_ospf);
+        if (!ret_status) {
+            VLOG_DBG("OSPF Admin distance set");
+        }
+    }
+    else
+        VLOG_DBG("OSPF Admin distance not set");
+
+}
+
+static void
+insert_ospf_area_instance(struct ovsdb_idl *idl,
+                                    int64_t area_id, int64_t ospf_inst)
+{
+    struct ospf* ospf = NULL;
+    struct ospf_area *area = NULL;
+    struct in_addr areaid;
+
+    areaid.s_addr = area_id;
+    ospf = ospf_lookup_by_instance(ospf_inst);
+    if (!ospf)
+    {
+         VLOG_DBG ("No OSPF config found!Critical error");
+         return;
+    }
+    area = ospf_area_lookup_by_area_id(ospf,areaid);
+    if (!area)
+    {
+         area = ospf_area_new (ospf, areaid);
+         area->format = OSPF_AREA_ID_FORMAT_ADDRESS;
+         listnode_add_sort (ospf->areas, area);
+         ospf_check_abr_status (ospf);
+         if (ospf->stub_router_admin_set == OSPF_STUB_ROUTER_ADMINISTRATIVE_SET)
+        {
+          SET_FLAG (area->stub_router_state, OSPF_AREA_ADMIN_STUB_ROUTED);
+        }
+    }
+    else
+        VLOG_DBG ("OSPF Area already present");
+
+    return;
+}
+
+static void
+modify_ospf_area_instance(struct ovsdb_idl *idl,
+    const struct ovsrec_ospf_area* ovs_area, int64_t area_id, int64_t ospf_inst)
+{
+    struct ospf_area* area = NULL;
+    struct ospf* ospf = NULL;
+    struct in_addr areaid;
+    int ret = 0;
+    bool sched_ab_task = false;
+
+    areaid.s_addr = area_id;
+    ospf = ospf_lookup_by_instance(ospf_inst);
+    if (!ospf)
+    {
+         VLOG_DBG ("No OSPF config found!Critical error");
+         return;
+    }
+    area = ospf_area_lookup_by_area_id(ospf,areaid);
+    if (!area)
+    {
+         VLOG_DBG ("No OSPF area config found!Critical error");
+         return;
+    }
+    /* Check if auth type is modified */
+    if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_ospf_area_col_ospf_auth_type, idl_seqno)) {
+        if (ovs_area->ospf_auth_type) {
+          if(!strcmp(ovs_area->ospf_auth_type,OVSREC_OSPF_AREA_OSPF_AUTH_TYPE_TEXT))
+              area->auth_type = OSPF_AUTH_SIMPLE;
+          else if(!strcmp(ovs_area->ospf_auth_type,OVSREC_OSPF_AREA_OSPF_AUTH_TYPE_MD5))
+              area->auth_type = OSPF_AUTH_CRYPTOGRAPHIC;
+        }
+        else {
+          area->auth_type = OSPF_AUTH_NULL;
+        }
+    }
+     /* Check if area type is modified */
+    if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_ospf_area_col_area_type, idl_seqno)) {
+        if (!ovs_area->area_type ||
+            !strcmp(ovs_area->area_type,OVSREC_OSPF_AREA_AREA_TYPE_DEFAULT)) {
+            /* Not checking if backbone area for making area type default */
+            if (OSPF_AREA_STUB == area->external_routing) {
+                ospf_area_type_set (area, OSPF_AREA_DEFAULT);
+                area->no_summary = 0;
+            }
+            else if(OSPF_AREA_NSSA == area->external_routing) {
+                ospf->anyNSSA--;
+                ospf_area_type_set (area, OSPF_AREA_DEFAULT);
+                area->no_summary = 0;
+                ospf_schedule_abr_task (ospf); //Is it necessary ospf_area_type_set() schedules an ABR task
+            }
+        }
+        else if(!strcmp(ovs_area->area_type,OVSREC_OSPF_AREA_AREA_TYPE_STUB)) {
+            if (!OSPF_IS_AREA_ID_BACKBONE(areaid)) {
+                ret = ospf_area_vlink_count (ospf, area);
+                if (ret != 0)
+                    VLOG_INFO ("Error setting area as stub. Area has virtual links through it");
+                else {
+                    if (area->external_routing != OSPF_AREA_STUB)
+                        ospf_area_type_set (area, OSPF_AREA_STUB);
+                    area->no_summary = 0;
+                }
+            }
+            else
+                VLOG_INFO ("Cannot configure Backbone area as stub");
+        }
+        else if(!strcmp(ovs_area->area_type,OVSREC_OSPF_AREA_AREA_TYPE_STUB_NO_SUMMARY)) {
+            if (!OSPF_IS_AREA_ID_BACKBONE(areaid)) {
+                ret = ospf_area_vlink_count (ospf, area);
+                if (ret != 0)
+                    VLOG_INFO ("Error setting area %d as stub. Area has virtual links through it");
+                else {
+                    if (area->external_routing != OSPF_AREA_STUB)
+                        ospf_area_type_set (area, OSPF_AREA_STUB);
+                     area->no_summary = 1;
+                }
+            }
+            else
+                VLOG_INFO ("Cannot configure Backbone area as stub");
+        }
+        else if(!strcmp(ovs_area->area_type,OVSREC_OSPF_AREA_AREA_TYPE_NSSA) ||
+                !strcmp(ovs_area->area_type,OVSREC_OSPF_AREA_AREA_TYPE_NSSA_NO_SUMMARY)) {
+            sched_ab_task = false;
+            if (!OSPF_IS_AREA_ID_BACKBONE(areaid)) {
+                ret = ospf_area_vlink_count (ospf, area);
+                if (ret != 0)
+                    VLOG_INFO ("Error setting area %d as NSSA. Area has virtual links through it");
+                else {
+                    /* OPS_TODO : Is it needed to run abr task again,
+                    if only area type is changed as its handled in ospf_area_type_set() */
+                    if (area->external_routing != OSPF_AREA_NSSA) {
+                        ospf_area_type_set (area, OSPF_AREA_NSSA);
+                        ospf->anyNSSA++;
+                        sched_ab_task = true;
+                    }
+                    /* Set translator role also */
+                    if (ovs_area->nssa_translator_role &&
+                        strcmp(ovs_area->nssa_translator_role,
+                        nssa_translate_role_str[area->NSSATranslatorRole])) {
+                          if(!strcmp(ovs_area->nssa_translator_role,OVSREC_OSPF_AREA_NSSA_TRANSLATOR_ROLE_CANDIDATE))
+                            area->NSSATranslatorRole = OSPF_NSSA_ROLE_CANDIDATE;
+                          if(!strcmp(ovs_area->nssa_translator_role,OVSREC_OSPF_AREA_NSSA_TRANSLATOR_ROLE_ALWAYS))
+                            area->NSSATranslatorRole = OSPF_NSSA_ROLE_ALWAYS;
+                          if(!strcmp(ovs_area->nssa_translator_role,OVSREC_OSPF_AREA_NSSA_TRANSLATOR_ROLE_NEVER))
+                          area->NSSATranslatorRole = OSPF_NSSA_ROLE_NEVER;
+                          sched_ab_task = true;
+                    }
+                    /* If OVSDB has no data but ospf instance has something other than candidate */
+                    else if (!ovs_area->nssa_translator_role &&
+                        strcmp(nssa_translate_role_str[area->NSSATranslatorRole],
+                        OVSREC_OSPF_AREA_NSSA_TRANSLATOR_ROLE_CANDIDATE)) {
+                          area->NSSATranslatorRole = OSPF_NSSA_ROLE_CANDIDATE;
+                          sched_ab_task = true;
+                    }
+                    if (!strcmp(ovs_area->area_type,OVSREC_OSPF_AREA_AREA_TYPE_NSSA))
+                        area->no_summary = 0;
+                    else {
+                        area->no_summary = 1;
+                        sched_ab_task = true;
+                    }
+                    if (sched_ab_task) {
+                        area->NSSATranslatorState = OSPF_NSSA_TRANSLATE_DISABLED;
+                        area->NSSATranslatorStabilityInterval = OSPF_NSSA_TRANS_STABLE_DEFAULT;
+                        ospf_schedule_abr_task (ospf);
+                    }
+                }
+            }
+            else
+                VLOG_INFO ("Cannot configure Backbone area as NSSA");
+        }
+    }
+    if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_ospf_area_col_nssa_translator_role, idl_seqno)) {
+        if (area->external_routing == OSPF_AREA_NSSA) {
+            if (ovs_area->nssa_translator_role &&
+                strcmp (nssa_translate_role_str[area->NSSATranslatorRole],ovs_area->nssa_translator_role)) {
+                  area->NSSATranslatorState = OSPF_NSSA_TRANSLATE_DISABLED;
+                  area->NSSATranslatorStabilityInterval = OSPF_NSSA_TRANS_STABLE_DEFAULT;
+                  if (!strcmp(ovs_area->nssa_translator_role,OVSREC_OSPF_AREA_NSSA_TRANSLATOR_ROLE_ALWAYS))
+                    area->NSSATranslatorRole = OSPF_NSSA_ROLE_ALWAYS;
+                  else if (!strcmp(ovs_area->nssa_translator_role,OVSREC_OSPF_AREA_NSSA_TRANSLATOR_ROLE_NEVER))
+                    area->NSSATranslatorRole = OSPF_NSSA_ROLE_NEVER;
+                  else
+                    area->NSSATranslatorRole = OSPF_NSSA_ROLE_CANDIDATE;
+                  ospf_schedule_abr_task (ospf);
+            }
+            else if (!ovs_area->nssa_translator_role &&
+                strcmp (nssa_translate_role_str[area->NSSATranslatorRole],OVSREC_OSPF_AREA_NSSA_TRANSLATOR_ROLE_CANDIDATE)) {
+                  area->NSSATranslatorState = OSPF_NSSA_TRANSLATE_DISABLED;
+                  area->NSSATranslatorStabilityInterval = OSPF_NSSA_TRANS_STABLE_DEFAULT;
+                  area->NSSATranslatorRole = OSPF_NSSA_ROLE_CANDIDATE;
+                  ospf_schedule_abr_task (ospf);
+            }
+        }
+        else
+            VLOG_INFO ("Area is not configured as NSSA");
+    }
+    ospf_area_check_free(ospf,areaid);
 }
 
 static void
@@ -2930,8 +3179,14 @@ modify_ospf_interface (struct ovsdb_idl *idl,
     struct ospf_if_params *params = NULL;
     struct ospf_interface *oi;
     struct route_node *rn = NULL;
+    struct crypt_key *ck = NULL;
+    struct crypt_key *lookup_ck = NULL;
+    struct listnode *node;
+    unsigned char key_id;
     u_int32_t seconds = 0;
     int ret_status = -1;
+    int i =0;
+    bool is_key_found = false;
 
     if (!ovs_port || !if_name)
     {
@@ -2968,6 +3223,66 @@ modify_ospf_interface (struct ovsdb_idl *idl,
                 for (rn = route_top (IF_OIFS (ifp)); rn; rn = route_next (rn))
                     if ((oi = rn->info))
                         ospf_nbr_timer_update (oi);
+            }
+        }
+    }
+    if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_port_col_ospf_auth_type, idl_seqno))  {
+        if (ovs_port->ospf_auth_type) {
+            if (!strcmp(ovs_port->ospf_auth_type,OVSREC_PORT_OSPF_AUTH_TYPE_TEXT)) {
+                SET_IF_PARAM (params, auth_type);
+                params->auth_type = OSPF_AUTH_SIMPLE;
+            }
+            else if (!strcmp(ovs_port->ospf_auth_type,OVSREC_PORT_OSPF_AUTH_TYPE_MD5)) {
+                SET_IF_PARAM (params, auth_type);
+                params->auth_type = OSPF_AUTH_CRYPTOGRAPHIC;
+            }
+            else if (!strcmp(ovs_port->ospf_auth_type,OVSREC_PORT_OSPF_AUTH_TYPE_NULL)) {
+                SET_IF_PARAM (params, auth_type);
+                params->auth_type = OSPF_AUTH_NULL;
+            }
+        }
+        else {
+            params->auth_type = OSPF_AUTH_NOTSET;
+            UNSET_IF_PARAM (params, auth_type);
+        }
+    }
+    if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_port_col_ospf_auth_text_key, idl_seqno)) {
+        if (ovs_port->ospf_auth_text_key) {
+            memset (params->auth_simple, 0, OSPF_AUTH_SIMPLE_SIZE + 1);
+            strncpy ((char *) params->auth_simple,
+                ovs_port->ospf_auth_text_key, OSPF_AUTH_SIMPLE_SIZE);
+            SET_IF_PARAM (params, auth_simple);
+        }
+        else {
+            memset (params->auth_simple, 0, OSPF_AUTH_SIMPLE_SIZE);
+            UNSET_IF_PARAM (params, auth_simple);
+        }
+    }
+    if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_port_col_ospf_auth_md5_keys, idl_seqno)) {
+        for (i = 0 ; i < ovs_port->n_ospf_auth_md5_keys;i++) {
+            key_id = (unsigned char)ovs_port->key_ospf_auth_md5_keys[i];
+            if (ospf_crypt_key_lookup (params->auth_crypt, key_id) != NULL) {
+                VLOG_INFO ("OSPF MD5 key already present");
+                continue;
+            }
+            else {
+                ck = ospf_crypt_key_new ();
+                ck->key_id = (u_char) key_id;
+                memset (ck->auth_key, 0, OSPF_AUTH_MD5_SIZE+1);
+                strncpy ((char *) ck->auth_key, ovs_port->value_ospf_auth_md5_keys[i], OSPF_AUTH_MD5_SIZE);
+                ospf_crypt_key_add (params->auth_crypt, ck);
+                SET_IF_PARAM (params, auth_crypt);
+            }
+        }
+        /* check to see if any key is deleted */
+        for (ALL_LIST_ELEMENTS_RO (params->auth_crypt, node, lookup_ck)) {
+            is_key_found = false;
+            for (i = 0; i<ovs_port->n_ospf_auth_md5_keys;i++) {
+                if (lookup_ck->key_id == ovs_port->key_ospf_auth_md5_keys[i])
+                    is_key_found = true;
+            }
+            if (!is_key_found) {
+                ospf_crypt_key_delete (params->auth_crypt, lookup_ck->key_id);
             }
         }
     }
@@ -3018,6 +3333,33 @@ ospf_router_read_ovsdb_apply_changes(struct ovsdb_idl *idl)
             if (OVSREC_IDL_IS_ROW_MODIFIED(ovs_ospf, idl_seqno) ||
                 (OVSREC_IDL_IS_ROW_INSERTED(ovs_ospf, idl_seqno))) {
                     modify_ospf_router_instance(idl, ovs_ospf,ovs_vrf->key_ospf_routers[i]);
+            }
+        }
+    }
+}
+
+static void
+ospf_area_read_ovsdb_apply_changes (struct ovsdb_idl *idl)
+{
+    const struct ovsrec_vrf* ovs_vrf = NULL;
+    const struct ovsrec_ospf_router* ovs_ospf = NULL;
+    const struct ovsrec_ospf_area* ovs_area = NULL;
+    int64_t instance = 0;
+    int i = 0,j = 0;
+
+     OVSREC_VRF_FOR_EACH(ovs_vrf, idl) {
+        for (j = 0 ; j < ovs_vrf->n_ospf_routers; j++) {
+            ovs_ospf = ovs_vrf->value_ospf_routers[j];
+            instance = ovs_vrf->key_ospf_routers[j];
+            for (i = 0; i < ovs_ospf->n_areas; i++) {
+                ovs_area = ovs_ospf->value_areas[i];
+                if (OVSREC_IDL_IS_ROW_INSERTED(ovs_area, idl_seqno)) {
+                    insert_ospf_area_instance(idl, ovs_ospf->key_areas[i],instance);
+                }
+                if (OVSREC_IDL_IS_ROW_MODIFIED(ovs_area, idl_seqno) ||
+                    OVSREC_IDL_IS_ROW_INSERTED(ovs_area, idl_seqno)) {
+                        modify_ospf_area_instance(idl, ovs_area,ovs_ospf->key_areas[i],instance);
+                }
             }
         }
     }
@@ -3164,6 +3506,41 @@ ospf_apply_ospf_router_changes (struct ovsdb_idl *idl)
     ospf_router_read_ovsdb_apply_changes(idl);
 
     // TODO: Add reconfigurations that will be needed by OSPF daemon
+    return 1;
+}
+
+static int
+ospf_apply_ospf_area_changes (struct ovsdb_idl *idl)
+{
+    const struct ovsrec_ospf_area* ospf_area_first = NULL;
+    struct ospf *ospf_instance;
+
+    ospf_area_first = ovsrec_ospf_area_first(idl);
+    /*
+     * Check if any table changes present.
+     * If no change just return from here
+     */
+    if (ospf_area_first && !OVSREC_IDL_ANY_TABLE_ROWS_INSERTED(ospf_area_first, idl_seqno)
+        && !OVSREC_IDL_ANY_TABLE_ROWS_DELETED(ospf_area_first, idl_seqno)
+        && !OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED(ospf_area_first, idl_seqno)) {
+            VLOG_DBG("No OSPF area changes");
+            return 0;
+    }
+    if (ospf_area_first == NULL) {
+            /* Check if it is a first row deletion */
+            /* Area is created by the OSPF daemon so donothing ish */
+            VLOG_DBG("OSPF area config empty!\n");
+            return 1;
+        }
+
+    /* Check if any row deletion */
+    if (OVSREC_IDL_ANY_TABLE_ROWS_DELETED(ospf_area_first, idl_seqno)) {
+        VLOG_DBG("Some OSPF areas are deleted!\n");
+    }
+
+    /* insert and modify cases */
+    ospf_area_read_ovsdb_apply_changes(idl);
+
     return 1;
 }
 
@@ -3812,7 +4189,8 @@ ospf_reconfigure(struct ovsdb_idl *idl)
     ospf_apply_global_changes();
     if (ospf_apply_port_changes(idl) |
         ospf_apply_interface_changes(idl) |
-        ospf_apply_ospf_router_changes(idl))
+        ospf_apply_ospf_router_changes(idl) |
+        ospf_apply_ospf_area_changes(idl))
     {
          /* Some OSPF configuration changed. */
         VLOG_DBG("OSPF Configuration changed\n");

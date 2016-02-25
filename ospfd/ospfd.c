@@ -1050,7 +1050,7 @@ static const struct message ospf_area_type_msg[] =
 };
 static const int ospf_area_type_msg_max = OSPF_AREA_TYPE_MAX;
 
-static void
+void
 ospf_area_type_set (struct ospf_area *area, int type)
 {
   struct listnode *node;
@@ -1137,7 +1137,7 @@ ospf_area_shortcut_unset (struct ospf *ospf, struct ospf_area *area)
   return 1;
 }
 
-static int
+int
 ospf_area_vlink_count (struct ospf *ospf, struct ospf_area *area)
 {
   struct ospf_vl_data *vl;

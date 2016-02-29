@@ -161,7 +161,7 @@ ecommunity_dup (struct ecommunity *ecom)
 }
 
 /* Retrun string representation of communities attribute. */
-char *
+const char *
 ecommunity_str (struct ecommunity *ecom)
 {
   if (! ecom->str)

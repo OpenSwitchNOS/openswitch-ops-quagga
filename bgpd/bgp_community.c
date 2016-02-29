@@ -378,7 +378,7 @@ community_dup (struct community *com)
 }
 
 /* Retrun string representation of communities attribute. */
-char *
+const char*
 community_str (struct community *com)
 {
   if (!com)

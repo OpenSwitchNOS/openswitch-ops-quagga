@@ -2123,9 +2123,7 @@ bgp_get (struct bgp **bgp_val, as_t *as, const char *name)
     }
 
     bgp = bgp_create (as, name);
-#ifndef ENABLE_OVSDB
-  bgp_router_id_set(bgp, &router_id_zebra);
-#endif /* ENABLE_OVSDB */
+    bgp_router_id_set(bgp, &router_id_zebra);
    *bgp_val = bgp;
 
   /* Create BGP server socket, if first instance.  */
@@ -2133,7 +2131,7 @@ bgp_get (struct bgp **bgp_val, as_t *as, const char *name)
       && !bgp_option_check (BGP_OPT_NO_LISTEN))
     {
       if (bgp_socket (bm->port, bm->address) < 0)
-	return BGP_ERR_INVALID_VALUE;
+          return BGP_ERR_INVALID_VALUE;
     }
 
   listnode_add (bm->bgp, bgp);

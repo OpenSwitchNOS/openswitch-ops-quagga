@@ -172,6 +172,7 @@ bgp_router_id_set (struct bgp *bgp, struct in_addr *id)
     return 0;
 
   IPV4_ADDR_COPY (&bgp->router_id, id);
+  VLOG_INFO("nimisara %s", inet_ntoa(*id));
   bgp_config_set (bgp, BGP_CONFIG_ROUTER_ID);
 
   /* Set all peer's local identifier with this value. */
@@ -2123,9 +2124,7 @@ bgp_get (struct bgp **bgp_val, as_t *as, const char *name)
     }
 
     bgp = bgp_create (as, name);
-#ifndef ENABLE_OVSDB
-  bgp_router_id_set(bgp, &router_id_zebra);
-#endif /* ENABLE_OVSDB */
+    bgp_router_id_set(bgp, &router_id_zebra);
    *bgp_val = bgp;
 
   /* Create BGP server socket, if first instance.  */
@@ -2133,7 +2132,7 @@ bgp_get (struct bgp **bgp_val, as_t *as, const char *name)
       && !bgp_option_check (BGP_OPT_NO_LISTEN))
     {
       if (bgp_socket (bm->port, bm->address) < 0)
-	return BGP_ERR_INVALID_VALUE;
+          return BGP_ERR_INVALID_VALUE;
     }
 
   listnode_add (bm->bgp, bgp);

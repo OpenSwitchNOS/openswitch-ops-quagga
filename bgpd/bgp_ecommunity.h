@@ -79,6 +79,6 @@ extern unsigned int ecommunity_hash_make (void *);
 extern struct ecommunity *ecommunity_str2com (const char *, int, int);
 extern char *ecommunity_ecom2str (struct ecommunity *, int);
 extern int ecommunity_match (const struct ecommunity *, const struct ecommunity *);
-extern char *ecommunity_str (struct ecommunity *);
+extern const char *ecommunity_str (struct ecommunity *);
 
 #endif /* _QUAGGA_BGP_ECOMMUNITY_H */

@@ -59,6 +59,8 @@
 #include "bgpd/bgp_ovsdb_if.h"
 #include "bgpd/bgp_clist.h"
 #include "bgpd/bgp_filter.h"
+#include "bgpd/bgp_community.h"
+#include "bgpd/bgp_ecommunity.h"
 
 #define MAX_ARGC         10
 #define MAX_ARG_LEN     256
@@ -237,6 +239,7 @@ bgp_ovsdb_get_vrf(struct bgp *bgp)
     return ovs_vrf;
 }
 
+
 static int
 bgp_ovsdb_set_rib_path_attributes(struct smap *smap,
                                   struct bgp_info *info,
@@ -244,11 +247,12 @@ bgp_ovsdb_set_rib_path_attributes(struct smap *smap,
 {
     struct attr *attr;
     struct peer *peer;
+    char *comm = NULL;
+    char *ecomm = NULL;
     time_t tbuf;
 
     attr = info->attr;
     peer = info->peer;
-
     smap_add_format(smap,
                     OVSDB_BGP_ROUTE_PATH_ATTRIBUTES_FLAGS,
                     "%d",
@@ -259,10 +263,85 @@ bgp_ovsdb_set_rib_path_attributes(struct smap *smap,
     smap_add(smap,
              OVSDB_BGP_ROUTE_PATH_ATTRIBUTES_ORIGIN,
              bgp_origin_str[info->attr->origin]);
+
+    if (attr->community) {
+        comm = (char *)community_str(attr->community);
+    }
+    if (attr->extra) {
+        if (attr->extra->ecommunity) {
+            ecomm =  (char *)ecommunity_str(attr->extra->ecommunity);
+        }
+    }
+    if(comm != NULL) {
+        smap_add(smap,
+                 OVSDB_BGP_ROUTE_PATH_ATTRIBUTES_COMMUNITY,
+                 comm);
+    } else if(comm == NULL) {
+        smap_add(smap,
+                 OVSDB_BGP_ROUTE_PATH_ATTRIBUTES_COMMUNITY,
+                 "");
+    }
+    if(ecomm != NULL) {
+        smap_add(smap,
+                 OVSDB_BGP_ROUTE_PATH_ATTRIBUTES_ECOMMUNITY,
+                 ecomm);
+    } else if(ecomm == NULL) {
+        smap_add(smap,
+                 OVSDB_BGP_ROUTE_PATH_ATTRIBUTES_ECOMMUNITY,
+                 "");
+    }
+
     smap_add_format(smap,
                     OVSDB_BGP_ROUTE_PATH_ATTRIBUTES_LOC_PREF,
                     "%d",
-                    attr->local_pref);
+                    attr->local_pref?attr->local_pref:0);
+    if (attr->extra) {
+        smap_add_format(smap,
+                        OVSDB_BGP_ROUTE_PATH_ATTRIBUTES_WEIGHT,
+                        "%d",
+                        attr->extra->weight?attr->extra->weight:0);
+
+        if (CHECK_FLAG(attr->flag, ATTR_FLAG_BIT(BGP_ATTR_AGGREGATOR))) {
+            smap_add_format(smap,
+                            OVSDB_BGP_ROUTE_PATH_ATTRIBUTES_AGGREGATOR_ID,
+                            "%d",
+                            attr->extra->aggregator_as?
+                            attr->extra->aggregator_as:0);
+            smap_add(smap,
+                     OVSDB_BGP_ROUTE_PATH_ATTRIBUTES_AGGREGATOR_ADDR,
+                     inet_ntoa(attr->extra->aggregator_addr));
+        } else {
+            smap_add_format(smap,
+                            OVSDB_BGP_ROUTE_PATH_ATTRIBUTES_AGGREGATOR_ID,
+                            "%d", 0);
+            smap_add(smap,
+                     OVSDB_BGP_ROUTE_PATH_ATTRIBUTES_AGGREGATOR_ADDR,
+                     "");
+        }
+
+    } else {
+        smap_add_format(smap,
+                        OVSDB_BGP_ROUTE_PATH_ATTRIBUTES_WEIGHT,
+                        "%d", 0);
+        smap_add_format(smap,
+                        OVSDB_BGP_ROUTE_PATH_ATTRIBUTES_AGGREGATOR_ID,
+                        "%d", 0);
+        smap_add(smap,
+                 OVSDB_BGP_ROUTE_PATH_ATTRIBUTES_AGGREGATOR_ADDR,
+                 "");
+        smap_add(smap,
+                OVSDB_BGP_ROUTE_PATH_ATTRIBUTES_ECOMMUNITY,
+                 "");
+    }
+    if (attr->flag & ATTR_FLAG_BIT(BGP_ATTR_ATOMIC_AGGREGATE)) {
+        smap_add(smap,
+                 OVSDB_BGP_ROUTE_PATH_ATTRIBUTES_ATOMIC_AGGREGATE,
+                 "atomic-aggregate");
+    } else {
+        smap_add(smap,
+                 OVSDB_BGP_ROUTE_PATH_ATTRIBUTES_ATOMIC_AGGREGATE,
+                 "");
+    }
     /* OPS_TODO: Check for confed flag later */
     if (peer->sort == BGP_PEER_IBGP) {
         smap_add(smap,
@@ -366,6 +445,7 @@ bgp_ovsdb_set_rib_nexthop(struct ovsdb_idl_txn *txn,
                   __FUNCTION__, pr);
         return -1;
     }
+
     nexthop_list = xmalloc(sizeof *rib->nexthops * nexthop_num);
     /* Set first nexthop */
     inet_ntop(p->family, nexthop, nexthop_buf, sizeof(nexthop_buf));
@@ -515,7 +595,7 @@ bgp_ovsdb_lookup_local_rib_entry(struct prefix *p,
 
     OVSREC_BGP_ROUTE_FOR_EACH(rib_row, idl) {
         prefix2str(p, pr, sizeof(pr));
-
+        VLOG_INFO("*********************************************Routes are  %s",rib_row->prefix);
         afi= get_str_from_afi(p->family);
         if (!afi) {
             VLOG_ERR ("Invalid address family for route %s\n", pr);
@@ -702,6 +782,7 @@ bgp_ovsdb_announce_rib_entry(struct prefix *p,
     const char *afi, *safi_str;
     int64_t flags = 0;
     int64_t distance = 0, nexthop_num;
+    int64_t metric_val = 0;
     const struct ovsrec_vrf *vrf = NULL;
     struct smap smap;
 
@@ -741,11 +822,12 @@ bgp_ovsdb_announce_rib_entry(struct prefix *p,
         /* Set VRF */
         ovsrec_route_set_vrf(rib, vrf);
         distance = bgp_distance_apply (p, info, bgp);
-        VLOG_DBG("distance %d\n", distance);
+        VLOG_INFO("distance %d\n", distance);
         if (distance) {
             ovsrec_route_set_distance(rib, (const int64_t *)&distance, 1);
         }
-        ovsrec_route_set_metric(rib, (const int64_t *)&info->attr->med, 1);
+        metric_val = info->attr->med?info->attr->med:0;
+        ovsrec_route_set_metric(rib, (const int64_t *)&metric_val, 1);
     } else {
         VLOG_DBG("Found route %s, updating ...\n", pr);
     }
@@ -755,6 +837,9 @@ bgp_ovsdb_announce_rib_entry(struct prefix *p,
         VLOG_INFO("%s: Nexthop address is 0 for route %s\n",
                   __FUNCTION__, pr);
     } else {
+        /****/
+        char nexthopbuf[INET6_ADDRSTRLEN];
+        inet_ntop(p->family, nexthop, nexthopbuf, sizeof(nexthopbuf));
         /* If global ECMP is disabled, only publish 1 path to rib */
         if(!get_global_ecmp_status()) {
             if(bgp_info_mpath_count (info)) {
@@ -771,7 +856,6 @@ bgp_ovsdb_announce_rib_entry(struct prefix *p,
             bgp_ovsdb_set_rib_nexthop(txn, rib, p, info, nexthop_num, safi);
         }
     }
-
     smap_init(&smap);
     bgp_ovsdb_set_rib_path_attributes(&smap, info, bgp);
     smap_destroy(&smap);
@@ -794,6 +878,7 @@ bgp_ovsdb_add_local_rib_entry(struct prefix *p,
     const char *afi, *safi_str;
     int64_t flags = 0;
     int64_t distance = 0, nexthop_num;
+    int64_t metric_val = 0;
     const struct ovsrec_vrf *vrf = NULL;
     struct smap smap;
 
@@ -836,7 +921,9 @@ bgp_ovsdb_add_local_rib_entry(struct prefix *p,
     if (distance) {
         ovsrec_bgp_route_set_distance(rib, (const int64_t *)&distance, 1);
     }
-    ovsrec_bgp_route_set_metric(rib, (const int64_t *)&info->attr->med, 1);
+
+    metric_val = info->attr->med;
+    ovsrec_bgp_route_set_metric(rib, (const int64_t *)&metric_val, 1);
 
     /* Nexthops */
     nexthop_num = 1 + bgp_info_mpath_count (info);
@@ -1151,10 +1238,10 @@ const struct lookup_entry match_table[]={
   {MATCH_IPV6_PREFIX, "ipv6 address prefix-list", "ipv6_prefix_list"},
   {MATCH_COMMUNITY, "community", "community"},
   {MATCH_EXTCOMMUNITY, "extcommunity", "extcommunity"},
-  {MATCH_ASPATH, "as-path","as_path"},
+  {MATCH_ASPATH, "as-path", "as_path"},
   {MATCH_ORIGIN, "origin", "origin"},
   {MATCH_METRIC, "metric", "metric"},
-  {MATCH_IPV6_NEXTHOP, "ipv6 next-hop", "ipv6_next_hop"},
+  {MATCH_IPV6_NEXTHOP, "ipv6 next-hop","ipv6_next_hop"},
   {MATCH_PROBABILITY, "probability","probability"},
   {0, NULL, NULL},
 };
@@ -1162,12 +1249,17 @@ const struct lookup_entry match_table[]={
 const struct lookup_entry set_table[]={
   {SET_COMMUNITY, "community", "community"},
   {SET_METRIC, "metric", "metric"},
-  {SET_ECOMMUNITY_RT, "extcommunity rt", "extcommunity rt"},
-  {SET_ECOMMUNITY_SOO, "extcommunity soo", "extcommunity soo"},
+  {SET_AGGREGATOR_AS, "aggregator as", "aggregator_as"},
   {SET_AS_PATH_EXCLUDE, "as-path exclude", "as_path_exclude"},
   {SET_AS_PATH_PREPEND, "as-path prepend", "as_path_prepend"},
-  {SET_ORIGIN, "origin", "origin"},
+  {SET_ATOMIC_AGGREGATE, "atomic-aggregate", "atomic_aggregate"},
+  {SET_COMM_LIST, "comm-list", "comm_list"},
+  {SET_ECOMMUNITY_RT, "extcommunity rt", "extcommunity_rt"},
+  {SET_ECOMMUNITY_SOO, "extcommunity soo", "extcommunity_soo"},
   {SET_IPV6_NEXT_HOP_GLOBAL, "ipv6 next-hop global", "ipv6_next_hop_global"},
+  {SET_LOCAL_PREFERENCE, "local-preference", "local_preference"},
+  {SET_ORIGIN, "origin", "origin"},
+  {SET_WEIGHT, "weight", "weight"},
   {0, NULL, NULL},
 };
 

@@ -63,9 +63,14 @@ Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 #ifdef HAVE_SNMP
 #include "bgpd/bgp_snmp.h"
 #endif /* HAVE_SNMP */
+#include "ovsdb-idl.h"
+#include "openswitch-idl.h"
+#include "vswitch-idl.h"
 
 VLOG_DEFINE_THIS_MODULE(bgpd);
 
+
+struct ovsdb_idl *idl;
 /* BGP process wide configuration.  */
 static struct bgp_master bgp_master;
 
@@ -2077,11 +2082,39 @@ bgp_lookup_by_name (const char *name)
   return NULL;
 }
 
+/*
+ * Find the vrf in ovsdb with matching name.
+ */
+static const struct ovsrec_vrf *
+get_ovsrec_vrf_with_name(char *name)
+{
+    /* TODO change this later when multi vrf's are supported */
+    return ovsrec_vrf_first(idl);
+}
+
+/*
+ * Find the bgp router in ovsdb with matching asn.
+ */
+static const struct ovsrec_bgp_router *
+get_ovsrec_bgp_router_with_asn(const struct ovsrec_vrf *vrf_row, int64_t asn)
+{
+    int i = 0;
+    for (i = 0; i < vrf_row->n_bgp_routers; i++) {
+        if (vrf_row->key_bgp_routers[i] == asn) {
+            return vrf_row->value_bgp_routers[i];
+        }
+    }
+    return NULL;
+}
+
 /* Called from VTY commands. */
 int
 bgp_get (struct bgp **bgp_val, as_t *as, const char *name)
 {
   struct bgp *bgp;
+  const struct ovsrec_bgp_router *bgp_router_row;
+  const struct ovsrec_vrf *vrf_row;
+  struct ovsdb_idl_txn *bgp_router_txn=NULL;
   /* Multiple instance check. */
   if (bgp_option_check (BGP_OPT_MULTIPLE_INSTANCE))
     {
@@ -2122,11 +2155,27 @@ bgp_get (struct bgp **bgp_val, as_t *as, const char *name)
 	}
     }
 
-    bgp = bgp_create (as, name);
-#ifndef ENABLE_OVSDB
+  bgp = bgp_create (as, name);
   bgp_router_id_set(bgp, &router_id_zebra);
-#endif /* ENABLE_OVSDB */
-   *bgp_val = bgp;
+  bgp_router_txn = ovsdb_idl_txn_create(idl);
+
+  /* TODO change this later when multi vrf's are supported */
+  vrf_row = get_ovsrec_vrf_with_name(NULL);
+  if (vrf_row == NULL) {
+        VLOG_DBG("No VRF found in OVSDB");
+  }
+  bgp_router_row =
+        get_ovsrec_bgp_router_with_asn(vrf_row,(int64_t)bgp->as);
+  if (bgp_router_row == NULL) {
+        VLOG_DBG("No BGP Router found in OVSDB");
+  } else {
+      ovsrec_bgp_router_set_router_id(bgp_router_row,
+                                      inet_ntoa((router_id_zebra)));
+  }
+  ovsdb_idl_txn_commit_block(bgp_router_txn);
+  ovsdb_idl_txn_destroy(bgp_router_txn);
+
+  *bgp_val = bgp;
 
   /* Create BGP server socket, if first instance.  */
   if (list_isempty(bm->bgp)

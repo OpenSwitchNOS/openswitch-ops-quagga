@@ -33,6 +33,7 @@ from opsvsiutils.bgpconfig import *
 
 BGP_ASN = "1"
 BGP_ROUTER_ID = "9.0.0.1"
+ZEBRA_BGP_ROUTER_ID =  "0.0.0.0"
 BGP_NETWORK = "11.0.0.0"
 BGP_PL = "8"
 NUM_OF_SWITCHES = 1
@@ -71,8 +72,33 @@ class bgpTest(OpsVsiTest):
 
         info("### bgpd process exists on switch %s ###\n" % switch.name)
 
+    def configure_bgp_without_router_id(self):
+        info("\n########## Applying BGP configurations without router-id"\
+             "... ##########\n")
+
+        switch = self.net.switches[0]
+
+        cfg_array = []
+        cfg_array.append("router bgp %s" % BGP_ASN)
+        cfg_array.append("network %s/%s" % (BGP_NETWORK, BGP_PL))
+
+        SwitchVtyshUtils.vtysh_cfg_cmd(switch, cfg_array)
+
+    def verify_bgp_router_id_by_zebra(self):
+        info("\n########## Verifying BGP Router-ID configured by zebra"\
+             "...##########\n")
+
+        switch = self.net.switches[0]
+        results = SwitchVtyshUtils.vtysh_cmd(switch, "sh ip bgp")
+
+        found = ZEBRA_BGP_ROUTER_ID in results
+        assert found, "BGP Router-ID %s not found" % ZEBRA_BGP_ROUTER_ID
+
+        info("### BGP Router-ID %s found ###\n" % ZEBRA_BGP_ROUTER_ID)
+
     def configure_bgp(self):
-        info("\n########## Applying BGP configurations... ##########\n")
+        info("\n########## Applying BGP configurations with router-id"\
+             "... ##########\n")
 
         switch = self.net.switches[0]
 
@@ -141,6 +167,8 @@ class Test_bgpd_router_id:
 
     def test_bgp_full(self):
         self.test_var.verify_bgp_running()
+        self.test_var.configure_bgp_without_router_id()
+        self.test_var.verify_bgp_router_id_by_zebra()
         self.test_var.configure_bgp()
         self.test_var.verify_bgp_router_id()
         self.test_var.unconfigure_bgp()

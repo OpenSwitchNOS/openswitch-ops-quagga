@@ -66,6 +66,7 @@ Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 
 VLOG_DEFINE_THIS_MODULE(bgpd);
 
+
 /* BGP process wide configuration.  */
 static struct bgp_master bgp_master;
 
@@ -2122,11 +2123,12 @@ bgp_get (struct bgp **bgp_val, as_t *as, const char *name)
 	}
     }
 
-    bgp = bgp_create (as, name);
-#ifndef ENABLE_OVSDB
+  bgp = bgp_create (as, name);
   bgp_router_id_set(bgp, &router_id_zebra);
-#endif /* ENABLE_OVSDB */
-   *bgp_val = bgp;
+#ifdef ENABLE_OVSDB
+  update_bgp_router_id_in_ovsdb((int64_t)bgp->as,inet_ntoa(router_id_zebra));
+#endif
+  *bgp_val = bgp;
 
   /* Create BGP server socket, if first instance.  */
   if (list_isempty(bm->bgp)

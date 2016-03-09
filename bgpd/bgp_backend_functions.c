@@ -4927,6 +4927,193 @@ bgp_clear (struct vty *vty, struct bgp *bgp,  afi_t afi, safi_t safi,
   return CMD_SUCCESS;
 }
 
+
+static void
+daemon_bgp_clear_error (struct peer *peer, afi_t afi,
+                        safi_t safi, int error)
+{
+    if (!peer)
+        return;
+
+    if (!peer->host)
+        return;
+
+    switch (error)
+    {
+        case BGP_ERR_AF_UNCONFIGURED:
+            VLOG_INFO(
+                 "%%BGP: Enable %s %s address family for the neighbor %s\n",
+                 afi == AFI_IP6 ? "IPv6" : safi == SAFI_MPLS_VPN ? "VPNv4"
+                 : "IPv4",  safi == SAFI_MULTICAST ? "Multicast" : "Unicast",
+                 peer->host);
+            break;
+        case BGP_ERR_SOFT_RECONFIG_UNCONFIGURED:
+            VLOG_INFO("%%BGP: Inbound soft reconfig for %s not possible as it "
+                      "has neither refresh capability, nor inbound "
+                      "soft reconfig\n", peer->host);
+            break;
+        default:
+            break;
+    }
+}
+
+/* `clear ip bgp' functions daemon. */
+static int
+daemon_bgp_clear (struct bgp *bgp,  afi_t afi, safi_t safi,
+                  enum clear_sort sort, enum bgp_clear_type stype,
+                  const char *arg)
+{
+    int ret;
+    struct peer *peer;
+    struct peer *peer_new;
+    struct listnode *node, *nnode;
+    int peer_idx = 1;
+    /* Clear all neighbors. */
+    if (sort == clear_all)
+    {
+        for (ALL_LIST_ELEMENTS(bgp->peer, node, nnode, peer))
+        {
+            VLOG_DBG("daemon_bgp_clear_all: Peer entry %d"
+                     "name is %s,  as %d\n",
+                     peer_idx, peer->host?peer->host:"NA", peer->as);
+
+            peer_deactivate(peer, AFI_IP6, SAFI_UNICAST);
+            peer_activate(peer, AFI_IP6, SAFI_UNICAST);
+
+            if (stype == BGP_CLEAR_SOFT_NONE)
+                ret = peer_clear(peer);
+            else
+                ret = peer_clear_soft(peer, afi, safi, stype);
+
+            if (ret < 0)
+                daemon_bgp_clear_error(peer, afi, safi, ret);
+            peer_idx++;
+        }
+        return CMD_SUCCESS;
+    }
+
+    /* Clear specified neighbors. */
+    if (sort == clear_peer)
+    {
+        union sockunion su;
+        int ret;
+
+        /* Make sockunion for lookup. */
+        ret = str2sockunion(arg, &su);
+        if (ret < 0)
+        {
+            VLOG_INFO("Malformed address for bgp clear daemon: %s\n", arg);
+            return CMD_WARNING;
+        }
+        peer = peer_lookup(bgp, &su);
+        if (! peer)
+        {
+            VLOG_INFO("%%BGP clear daemon: Unknown neighbor - \"%s\"\n", arg);
+            return CMD_WARNING;
+        }
+
+        peer_deactivate(peer, AFI_IP6, SAFI_UNICAST);
+        peer_activate(peer, AFI_IP6, SAFI_UNICAST);
+
+        if (stype == BGP_CLEAR_SOFT_NONE)
+            ret = peer_clear(peer);
+        else
+            ret = peer_clear_soft(peer, afi, safi, stype);
+
+        if (ret < 0)
+            daemon_bgp_clear_error(peer, afi, safi, ret);
+
+        return CMD_SUCCESS;
+    }
+
+    /* Clear all peer-group members. */
+    if (sort == clear_group)
+    {
+        struct peer_group *group;
+
+        group = peer_group_lookup(bgp, arg);
+        if (! group)
+        {
+            VLOG_INFO("%%BGP clear daemon: No such peer-group %s\n", arg);
+            return CMD_WARNING;
+        }
+
+        for (ALL_LIST_ELEMENTS(group->peer, node, nnode, peer))
+        {
+            peer_deactivate(peer, AFI_IP6, SAFI_UNICAST);
+            peer_activate(peer, AFI_IP6, SAFI_UNICAST);
+
+            if (stype == BGP_CLEAR_SOFT_NONE)
+            {
+                ret = peer_clear(peer);
+                continue;
+            }
+
+            if (! peer->af_group[afi][safi])
+                continue;
+
+            ret = peer_clear_soft(peer, afi, safi, stype);
+
+            if (ret < 0)
+                daemon_bgp_clear_error(peer, afi, safi, ret);
+        }
+        return CMD_SUCCESS;
+    }
+
+    if (sort == clear_external)
+    {
+        for (ALL_LIST_ELEMENTS(bgp->peer, node, nnode, peer))
+	{
+            peer_deactivate(peer, AFI_IP6, SAFI_UNICAST);
+            peer_activate(peer, AFI_IP6, SAFI_UNICAST);
+
+            if (peer->sort == BGP_PEER_IBGP)
+                continue;
+
+            if (stype == BGP_CLEAR_SOFT_NONE)
+                ret = peer_clear(peer);
+            else
+                ret = peer_clear_soft(peer, afi, safi, stype);
+
+            if (ret < 0)
+                daemon_bgp_clear_error(peer, afi, safi, ret);
+        }
+        return CMD_SUCCESS;
+    }
+
+    return CMD_SUCCESS;
+}
+
+int
+daemon_bgp_clear_request (const char *name, afi_t afi, safi_t safi,
+                          enum clear_sort sort, enum bgp_clear_type stype,
+                          const char *arg)
+{
+    struct bgp *bgp;
+
+    /* BGP structure lookup. */
+    if (name)
+    {
+        bgp = bgp_lookup_by_name(name);
+        if (bgp == NULL)
+        {
+            VLOG_INFO("BGP clear request daemon: Can't find BGP view %s\n", name);
+            return CMD_WARNING;
+        }
+    }
+    else
+    {
+        bgp = bgp_get_default();
+        if (bgp == NULL)
+        {
+            VLOG_INFO("BGP clear request daemon: No BGP process is configured\n");
+            return CMD_WARNING;
+        }
+    }
+
+    return daemon_bgp_clear(bgp, afi, safi, sort, stype, arg);
+}
+
 static int
 bgp_clear_vty (struct vty *vty, const char *name, afi_t afi, safi_t safi,
                enum clear_sort sort, enum bgp_clear_type stype,

@@ -68,8 +68,18 @@ typedef struct bgp_ovsdb_t_ {
     unsigned int write_cb_count;
 } bgp_ovsdb_t;
 
-static bgp_ovsdb_t glob_bgp_ovs;
+/* BGP clear sort. */
+enum clear_sort
+{
+  clear_all,
+  clear_peer,
+  clear_group,
+  clear_external,
+  clear_as
+};
 
+static bgp_ovsdb_t glob_bgp_ovs;
+#define MAX_BUF_LEN 10
 COVERAGE_DEFINE(bgp_ovsdb_cnt);
 VLOG_DEFINE_THIS_MODULE(bgp_ovsdb_if);
 
@@ -1184,6 +1194,7 @@ bgp_router_read_ovsdb_apply_changes (struct ovsdb_idl *idl)
         }
     }
 }
+
 /*
  * Subscribe for changes in the BGP_Router table
  */
@@ -1192,8 +1203,10 @@ bgp_apply_bgp_router_changes (struct ovsdb_idl *idl)
 {
     const struct ovsrec_bgp_router *bgp_first;
     struct bgp *bgp_cfg;
+    static struct ovsdb_idl_txn *confirm_txn = NULL;
 
     bgp_first = ovsrec_bgp_router_first(idl);
+
     /*
      * Check if any table changes present.
      * If no change just return from here
@@ -1774,6 +1787,256 @@ bgp_nbr_update_source_ovsdb_apply_changes (const struct ovsrec_bgp_neighbor *ovs
 }
 
 /*
+ * Find bgp neighbor for clear counter updates
+ */
+static const struct ovsrec_bgp_neighbor *
+get_bgp_neighbor_context (struct ovsdb_idl *idl,
+                          char *name)
+{
+    int i, j;
+    const struct ovsrec_vrf *ovs_vrf = NULL;
+    const struct ovsrec_bgp_router *ovs_bgp = NULL;
+
+    if (!name) {
+        VLOG_INFO("Peer name is null for neighbor context\n");
+        return NULL;
+    }
+
+    if (!idl) {
+        VLOG_INFO("IDL instance for getting neighbor context is NULL\n");
+        return NULL;
+    }
+
+    ovs_bgp = ovsrec_bgp_router_first(idl);
+    for (j = 0; j < ovs_bgp->n_bgp_neighbors; j++) {
+        if (ovs_bgp &&
+           (0 == strcmp(ovs_bgp->key_bgp_neighbors[j], name))) {
+           return ovs_bgp->value_bgp_neighbors[j];
+        }
+    }
+    return NULL;
+}
+
+/*
+ * Update clear counters for clear bgp neighbor soft in commands
+ */
+
+static bool
+bgp_check_neighbor_clear_soft_in (struct ovsdb_idl *idl,
+                                  const struct
+                                  ovsrec_bgp_neighbor *neighbor_row,
+                                  char *name)
+{
+    const struct ovsrec_bgp_neighbor *ovs_neighbor = NULL;
+    int clear_bgp_neighbor_table_requested = 0;
+    int clear_bgp_neighbor_table_performed = 0;
+    struct smap smap_status;
+    char clear_bgp_neighbor_table_str_performed[MAX_BUF_LEN] = {0};
+    char clear_bgp_neighbor_table_str_requested[MAX_BUF_LEN] = {0};
+    int req_cnt, perf_cnt;
+
+    if (!idl) {
+        VLOG_INFO("IDL instance for updating clear counters for"
+             "clear bgp neighbor soft in commands is NULL\n");
+        return false;
+    }
+
+    if (!neighbor_row) {
+        VLOG_INFO("Neighbor instance for updating clear counters for"
+             "clear bgp neighbor soft in commands is NULL\n");
+        return false;
+    }
+
+    if (!name) {
+        VLOG_INFO("Peer name updating clear counters for"
+             "clear bgp neighbor soft in commands is NULL\n");
+        return false;
+    }
+
+    if (object_is_peer_group(neighbor_row)) {
+        VLOG_INFO("Updating clear counters for peer soft in"
+                  "clear request for PEER-GROUP %s\n", name?name:"NA");
+    } else {
+        VLOG_INFO("Updating clear counters for peer soft in"
+                  "clear request for PEER %s\n", name?name:"NA");
+    }
+
+    clear_bgp_neighbor_table_requested = smap_get_int(&neighbor_row->status,
+        "bgp_num_clear_counters_peer_soft_in_requested", 0);
+    clear_bgp_neighbor_table_performed = smap_get_int(&neighbor_row->status,
+        "bgp_num_clear_counters_peer_soft_in_performed", 0);
+
+    VLOG_INFO("request count %d, performed count %d\n",
+               clear_bgp_neighbor_table_requested,
+               clear_bgp_neighbor_table_performed);
+
+    if (clear_bgp_neighbor_table_requested >
+        clear_bgp_neighbor_table_performed) {
+        if (object_is_peer_group(neighbor_row)) {
+            daemon_bgp_clear_request(NULL, AFI_IP6, SAFI_UNICAST, clear_group,
+                                     BGP_CLEAR_SOFT_IN, name);
+        } else {
+            daemon_bgp_clear_request(NULL, AFI_IP6, SAFI_UNICAST, clear_peer,
+                                     BGP_CLEAR_SOFT_IN, name);
+        }
+
+        clear_bgp_neighbor_table_performed++;
+        clear_bgp_neighbor_table_requested = clear_bgp_neighbor_table_performed;
+        snprintf(clear_bgp_neighbor_table_str_performed, MAX_BUF_LEN-1, "%d",
+                 clear_bgp_neighbor_table_performed);
+        snprintf(clear_bgp_neighbor_table_str_requested, MAX_BUF_LEN-1, "%d",
+                 clear_bgp_neighbor_table_requested);
+
+        ovs_neighbor = get_bgp_neighbor_context(idl, name);
+        if (ovs_neighbor) {
+            VLOG_INFO("Adding smap\n");
+            smap_init(&smap_status);
+            smap_add(&smap_status,
+                     "bgp_num_clear_counters_peer_soft_in_performed",
+                     clear_bgp_neighbor_table_str_performed);
+            smap_add(&smap_status,
+                     "bgp_num_clear_counters_peer_soft_in_requested",
+                     clear_bgp_neighbor_table_str_requested);
+            ovsrec_bgp_neighbor_set_status(ovs_neighbor, &smap_status);
+
+            req_cnt =
+                smap_get_int(&ovs_neighbor->status,
+                "bgp_num_clear_counters_peer_soft_in_requested",
+                0);
+
+            perf_cnt =
+                smap_get_int(&ovs_neighbor->status,
+                "bgp_num_clear_counters_peer_soft_in_performed",
+                0);
+
+            VLOG_INFO("Requested count %d, performed count %d\n",
+                      req_cnt, perf_cnt);
+
+            VLOG_INFO("Done with clear op for bgp peer soft in"
+                      "requested count %d, performed count %d\n",
+                      clear_bgp_neighbor_table_requested,
+                      clear_bgp_neighbor_table_performed);
+
+            smap_destroy(&smap_status);
+        } else {
+            VLOG_INFO("BGP neighbor row is NULL for smap set operation\n");
+        }
+    }
+    return true;
+}
+
+
+/*
+ * Update clear counters for clear bgp neighbor soft out commands
+ */
+
+static bool
+bgp_check_neighbor_clear_soft_out (struct ovsdb_idl *idl,
+                                  const struct
+                                  ovsrec_bgp_neighbor *neighbor_row,
+                                  char *name)
+{
+    const struct ovsrec_bgp_neighbor *ovs_neighbor = NULL;
+    int clear_bgp_neighbor_table_requested = 0;
+    int clear_bgp_neighbor_table_performed = 0;
+    struct smap smap_status;
+    char clear_bgp_neighbor_table_str_performed[MAX_BUF_LEN] = {0};
+    char clear_bgp_neighbor_table_str_requested[MAX_BUF_LEN] = {0};
+    int req_cnt, perf_cnt;
+
+    if (!idl) {
+        VLOG_INFO("IDL instance for updating clear counters for"
+             "clear bgp neighbor soft out commands is NULL\n");
+        return false;
+    }
+
+    if (!neighbor_row) {
+        VLOG_INFO("Neighbor instance for updating clear counters for"
+             "clear bgp neighbor soft out commands is NULL\n");
+        return false;
+    }
+
+    if (!name) {
+        VLOG_INFO("Peer name updating clear counters for"
+             "clear bgp neighbor soft out commands is NULL\n");
+        return false;
+    }
+
+    if (object_is_peer_group(neighbor_row)) {
+        VLOG_INFO("Updating clear counters for peer soft out"
+                  "clear request for PEER-GROUP %s\n", name?name:"NA");
+    } else {
+        VLOG_INFO("Updating clear counters for peer soft out"
+                  "clear request for PEER %s\n", name?name:"NA");
+    }
+
+    clear_bgp_neighbor_table_requested = smap_get_int(&neighbor_row->status,
+        "bgp_num_clear_counters_peer_soft_out_requested", 0);
+    clear_bgp_neighbor_table_performed = smap_get_int(&neighbor_row->status,
+        "bgp_num_clear_counters_peer_soft_out_performed", 0);
+
+    VLOG_INFO("request count %d, performed count %d\n",
+               clear_bgp_neighbor_table_requested,
+               clear_bgp_neighbor_table_performed);
+
+    if (clear_bgp_neighbor_table_requested >
+        clear_bgp_neighbor_table_performed) {
+        if (object_is_peer_group(neighbor_row)) {
+            daemon_bgp_clear_request(NULL, AFI_IP6, SAFI_UNICAST, clear_group,
+                                     BGP_CLEAR_SOFT_OUT, name);
+        } else {
+            daemon_bgp_clear_request(NULL, AFI_IP6, SAFI_UNICAST, clear_peer,
+                                     BGP_CLEAR_SOFT_OUT, name);
+        }
+
+        clear_bgp_neighbor_table_performed++;
+        clear_bgp_neighbor_table_requested = clear_bgp_neighbor_table_performed;
+        snprintf(clear_bgp_neighbor_table_str_performed, MAX_BUF_LEN-1, "%d",
+                 clear_bgp_neighbor_table_performed);
+        snprintf(clear_bgp_neighbor_table_str_requested, MAX_BUF_LEN-1, "%d",
+                 clear_bgp_neighbor_table_requested);
+        /*
+         * Get neighbor here
+         */
+        ovs_neighbor = get_bgp_neighbor_context(idl, name);
+        if (ovs_neighbor) {
+            VLOG_INFO("Adding smap\n");
+            smap_init(&smap_status);
+            smap_add(&smap_status,
+                     "bgp_num_clear_counters_peer_soft_out_performed",
+                     clear_bgp_neighbor_table_str_performed);
+            smap_add(&smap_status,
+                     "bgp_num_clear_counters_peer_soft_out_requested",
+                     clear_bgp_neighbor_table_str_requested);
+            ovsrec_bgp_neighbor_set_status(ovs_neighbor, &smap_status);
+
+            req_cnt =
+                smap_get_int(&ovs_neighbor->status,
+                "bgp_num_clear_counters_peer_soft_out_requested",
+                0);
+
+            perf_cnt =
+                smap_get_int(&ovs_neighbor->status,
+                "bgp_num_clear_counters_peer_soft_out_performed",
+                0);
+
+            VLOG_INFO("Requested count %d, performed count %d\n",
+                      req_cnt, perf_cnt);
+
+            VLOG_INFO("Done with clear op for bgp peer soft out"
+                      "requested count %d, performed count %d\n",
+                      clear_bgp_neighbor_table_requested,
+                      clear_bgp_neighbor_table_performed);
+
+            smap_destroy(&smap_status);
+        } else {
+            VLOG_INFO("BGP neighbor row is NULL for smap set operation\n");
+        }
+    }
+    return true;
+}
+
+/*
  * Do bgp nbr changes according to ovsdb changes
  */
 static void
@@ -1787,6 +2050,9 @@ bgp_nbr_read_ovsdb_apply_changes (struct ovsdb_idl *idl)
     char peer[80];
     int i, j;
     struct bgp *bgp_instance;
+    static struct ovsdb_idl_txn *confirm_txn = NULL;
+    enum ovsdb_idl_txn_status status;
+    int req_cnt, perf_cnt;
 
     OVSREC_VRF_FOR_EACH(ovs_vrf, idl) {
       for (i = 0; i < ovs_vrf->n_bgp_routers; i++) {
@@ -1800,6 +2066,7 @@ bgp_nbr_read_ovsdb_apply_changes (struct ovsdb_idl *idl)
         }
         for (j = 0; j < ovs_bgp->n_bgp_neighbors; j++) {
             ovs_nbr = ovs_bgp->value_bgp_neighbors[j];
+
             if (!OVSREC_IDL_IS_ROW_INSERTED(ovs_nbr, idl_seqno) &&
                 !OVSREC_IDL_IS_ROW_MODIFIED(ovs_nbr, idl_seqno)) {
                     continue;
@@ -1833,6 +2100,36 @@ bgp_nbr_read_ovsdb_apply_changes (struct ovsdb_idl *idl)
                     daemon_neighbor_peer_group_cmd_execute(bgp_instance,
                         ovs_bgp->key_bgp_neighbors[j]);
                 }
+            }
+
+
+
+            /* Create a confirmed database transaction for nbr updates */
+            if (!confirm_txn) {
+                VLOG_DBG("Check here for clear counters for neighbor %s\n"
+                         ,ovs_bgp->key_bgp_neighbors[j]);
+                confirm_txn = ovsdb_idl_txn_create(idl);
+                bgp_check_neighbor_clear_soft_in(idl, ovs_nbr,
+                                                 ovs_bgp->key_bgp_neighbors[j]);
+                bgp_check_neighbor_clear_soft_out(idl, ovs_nbr,
+                                                 ovs_bgp->key_bgp_neighbors[j]);
+                status = ovsdb_idl_txn_commit_block(confirm_txn);
+                ovsdb_idl_txn_destroy(confirm_txn);
+                VLOG_DBG("Neighbor clear operation txn result: %s\n",
+                         ovsdb_idl_txn_status_to_string(status));
+                confirm_txn = NULL;
+                req_cnt =
+                    smap_get_int(&ovs_nbr->status,
+                    "bgp_num_clear_counters_peer_soft_in_requested",
+                    0);
+
+                perf_cnt =
+                    smap_get_int(&ovs_nbr->status,
+                    "bgp_num_clear_counters_peer_soft_in_performed",
+                    0);
+                VLOG_INFO("After neighbor clear operation txn commit:"
+                          " requested count %d, performed count %d\n",
+                          req_cnt, perf_cnt);
             }
 
 	    /* remote-as */

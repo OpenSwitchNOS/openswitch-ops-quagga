@@ -101,6 +101,50 @@ boolean get_global_ecmp_status()
 {
    return sys_ecmp_status;
 }
+
+/*
+ * From vrf row in db to get bgp router with a specific asn
+ */
+static const struct ovsrec_bgp_router *
+get_bgp_router_with_asn ( char *vrf_name, int64_t asn)
+{
+    int i;
+    const struct ovsrec_vrf *ovs_vrf;
+    OVSREC_VRF_FOR_EACH(ovs_vrf, idl) {
+        if (!strcmp(ovs_vrf->name, vrf_name)) {
+            for (i = 0; i < ovs_vrf->n_bgp_routers; i++) {
+                if (ovs_vrf->key_bgp_routers[i] == asn) {
+                    return ovs_vrf->value_bgp_routers[i];
+                }
+            }
+        }
+    }
+    return NULL;
+}
+
+/*
+ * Update the bgp router id in the router_id column of
+ * bgp router table in db
+ */
+void
+update_bgp_router_id_in_ovsdb (int64_t asn, char *router_id)
+{
+    const struct ovsrec_bgp_router *bgp_router_row;
+    const struct ovsrec_vrf *vrf_row;
+    struct ovsdb_idl_txn *bgp_router_txn=NULL;
+    bgp_router_txn = ovsdb_idl_txn_create(idl);
+    bgp_router_row =
+        get_bgp_router_with_asn(DEFAULT_VRF_NAME, asn);
+    if (bgp_router_row == NULL) {
+        VLOG_ERR("No BGP Router found in OVSDB");
+    } else {
+        ovsrec_bgp_router_set_router_id(bgp_router_row,
+                                      router_id);
+    }
+    ovsdb_idl_txn_commit_block(bgp_router_txn);
+    ovsdb_idl_txn_destroy(bgp_router_txn);
+}
+
 /*
  * From bgp router row in db to get bgp asn #
  */
@@ -120,6 +164,7 @@ ovsdb_bgp_router_from_row_to_asn (struct ovsdb_idl *idl,
     }
     return -1;
 }
+
 
 /*
  * From bgp nbr row in db to get peer name, a by product is that

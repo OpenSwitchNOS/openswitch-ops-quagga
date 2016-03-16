@@ -1491,7 +1491,7 @@ bgp_daemon_ovsdb_neighbor_statistics_update (bool start_new_db_txn,
 	keywords, values, count);
 
     if (start_new_db_txn) {
-	ovsdb_idl_txn_commit_block(db_txn);
+	ovsdb_idl_txn_commit(db_txn);
 	ovsdb_idl_txn_destroy(db_txn);
     }
 }
@@ -1561,7 +1561,7 @@ void bgp_daemon_ovsdb_neighbor_update (struct peer *peer,
 	VLOG_DBG("updated stats also\n");
     }
 
-    status = ovsdb_idl_txn_commit_block(db_txn);
+    status = ovsdb_idl_txn_commit(db_txn);
     ovsdb_idl_txn_destroy(db_txn);
     VLOG_DBG("txn result: %s\n", ovsdb_idl_txn_status_to_string(status));
 }

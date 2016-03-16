@@ -125,6 +125,7 @@ class bgpTest(OpsVsiTest):
             info("### \"%s\" successfully configured ###\n" % cfg)
 
 
+@pytest.mark.skipif(True, reason="Disabling old tests")
 class Test_bgpd_show_running_config:
     def setup(self):
         pass

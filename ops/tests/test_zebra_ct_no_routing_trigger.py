@@ -949,6 +949,7 @@ def routing_trigger_static_routes(**kwargs):
 
 # Test class for testing "no routing"/"routing" triggers on static routes
 # cleanup from RIB/FIB/rinning-config.
+@pytest.mark.skipif(True, reason="Disabling old tests")
 class Test_ecmp_no_routing_trigger:
     def setup_class(cls):
         # Test object will parse command line and formulate the env

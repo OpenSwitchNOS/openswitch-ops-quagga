@@ -130,6 +130,7 @@ class bgpTest(OpsVsiTest):
         SwitchVtyshUtils.vtysh_cfg_cmd(self.switch, cfg_array)
 
 
+@pytest.mark.skipif(True, reason="Disabling old tests")
 class Test_bgpd_network_cfg:
     def setup(self):
         pass

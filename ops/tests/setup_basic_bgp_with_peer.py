@@ -141,6 +141,7 @@ class bgpTest(OpsVsiTest):
 # Mark zero timeout so that commands can be entered manually indefinitely.
 # This script is not picked up by CIT.
 @pytest.mark.timeout(0)
+@pytest.mark.skipif(True, reason="Disabling old tests")
 class Test_bgp_basic_setup:
     def setup(self):
         pass

@@ -1820,6 +1820,7 @@ def interface_changing_back_addresses_trigger_static_routes(**kwargs):
 
 # Test class for testing "no shutdown"/"shutdown" triggers on static routes
 # cleanup from RIB/FIB.
+@pytest.mark.skipif(True, reason="Disabling old tests")
 class Test_ecmp_interface_up_down_events:
     def setup_class(cls):
         # Test object will parse command line and formulate the env

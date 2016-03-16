@@ -263,6 +263,7 @@ class ecmpStaticRouteTest(OpsVsiTest):
         info('\n########## IPv4 ECMP route delete test completed ##########\n')
 
 
+@pytest.mark.skipif(True, reason="Disabling old tests")
 class Test_zebra_ecmp_static_routes_ft:
 
     def setup_class(cls):

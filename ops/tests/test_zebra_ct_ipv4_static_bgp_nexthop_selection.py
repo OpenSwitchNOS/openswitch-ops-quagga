@@ -521,6 +521,7 @@ def delete_static_bgp_routes(**kwargs):
 
 
 # Test class for testing static/BGP routes add and delete triggers.
+@pytest.mark.skipif(True, reason="Disabling old tests")
 class Test_static_bgp_nexthop_selection:
     def setup_class(cls):
         # Test object will parse command line and formulate the env

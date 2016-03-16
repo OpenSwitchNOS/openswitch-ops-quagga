@@ -642,6 +642,7 @@ class bgpTest(OpsVsiTest):
         info("### ip prefix-list configs were successfully removed ###\n")
 
 
+@pytest.mark.skipif(True, reason="Disabling old tests")
 class Test_bgpd_routemap:
     def setup(self):
         pass

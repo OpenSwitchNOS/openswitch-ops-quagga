@@ -117,6 +117,7 @@ class bgpTest(OpsVsiTest):
         info("### BGP Router-ID %s not found ###\n" % BGP_ROUTER_ID)
 
 
+@pytest.mark.skipif(True, reason="Disabling old tests")
 class Test_bgpd_router_id:
     def setup(self):
         pass

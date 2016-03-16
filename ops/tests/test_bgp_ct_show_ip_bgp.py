@@ -218,6 +218,7 @@ class bgpTest(OpsVsiTest):
         SwitchVtyshUtils.vtysh_cfg_cmd(switch, cfg_array)
 
 
+@pytest.mark.skipif(True, reason="Disabling old tests")
 class Test_bgpd_show_ip_bgp:
     def setup(self):
         pass

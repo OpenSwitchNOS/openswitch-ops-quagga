@@ -3274,6 +3274,10 @@ zebra_handle_static_route_change (const struct ovsrec_route *route)
 
       VLOG_DBG("Walking next-hop number %d\n", next_hop_index);
 
+      ifname = NULL;
+      memset(&gate, 0, sizeof(struct in_addr));
+      memset(&ipv6_gate, 0, sizeof(struct in6_addr));
+
       /* Get Nexthop ip/interface */
       nexthop = route->nexthops[next_hop_index];
 

@@ -1304,7 +1304,14 @@ rib_uninstall (struct route_node *rn, struct rib *rib)
 
       redistribute_delete (&rn->p, rib);
       if (! RIB_SYSTEM_ROUTE (rib))
-	rib_uninstall_kernel (rn, rib);
+        {
+          rib_uninstall_kernel (rn, rib);
+#ifdef ENABLE_OVSDB
+          if (!CHECK_FLAG (rib->status, RIB_ENTRY_REMOVED))
+            zebra_update_selected_route_nexthops_to_db(rn, rib,
+                                                     ZEBRA_NH_UNINSTALL);
+#endif
+        }
       UNSET_FLAG (rib->flags, ZEBRA_FLAG_SELECTED);
     }
 }
@@ -1493,30 +1500,28 @@ rib_process (struct route_node *rn)
           VLOG_DBG("In process_rib delete existing route");
           redistribute_delete (&rn->p, select);
           if (! RIB_SYSTEM_ROUTE (select))
-            rib_uninstall_kernel (rn, select);
+            {
+              rib_uninstall_kernel (rn, select);
+#ifdef ENABLE_OVSDB
+              if (!CHECK_FLAG (select->status, RIB_ENTRY_REMOVED))
+                zebra_update_selected_route_nexthops_to_db(rn, select,
+                                                         ZEBRA_NH_UNINSTALL);
+#endif
+            }
 
           /* Set real nexthop. */
           nexthop_active_update (rn, select, 1);
 
           VLOG_DBG("In process_rib install in kernel");
           if (! RIB_SYSTEM_ROUTE (select))
-            rib_install_kernel (rn, select);
-
-          redistribute_add (&rn->p, select);
-#ifdef ENABLE_OVSDB
-          if (CHECK_FLAG (select->flags, ZEBRA_FLAG_CHANGED))
             {
-              /*
-               * nexthop_active_update will update the rib flags
-               * and set it to ZEBRA_FLAG_CHANGED if any NH was updated.
-               * If this happens, the route needs to be updated in the DB
-               */
-              zebra_update_selected_route_nexthops_to_db(rn, select,
-                                                         ZEBRA_NH_UNINSTALL);
+              rib_install_kernel (rn, select);
+#ifdef ENABLE_OVSDB
               zebra_update_selected_route_nexthops_to_db(rn, select,
                                                          ZEBRA_NH_INSTALL);
-            }
 #endif
+            }
+          redistribute_add (&rn->p, select);
         }
       else if (! RIB_SYSTEM_ROUTE (select))
         {
@@ -1536,13 +1541,11 @@ rib_process (struct route_node *rn)
               }
 
           if (! installed)
-            {
-              rib_install_kernel (rn, select);
+            rib_install_kernel (rn, select);
 #ifdef ENABLE_OVSDB
-              zebra_update_selected_route_nexthops_to_db(rn, select,
-                                                         ZEBRA_NH_INSTALL);
+          zebra_update_selected_route_nexthops_to_db(rn, select,
+                                                     ZEBRA_NH_INSTALL);
 #endif
-            }
         }
       goto end;
     }
@@ -1568,7 +1571,7 @@ rib_process (struct route_node *rn)
 #ifdef ENABLE_OVSDB
           if (!CHECK_FLAG (fib->status, RIB_ENTRY_REMOVED))
             zebra_update_selected_route_nexthops_to_db(rn, fib,
-                                                       ZEBRA_NH_UNINSTALL);
+                                                     ZEBRA_NH_UNINSTALL);
 #endif
         }
 
@@ -3411,11 +3414,16 @@ rib_sweep_table (struct route_table *table)
 	  if (CHECK_FLAG (rib->status, RIB_ENTRY_REMOVED))
 	    continue;
 
-	  if (rib->type == ZEBRA_ROUTE_KERNEL &&
-	      CHECK_FLAG (rib->flags, ZEBRA_FLAG_SELFROUTE))
-	    {
-	      ret = rib_uninstall_kernel (rn, rib);
-	      if (! ret)
+      if (rib->type == ZEBRA_ROUTE_KERNEL &&
+          CHECK_FLAG (rib->flags, ZEBRA_FLAG_SELFROUTE))
+        {
+          ret = rib_uninstall_kernel (rn, rib);
+#ifdef ENABLE_OVSDB
+          if (!CHECK_FLAG (rib->status, RIB_ENTRY_REMOVED))
+            zebra_update_selected_route_nexthops_to_db(rn, rib,
+                                                     ZEBRA_NH_UNINSTALL);
+#endif
+          if (! ret)
                 rib_delnode (rn, rib);
 	    }
 	}
@@ -3475,13 +3483,20 @@ rib_close_table (struct route_table *table)
       RNODE_FOREACH_RIB (rn, rib)
         {
           if (!CHECK_FLAG (rib->flags, ZEBRA_FLAG_SELECTED))
-	    continue;
+            continue;
 
           if (info->safi == SAFI_UNICAST)
             zfpm_trigger_update (rn, NULL);
 
-	  if (! RIB_SYSTEM_ROUTE (rib))
-	    rib_uninstall_kernel (rn, rib);
+          if (! RIB_SYSTEM_ROUTE (rib))
+            {
+              rib_uninstall_kernel (rn, rib);
+#ifdef ENABLE_OVSDB
+              if (!CHECK_FLAG (rib->status, RIB_ENTRY_REMOVED))
+                 zebra_update_selected_route_nexthops_to_db(rn, rib,
+                                                     ZEBRA_NH_UNINSTALL);
+#endif
+            }
         }
 }
 

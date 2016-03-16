@@ -1814,6 +1814,180 @@ def interface_changing_back_addresses_trigger_static_routes(**kwargs):
               "passed#########")
 
 
+# This test case adds an inactive next-hop to a route whose next-hop
+# is in FIB. The new next-hop should not appear in the output of
+# "show ip route" but should appear in "show rib" output.
+def add_inactive_nexthop_to_static_routes(**kwargs):
+
+    switch1 = kwargs.get('switch1', None)
+    switch2 = kwargs.get('switch2', None)
+
+    switch1.commandErrorCheck = 0
+    switch2.commandErrorCheck = 0
+
+    # Shutting interface 4 on switch1
+    LogOutput('info', "shutting interface4 on SW1")
+    retStruct = InterfaceEnable(deviceObj=switch1, enable=False,
+                                interface=switch1.linkPortMapping['lnk04'])
+    retCode = retStruct.returnCode()
+    if retCode != 0:
+        assert "Unable to disable interafce 4 on SW1"
+
+    # Add nexthop 4.4.4.7 to route 163.0.0.1/32
+    retStruct = IpRouteConfig(deviceObj=switch1, route="163.0.0.1", mask=32,
+                              nexthop="4.4.4.7", config=True)
+    retCode = retStruct.returnCode()
+    if retCode:
+        assert "Failed to configure ipv4 route"
+
+    # Populate the expected RIB ("show rib") route dictionary for the
+    # route 163.0.0.1/32 and its next-hops.
+    ExpRibDictIpv4StaticRoute = dict()
+    ExpRibDictIpv4StaticRoute['Route'] = '163.0.0.1' + '/' + '32'
+    ExpRibDictIpv4StaticRoute['NumberNexthops'] = '2'
+    ExpRibDictIpv4StaticRoute['2'] = dict()
+    ExpRibDictIpv4StaticRoute['2']['Distance'] = '1'
+    ExpRibDictIpv4StaticRoute['2']['Metric'] = '0'
+    ExpRibDictIpv4StaticRoute['2']['RouteType'] = 'static'
+    ExpRibDictIpv4StaticRoute['4.4.4.7'] = dict()
+    ExpRibDictIpv4StaticRoute['4.4.4.7']['Distance'] = '1'
+    ExpRibDictIpv4StaticRoute['4.4.4.7']['Metric'] = '0'
+    ExpRibDictIpv4StaticRoute['4.4.4.7']['RouteType'] = 'static'
+
+    # Populate the expected FIB ("show ip route") route dictionary for the
+    # route 163.0.0.1/32 and its next-hops.
+    ExpRouteDictIpv4StaticRoute = dict()
+    ExpRouteDictIpv4StaticRoute['Route'] = '163.0.0.1' + '/' + '32'
+    ExpRouteDictIpv4StaticRoute['NumberNexthops'] = '1'
+    ExpRouteDictIpv4StaticRoute['2'] = dict()
+    ExpRouteDictIpv4StaticRoute['2']['Distance'] = '1'
+    ExpRouteDictIpv4StaticRoute['2']['Metric'] = '0'
+    ExpRouteDictIpv4StaticRoute['2']['RouteType'] = 'static'
+
+    # Configure IPv6 route 3234:3234::1/128 with interface 4 as next-hop
+    retStruct = IpRouteConfig(deviceObj=switch1, route="3234:3234::1",
+                              mask=128, nexthop="4", config=True,
+                              ipv6flag=True)
+    retCode = retStruct.returnCode()
+    if retCode:
+        assert "Failed to configure ipv6 route"
+
+    # Populate the expected RIB ("show rib") route dictionary for the
+    # route 3234:3234::1/128 and its next-hops.
+    ExpRibDictIpv6StaticRoute = dict()
+    ExpRibDictIpv6StaticRoute['Route'] = '3234:3234::1' + '/' + '128'
+    ExpRibDictIpv6StaticRoute['NumberNexthops'] = '2'
+    ExpRibDictIpv6StaticRoute['2'] = dict()
+    ExpRibDictIpv6StaticRoute['2']['Distance'] = '1'
+    ExpRibDictIpv6StaticRoute['2']['Metric'] = '0'
+    ExpRibDictIpv6StaticRoute['2']['RouteType'] = 'static'
+    ExpRibDictIpv6StaticRoute['4'] = dict()
+    ExpRibDictIpv6StaticRoute['4']['Distance'] = '1'
+    ExpRibDictIpv6StaticRoute['4']['Metric'] = '0'
+    ExpRibDictIpv6StaticRoute['4']['RouteType'] = 'static'
+
+    # Populate the expected FIB ("show ipv6 route") route dictionary for the
+    # route 3234:3234::1/128 and its next-hops.
+    ExpRouteDictIpv6StaticRoute = dict()
+    ExpRouteDictIpv6StaticRoute['Route'] = '3234:3234::1' + '/' + '128'
+    ExpRouteDictIpv6StaticRoute['NumberNexthops'] = '1'
+    ExpRouteDictIpv6StaticRoute['2'] = dict()
+    ExpRouteDictIpv6StaticRoute['2']['Distance'] = '1'
+    ExpRouteDictIpv6StaticRoute['2']['Metric'] = '0'
+    ExpRouteDictIpv6StaticRoute['2']['RouteType'] = 'static'
+
+    # Verify route 163.0.0.1/32 and next-hops in RIB and FIB
+    verify_route_in_show_route(switch1, True, ExpRouteDictIpv4StaticRoute,
+                               'static')
+    verify_route_in_show_rib(switch1, ExpRibDictIpv4StaticRoute, 'static')
+
+    LogOutput('info', "\n\n\n######### Verification of route 163.0.0.1/32 "
+              "after adding inactive next-hop passed #########")
+
+    # Verify route 3234:3234::1/128 and next-hops in RIB and FIB
+    verify_route_in_show_route(switch1, False, ExpRouteDictIpv6StaticRoute,
+                               'static')
+    verify_route_in_show_rib(switch1, ExpRibDictIpv6StaticRoute, 'static')
+
+    LogOutput('info', "\n\n\n######### Verification of route 3234:3234::1/128 "
+              "after adding inactive next-hop passed #########")
+
+
+# This test case removes an active next-hop from a route which already
+# has another inactive next-hop. The route should not exist in the output
+# of "show ip route" but should appear in "show rib" output.
+def remove_active_nexthop_from_static_routes(**kwargs):
+
+    switch1 = kwargs.get('switch1', None)
+    switch2 = kwargs.get('switch2', None)
+
+    switch1.commandErrorCheck = 0
+    switch2.commandErrorCheck = 0
+
+    # Remove nexthop 2 to route 163.0.0.1/32
+    retStruct = IpRouteConfig(deviceObj=switch1, route="163.0.0.1", mask=32,
+                              nexthop="2", config=False)
+    retCode = retStruct.returnCode()
+    if retCode:
+        assert "Failed to un-configure ipv4 route"
+
+    # Populate the expected RIB ("show rib") route dictionary for the
+    # route 163.0.0.1/32 and its next-hops.
+    ExpRibDictIpv4StaticRoute = dict()
+    ExpRibDictIpv4StaticRoute['Route'] = '163.0.0.1' + '/' + '32'
+    ExpRibDictIpv4StaticRoute['NumberNexthops'] = '1'
+    ExpRibDictIpv4StaticRoute['4.4.4.7'] = dict()
+    ExpRibDictIpv4StaticRoute['4.4.4.7']['Distance'] = '1'
+    ExpRibDictIpv4StaticRoute['4.4.4.7']['Metric'] = '0'
+    ExpRibDictIpv4StaticRoute['4.4.4.7']['RouteType'] = 'static'
+
+    # Populate the expected FIB ("show ip route") route dictionary for the
+    # route 163.0.0.1/32 and its next-hops. The next-hop for the route
+    # should be withdrawn from the FIB.
+    ExpRouteDictIpv4StaticRoute = dict()
+    ExpRouteDictIpv4StaticRoute['Route'] = '163.0.0.1' + '/' + '32'
+
+    # Un-Configure IPv6 route 3234:3234::1/128 with interface 2 as next-hop
+    retStruct = IpRouteConfig(deviceObj=switch1, route="3234:3234::1",
+                              mask=128, nexthop="2", config=False,
+                              ipv6flag=True)
+    retCode = retStruct.returnCode()
+    if retCode:
+        assert "Failed to un-configure ipv6 route"
+
+    # Populate the expected RIB ("show rib") route dictionary for the
+    # route 3234:3234::1/128 and its next-hops.
+    ExpRibDictIpv6StaticRoute = dict()
+    ExpRibDictIpv6StaticRoute['Route'] = '3234:3234::1' + '/' + '128'
+    ExpRibDictIpv6StaticRoute['NumberNexthops'] = '1'
+    ExpRibDictIpv6StaticRoute['4'] = dict()
+    ExpRibDictIpv6StaticRoute['4']['Distance'] = '1'
+    ExpRibDictIpv6StaticRoute['4']['Metric'] = '0'
+    ExpRibDictIpv6StaticRoute['4']['RouteType'] = 'static'
+
+    # Populate the expected FIB ("show ipv6 route") route dictionary for the
+    # route 3234:3234::1/128 and its next-hops. The next-hop for the route
+    # should be withdrawn from the FIB.
+    ExpRouteDictIpv6StaticRoute = dict()
+    ExpRouteDictIpv6StaticRoute['Route'] = '3234:3234::1' + '/' + '128'
+
+    # Verify route 163.0.0.1/32 and next-hops in RIB and FIB
+    verify_route_in_show_route(switch1, True, ExpRouteDictIpv4StaticRoute,
+                               'static')
+    verify_route_in_show_rib(switch1, ExpRibDictIpv4StaticRoute, 'static')
+
+    LogOutput('info', "\n\n\n######### Verification of route 163.0.0.1/32 "
+              "after removing active next-hop passed #########")
+
+    # Verify route 3234:3234::1/128 and next-hops in RIB and FIB
+    verify_route_in_show_route(switch1, False, ExpRouteDictIpv6StaticRoute,
+                               'static')
+    verify_route_in_show_rib(switch1, ExpRibDictIpv6StaticRoute, 'static')
+
+    LogOutput('info', "\n\n\n######### Verification of route 3234:3234::1/128 "
+              "after adding inactive next-hop passed #########")
+
+
 # Set the maximum timeout for all the test cases
 @pytest.mark.timeout(5000)
 
@@ -1868,3 +2042,13 @@ class Test_ecmp_interface_up_down_events:
         dut01Obj = self.topoObj.deviceObjGet(device="dut01")
         dut02Obj = self.topoObj.deviceObjGet(device="dut02")
         interface_changing_back_addresses_trigger_static_routes(switch1=dut01Obj, switch2=dut02Obj)
+
+    def test_add_inactive_nexthop_to_static_routes(self):
+        dut01Obj = self.topoObj.deviceObjGet(device="dut01")
+        dut02Obj = self.topoObj.deviceObjGet(device="dut02")
+        add_inactive_nexthop_to_static_routes(switch1=dut01Obj, switch2=dut02Obj)
+
+    def test_remove_active_nexthop_from_static_routes(self):
+        dut01Obj = self.topoObj.deviceObjGet(device="dut01")
+        dut02Obj = self.topoObj.deviceObjGet(device="dut02")
+        remove_active_nexthop_from_static_routes(switch1=dut01Obj, switch2=dut02Obj)

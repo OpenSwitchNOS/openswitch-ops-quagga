@@ -65,7 +65,6 @@
 #define MAX_ARGC         10
 #define MAX_ARG_LEN     256
 #define PREFIX_MAXLEN    50
-#define BGP_TXN_TIMEOUT   5
 
 extern unsigned int idl_seqno;
 extern const char *bgp_origin_str[];
@@ -1148,8 +1147,7 @@ bgp_txn_complete_processing(void)
             continue;
         }
         /* If incomplete but no timeout allow more time to complete */
-        if ((status == TXN_INCOMPLETE) &&
-            ((time(NULL) - txn->update_time) < BGP_TXN_TIMEOUT)) {
+        if (status == TXN_INCOMPLETE){
             VLOG_DBG("Route transaction incomplete as=%d prefix=%s time=%lld",
                      txn->as_no, prefix_str, txn->update_time);
             continue;

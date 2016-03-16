@@ -709,6 +709,7 @@ def delete_static_routes(**kwargs):
 @pytest.mark.timeout(5000)
 
 
+@pytest.mark.skipif(True, reason="Disabling old tests")
 # Test class for testing static routes add and delete triggers.
 class Test_ecmp_route_nexthop_delete:
 

@@ -134,6 +134,7 @@ class bgpTest(OpsVsiTest):
                           (network, next_hop, switch.name)
 
 
+@pytest.mark.skipif(True, reason="Disabling old tests")
 class Test_bgpd_router_bgp:
     def setup(self):
         pass

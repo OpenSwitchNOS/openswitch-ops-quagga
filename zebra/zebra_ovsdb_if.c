@@ -2186,7 +2186,8 @@ zebra_find_routes_with_deleted_ports (
           #endif
 
           if ((rib->type != ZEBRA_ROUTE_STATIC &&
-              rib->type != ZEBRA_ROUTE_BGP) ||
+              rib->type != ZEBRA_ROUTE_BGP &&
+              rib->type != ZEBRA_ROUTE_OSPF) ||
               !rib->nexthop)
             {
               VLOG_DBG("Not a static/BGP route or null next-hop");
@@ -2200,21 +2201,32 @@ zebra_find_routes_with_deleted_ports (
 
               if (afi == AFI_IP)
                 {
-                  if (nexthop->type == NEXTHOP_TYPE_IPV4)
+                  if ((nexthop->type == NEXTHOP_TYPE_IPV4) ||
+                       (nexthop->type == NEXTHOP_TYPE_IPV4_IFNAME) ||
+                       (nexthop->type == NEXTHOP_TYPE_IPV4_IFINDEX))
                     inet_ntop(AF_INET, &nexthop->gate.ipv4,
                               nexthop_str, sizeof(nexthop_str));
                 }
               else if (afi == AFI_IP6)
                 {
-                  if (nexthop->type == NEXTHOP_TYPE_IPV6)
+                  if ((nexthop->type == NEXTHOP_TYPE_IPV6) ||
+                    (nexthop->type == NEXTHOP_TYPE_IPV6_IFNAME) ||
+                    (nexthop->type == NEXTHOP_TYPE_IPV6_IFINDEX))
                     inet_ntop(AF_INET6, &nexthop->gate.ipv6,
                               nexthop_str, sizeof(nexthop_str));
                 }
 
               if ((nexthop->type == NEXTHOP_TYPE_IFNAME) ||
                   (nexthop->type == NEXTHOP_TYPE_IPV4_IFNAME) ||
-                  (nexthop->type == NEXTHOP_TYPE_IPV6_IFNAME))
-                strncpy(ifname, nexthop->ifname, IF_NAMESIZE);
+                  (nexthop->type == NEXTHOP_TYPE_IPV4_IFINDEX) ||
+                  (nexthop->type == NEXTHOP_TYPE_IPV6_IFINDEX) ||
+                  (nexthop->type == NEXTHOP_TYPE_IPV6_IFNAME)) {
+                if ((nexthop->type == NEXTHOP_TYPE_IPV4_IFINDEX) ||
+                  (nexthop->type == NEXTHOP_TYPE_IPV6_IFINDEX))
+                      nexthop->ifname = (char*)ifindex2ifname(nexthop->ifindex);
+                if (nexthop->ifname)
+                    strncpy(ifname, nexthop->ifname, IF_NAMESIZE);
+              }
 
               VLOG_DBG("Processing route %s for the next-hop IP %s or "
                         "interface %s\n", prefix_str,
@@ -2964,6 +2976,8 @@ zebra_route_del_process (void)
   struct zebra_route_del_data *rdata;
   rib_table_info_t *info;
   struct prefix *pprefix;
+  struct in_addr* nh_ipv4_addr = NULL;
+  struct in6_addr* nh_ipv6_addr = NULL;
 
   /* Loop through the local cache of deleted routes */
   for (ALL_LIST_ELEMENTS (zebra_route_del_list, node, nnode, rdata))
@@ -2986,17 +3000,22 @@ zebra_route_del_process (void)
                                          rdata->nexthop->ifname,
                                          rdata->rib->distance,
                                          info->vrf->id);
-	      else
+              else {
+                nh_ipv4_addr = NULL;
+                if ( (NEXTHOP_TYPE_IPV4_IFNAME == rdata->nexthop->type) ||
+                    (NEXTHOP_TYPE_IPV4_IFINDEX == rdata->nexthop->type)||
+                    (NEXTHOP_TYPE_IPV4 == rdata->nexthop->type))
+                    nh_ipv4_addr = &rdata->nexthop->gate.ipv4;
                 rib_delete_ipv4(rdata->rib->type,              /*protocol*/
                                 0,                             /*flags*/
                                 (struct prefix_ipv4 *)pprefix, /*prefix*/
-                                (rdata->nexthop->ifname ?
-                                 NULL : &rdata->nexthop->gate.ipv4),/*gate*/
+                                nh_ipv4_addr,/*gate*/
                                 ifname2ifindex(rdata->nexthop->ifname),
                                                                /* ifindex */
                                 0,                             /*vrf_id*/
                                 info->safi                     /*safi*/
                                 );
+          }
 #ifdef HAVE_IPV6
 	    }
 	  else if (pprefix->family == AF_INET6)
@@ -3010,17 +3029,22 @@ zebra_route_del_process (void)
                                     rdata->nexthop->ifname,
                                     rdata->rib->distance,
                                     info->vrf->id);
-	      else
+              else {
+                nh_ipv6_addr = NULL;
+                if ( (NEXTHOP_TYPE_IPV6_IFNAME == rdata->nexthop->type) ||
+                    (NEXTHOP_TYPE_IPV6_IFINDEX == rdata->nexthop->type)||
+                    (NEXTHOP_TYPE_IPV6 == rdata->nexthop->type))
+                    nh_ipv6_addr = &rdata->nexthop->gate.ipv6;
                 rib_delete_ipv6(rdata->rib->type,             /*protocol*/
                                 0,                            /*flags*/
                                 (struct prefix_ipv6 *)pprefix,/*prefix*/
-                                (rdata->nexthop->ifname ?
-                                 NULL : &rdata->nexthop->gate.ipv6),/*gate*/
+                                nh_ipv6_addr,/*gate*/
                                 ifname2ifindex(rdata->nexthop->ifname),
                                                               /* ifindex */
                                 0,                            /*vrf_id*/
                                 info->safi                    /*safi*/
                                 );
+              }
 #endif
 	    }
 	}
@@ -3074,38 +3098,49 @@ zebra_find_ovsdb_deleted_routes (afi_t afi, safi_t safi, u_int32_t id)
 	   * the local cache for deletion
 	   */
           for (nexthop = rib->nexthop; nexthop; nexthop = nexthop->next)
-	    {
+          {
               memset(&rkey, 0, sizeof (struct zebra_route_key));
               memset(prefix_str, 0, sizeof(prefix_str));
               memset(nexthop_str, 0, sizeof(nexthop_str));
 
               if (afi == AFI_IP)
-	        {
+              {
                   rkey.prefix.u.ipv4_addr = rn->p.u.prefix4;
                   rkey.prefix_len = rn->p.prefixlen;
-                  if (nexthop->type == NEXTHOP_TYPE_IPV4)
-		    {
+                  if ((nexthop->type == NEXTHOP_TYPE_IPV4_IFINDEX) ||
+                     (nexthop->type == NEXTHOP_TYPE_IPV4_IFNAME) ||
+                     (nexthop->type == NEXTHOP_TYPE_IPV4))
+                  {
                       rkey.nexthop.u.ipv4_addr = nexthop->gate.ipv4;
                       inet_ntop(AF_INET, &nexthop->gate.ipv4,
                                 nexthop_str, sizeof(nexthop_str));
-                    }
-                }
-	      else if (afi == AFI_IP6)
-	        {
+                  }
+              }
+              else if (afi == AFI_IP6)
+              {
                   rkey.prefix.u.ipv6_addr = rn->p.u.prefix6;
                   rkey.prefix_len = rn->p.prefixlen;
-                  if (nexthop->type == NEXTHOP_TYPE_IPV6)
-		    {
+                  if ((nexthop->type == NEXTHOP_TYPE_IPV6) ||
+                       (nexthop->type == NEXTHOP_TYPE_IPV6_IFINDEX) ||
+                       (nexthop->type == NEXTHOP_TYPE_IPV6_IFNAME))
+                  {
                       rkey.nexthop.u.ipv6_addr = nexthop->gate.ipv6;
                       inet_ntop(AF_INET6, &nexthop->gate.ipv6,
                                 nexthop_str, sizeof(nexthop_str));
-                    }
-                }
+                  }
+              }
 
               if ((nexthop->type == NEXTHOP_TYPE_IFNAME) ||
                   (nexthop->type == NEXTHOP_TYPE_IPV4_IFNAME) ||
-                  (nexthop->type == NEXTHOP_TYPE_IPV6_IFNAME))
-                strncpy(rkey.ifname, nexthop->ifname, IF_NAMESIZE);
+                  (nexthop->type == NEXTHOP_TYPE_IPV4_IFINDEX) ||
+                  (nexthop->type == NEXTHOP_TYPE_IPV6_IFINDEX) ||
+                  (nexthop->type == NEXTHOP_TYPE_IPV6_IFNAME)) {
+                if ((nexthop->type == NEXTHOP_TYPE_IPV4_IFINDEX) ||
+                  (nexthop->type == NEXTHOP_TYPE_IPV6_IFINDEX))
+                     nexthop->ifname = (char*)ifindex2ifname(nexthop->ifindex);
+                if (nexthop->ifname)
+                    strncpy(rkey.ifname, nexthop->ifname, IF_NAMESIZE);
+              }
 
               if (VLOG_IS_DBG_ENABLED())
                 print_key(&rkey);
@@ -4525,6 +4560,7 @@ zebra_update_selected_route_nexthops_to_db (struct route_node *rn,
                 /*
                  * Case when the next-hop is of IP address.
                  */
+                case NEXTHOP_TYPE_IPV4_IFINDEX:
                 case NEXTHOP_TYPE_IPV4:
                   if (inet_ntop(AF_INET, &nexthop->gate.ipv4,
                                 nexthop_str, sizeof(nexthop_str)))
@@ -4637,6 +4673,7 @@ zebra_update_selected_route_nexthops_to_db (struct route_node *rn,
                 /*
                  * Case when the next-hop is of IPv6 address.
                  */
+                case NEXTHOP_TYPE_IPV6_IFINDEX:
                 case NEXTHOP_TYPE_IPV6:
                   if (inet_ntop(AF_INET6, &nexthop->gate.ipv6,
                                 nexthop_str, sizeof(nexthop_str)))
@@ -4754,6 +4791,7 @@ zebra_add_route (bool is_ipv6, struct prefix *p, int type, safi_t safi,
   struct ovsrec_nexthop *idl_nexthop;
   struct in_addr ipv4_dest_addr;
   struct in6_addr ipv6_dest_addr;
+  unsigned int ifindex = 0;
   int count;
   int rc = 1;
 
@@ -4778,41 +4816,72 @@ zebra_add_route (bool is_ipv6, struct prefix *p, int type, safi_t safi,
              (idl_nexthop->selected[0] != true) ) )
         continue;
 
-      /* If next hop is port */
-      if(idl_nexthop->ports != NULL)
-        {
-          VLOG_DBG("Processing %d-next-hop %s", count,
-                     idl_nexthop->ports[0]->name);
-          nexthop_ifname_add(rib, idl_nexthop->ports[0]->name);
-        }
-      else
-        {
+      if (idl_nexthop->ports != NULL &&
+          idl_nexthop->ip_address != NULL) {
           memset(&ipv4_dest_addr, 0, sizeof(struct in_addr));
           memset(&ipv6_dest_addr, 0, sizeof(struct in6_addr));
-          /* Check if ipv4 or ipv6 */
-          if (inet_pton(AF_INET, idl_nexthop->ip_address,
-                        &ipv4_dest_addr) != 1)
-	    {
-               if (inet_pton(AF_INET6, idl_nexthop->ip_address,
-                             &ipv6_dest_addr) != 1)
-	         {
-                   VLOG_DBG("Invalid next-hop ip %s",idl_nexthop->ip_address);
-                   continue;
-                 }
-	       else
-	         {
-                   VLOG_DBG("Processing %d-next-hop ipv6 %s",
-                             count, idl_nexthop->ip_address);
-                   nexthop_ipv6_add(rib, &ipv6_dest_addr);
-                 }
-            }
-	  else
-	    {
+
+          ifindex = ifname2ifindex(idl_nexthop->ports[0]->name);
+          if (1 == inet_pton(AF_INET, idl_nexthop->ip_address,
+                        &ipv4_dest_addr))
+          {
               VLOG_DBG("Processing ipv4 %d-next-hop ipv4 %s",
-                         count, idl_nexthop->ip_address);
-              nexthop_ipv4_add(rib, &ipv4_dest_addr, NULL);
+                       count, idl_nexthop->ip_address);
+              nexthop_ipv4_ifindex_add(rib, &ipv4_dest_addr, NULL, ifindex);
+          }
+          else
+          {
+              if (1 == inet_pton(AF_INET6, idl_nexthop->ip_address,
+                             &ipv6_dest_addr))
+               {
+                   VLOG_DBG("Processing %d-next-hop ipv6 %s",
+                           count, idl_nexthop->ip_address);
+                   nexthop_ipv6_ifindex_add(rib, &ipv6_dest_addr, ifindex);
+               }
+               else
+               {
+                   VLOG_DBG("Invalid next-hop ip %s", idl_nexthop->ip_address);
+                   continue;
+               }
+          }
+      }
+      else {
+          /* If next hop is port */
+          if(idl_nexthop->ports != NULL)
+            {
+              VLOG_DBG("Processing %d-next-hop %s", count,
+                         idl_nexthop->ports[0]->name);
+              nexthop_ifname_add(rib, idl_nexthop->ports[0]->name);
             }
-        }
+          else
+          {
+              memset(&ipv4_dest_addr, 0, sizeof(struct in_addr));
+              memset(&ipv6_dest_addr, 0, sizeof(struct in6_addr));
+              /* Check if ipv4 or ipv6 */
+              if (inet_pton(AF_INET, idl_nexthop->ip_address,
+                            &ipv4_dest_addr) != 1)
+              {
+                   if (inet_pton(AF_INET6, idl_nexthop->ip_address,
+                                 &ipv6_dest_addr) != 1)
+                   {
+                       VLOG_DBG("Invalid next-hop ip %s", idl_nexthop->ip_address);
+                       continue;
+                   }
+                   else
+                   {
+                       VLOG_DBG("Processing %d-next-hop ipv6 %s",
+                                 count, idl_nexthop->ip_address);
+                       nexthop_ipv6_add(rib, &ipv6_dest_addr);
+                   }
+              }
+              else
+              {
+                  VLOG_DBG("Processing ipv4 %d-next-hop ipv4 %s",
+                             count, idl_nexthop->ip_address);
+                  nexthop_ipv4_add(rib, &ipv4_dest_addr, NULL);
+              }
+          }
+      }
     }
 
   /* Distance. */

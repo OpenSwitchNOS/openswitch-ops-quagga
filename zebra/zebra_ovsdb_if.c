@@ -2376,6 +2376,152 @@ zebra_update_port_active_state (const struct ovsrec_interface *interface)
     }
 }
 
+static void
+nh_update_delete_on_port_status (char* ifname, char* prefix_str,
+        char* nh_ip, struct route_node *rn, struct rib *rib,
+        struct nexthop *nexthop, afi_t afi, int port_options)
+{
+    /*
+    * If 'ifname' is legal, then peak into the hash table
+    * 'zebra_updated_or_changed_l3_ports' to see if the L3 port
+    * got deleted.
+    */
+    if (ifname && ifname[0])
+    {
+       switch (port_options)
+       {
+          case ZEBRA_L3_PORT_DELETE_UPDATE_OPTION:
+             if (zebra_nh_port_in_deleted_cached_l3_ports_hash(ifname))
+             {
+               /*
+                * Remove the next-hop via the deleted port from
+                * the kernel.
+                */
+                 zebra_route_list_add_data(rn, rib, nexthop);
+                 zebra_delete_route_nexthop_port_from_db(rib, ifname);
+             }
+             break;
+
+          case ZEBRA_L3_PORT_ACTIVE_STATE_CHN_OPTION:
+             if (!zebra_nh_port_active_in_cached_l3_ports_hash(ifname))
+             {
+                VLOG_DBG("Mark the next-hop port %s of the "
+                         "route as unselected in OVSDB", ifname);
+                log_event("ZEBRA_NEXTHOP_STATE",
+                                      EV_KV("nexthop_port", "%s",ifname),
+                                      EV_KV("msg", "%s","unselected"));
+                zebra_update_selected_nh(rn, rib, ifname, NULL,
+                                              ZEBRA_NH_UNINSTALL);
+             }
+             else
+             {
+                VLOG_DBG("Mark the next-hop port %s of the "
+                          "route as selected in OVSDB", ifname);
+                log_event("ZEBRA_NEXTHOP_STATE",
+                                      EV_KV("nexthop_port", "%s",ifname),
+                                      EV_KV("msg", "%s","selected"));
+                zebra_update_selected_nh(rn, rib, ifname, NULL,
+                                           ZEBRA_NH_INSTALL);
+             }
+             break;
+
+         default:
+             VLOG_ERR("Unsupported option for zebra OVSDB route "
+                      "cleanup");
+             break;
+       }
+    }
+
+// TODO:Will there be a situation where both ifname and nh_ip should be checked?
+// TODO:if no then this can be done in else part
+    /*
+     * If 'nexthop' is legal, then walk the hash table
+     * 'zebra_updated_or_changed_l3_ports' to see if the L3 port
+     * with the IP subnet got deleted.
+     */
+     else if (nh_ip && nh_ip[0])
+     {
+         switch (port_options)
+         {
+           case ZEBRA_L3_PORT_DELETE_UPDATE_OPTION:
+
+            /*
+             * Check if the next-hop occurs in the port cache for
+             * deleted ports.
+             */
+             if (zebra_nh_address_in_deleted_cached_l3_ports_hash(nh_ip, afi))
+             {
+                VLOG_DBG("The next-hop string %s found in the "
+                         " deleted L3 port list", nh_ip);
+                zebra_route_list_add_data(rn, rib, nexthop);
+                zebra_delete_route_nexthop_addr_from_db(rib, nh_ip);
+             }
+             else
+             {
+               /*
+                * If the next-hop address does not occur in the
+                * L3 port cache or if the next-hop address occurs
+                * in some port node in L3 port cache but the port
+                * is shut, then mark the next-hop as unselected in
+                * OVSDB. Otherwise mark the next-hop as selected
+                * in OVSDB.
+                */
+                if (!zebra_nh_addr_active_in_cached_l3_ports_hash(nh_ip, afi))
+                {
+                   VLOG_DBG("Mark the next-hop addr %s of the "
+                            "route as unselected in OVSDB", nh_ip);
+                   log_event("ZEBRA_NEXTHOP_STATE",
+                                          EV_KV("nexthop_port", "%s",nh_ip),
+                                          EV_KV("msg", "%s","unselected"));
+                   zebra_update_selected_nh(rn, rib, NULL,
+                                       nh_ip, ZEBRA_NH_UNINSTALL);
+                }
+                else
+                {
+                   VLOG_DBG("Mark the next-hop addr %s of the "
+                            "route as selected in OVSDB", nh_ip);
+                   log_event("ZEBRA_NEXTHOP_STATE",
+                                          EV_KV("nexthop_port", "%s",nh_ip),
+                                          EV_KV("msg", "%s","selected"));
+                   log_event("ZEBRA_ROUTE",
+                                          EV_KV("routemsg", "%s", ""),
+                                          EV_KV("prefix", "%s", prefix_str));
+                   zebra_update_selected_nh(rn, rib, NULL,
+                                            nh_ip, ZEBRA_NH_INSTALL);
+                }
+             }
+             break;
+
+           case ZEBRA_L3_PORT_ACTIVE_STATE_CHN_OPTION:
+             if (!zebra_nh_addr_active_in_cached_l3_ports_hash(
+                                                      nh_ip, afi))
+             {
+                VLOG_DBG("Mark the next-hop addr %s of the "
+                         "route as unselected in OVSDB", nh_ip);
+                log_event("ZEBRA_NEXTHOP_STATE",
+                                      EV_KV("nexthop_port", "%s",nh_ip),
+                                      EV_KV("msg", "%s","unselected"));
+                zebra_update_selected_nh(rn, rib, NULL, nh_ip,
+                                                  ZEBRA_NH_UNINSTALL);
+             }
+             else
+             {
+                VLOG_DBG("Mark the next-hop addr %s of the "
+                         "route as selected in OVSDB", nh_ip);
+                log_event("ZEBRA_NEXTHOP_STATE",
+                                      EV_KV("nexthop_port", "%s",nh_ip),
+                                      EV_KV("msg", "%s","selected"));
+                zebra_update_selected_nh(rn, rib, NULL, nh_ip, ZEBRA_NH_INSTALL);
+             }
+             break;
+
+           default:
+               VLOG_ERR("Unsupported option for zebra OVSDB route "
+                        "cleanup");
+               break;
+         }
+     }
+}
 
 /*
  * Find routes and their next-hops which have been deleted/shut and add them to
@@ -2458,10 +2604,11 @@ zebra_find_routes_with_deleted_ports (
           #endif
 
           if ((rib->type != ZEBRA_ROUTE_STATIC &&
-              rib->type != ZEBRA_ROUTE_BGP) ||
+              rib->type != ZEBRA_ROUTE_BGP &&
+              rib->type != ZEBRA_ROUTE_OSPF) ||
               !rib->nexthop)
             {
-              VLOG_DBG("Not a static/BGP route or null next-hop");
+              VLOG_DBG("Not a static/BGP/OSPF route or null next-hop");
               continue;
             }
 
@@ -2472,174 +2619,39 @@ zebra_find_routes_with_deleted_ports (
 
               if (afi == AFI_IP)
                 {
-                  if (nexthop->type == NEXTHOP_TYPE_IPV4)
+                  if ((nexthop->type == NEXTHOP_TYPE_IPV4) ||
+                       (nexthop->type == NEXTHOP_TYPE_IPV4_IFINDEX))
                     inet_ntop(AF_INET, &nexthop->gate.ipv4,
                               nexthop_str, sizeof(nexthop_str));
                 }
               else if (afi == AFI_IP6)
                 {
-                  if (nexthop->type == NEXTHOP_TYPE_IPV6)
+                  if ((nexthop->type == NEXTHOP_TYPE_IPV6) ||
+                    (nexthop->type == NEXTHOP_TYPE_IPV6_IFINDEX))
                     inet_ntop(AF_INET6, &nexthop->gate.ipv6,
                               nexthop_str, sizeof(nexthop_str));
                 }
 
               if ((nexthop->type == NEXTHOP_TYPE_IFNAME) ||
                   (nexthop->type == NEXTHOP_TYPE_IPV4_IFNAME) ||
-                  (nexthop->type == NEXTHOP_TYPE_IPV6_IFNAME))
-                strncpy(ifname, nexthop->ifname, IF_NAMESIZE);
+                  (nexthop->type == NEXTHOP_TYPE_IPV6_IFNAME) ||
+                  (nexthop->type == NEXTHOP_TYPE_IPV4_IFINDEX) ||
+                  (nexthop->type == NEXTHOP_TYPE_IPV6_IFINDEX))
+              {
+                if ((nexthop->type == NEXTHOP_TYPE_IPV4_IFINDEX) ||
+                   (nexthop->type == NEXTHOP_TYPE_IPV6_IFINDEX))
+                      nexthop->ifname = (char*)ifindex2ifname(nexthop->ifindex);
+                if (nexthop->ifname)
+                      strncpy(ifname, nexthop->ifname, IF_NAMESIZE);
+              }
 
-              VLOG_DBG("Processing route %s for the next-hop IP %s or "
+              VLOG_DBG("Processing route %s for the next-hop IP %s and/or "
                         "interface %s\n", prefix_str,
                         nexthop_str[0] ? nexthop_str : "NONE",
                         ifname[0] ? ifname : "NONE");
 
-              /*
-               * If 'ifname' is legal, then peak into the hash table
-               * 'zebra_updated_or_changed_l3_ports' to see if the L3 port
-               * got deleted.
-               */
-              if (ifname[0])
-                {
-                  switch (option)
-                    {
-                      case ZEBRA_L3_PORT_DELETE_UPDATE_OPTION:
-                        if (zebra_nh_port_in_deleted_cached_l3_ports_hash(ifname))
-                          {
-                            /*
-                              * Remove the next-hop via the deleted port from
-                              * the kernel.
-                              */
-                            zebra_route_list_add_data(rn, rib, nexthop);
-                            zebra_delete_route_nexthop_port_from_db(rib,
-                                                                  ifname);
-                          }
-                        break;
-
-                      case ZEBRA_L3_PORT_ACTIVE_STATE_CHN_OPTION:
-                        if (!zebra_nh_port_active_in_cached_l3_ports_hash(ifname))
-                          {
-                            VLOG_DBG("Mark the next-hop port %s of the "
-                                     "route as unselected in OVSDB", ifname);
-                            log_event("ZEBRA_NEXTHOP_STATE",
-                                      EV_KV("nexthop_port", "%s",ifname),
-                                      EV_KV("msg", "%s","unselected"));
-                            zebra_update_selected_nh(rn, rib, ifname, NULL,
-                                                     ZEBRA_NH_UNINSTALL);
-                          }
-                        else
-                          {
-                            VLOG_DBG("Mark the next-hop port %s of the "
-                                     "route as selected in OVSDB", ifname);
-                            log_event("ZEBRA_NEXTHOP_STATE",
-                                      EV_KV("nexthop_port", "%s",ifname),
-                                      EV_KV("msg", "%s","selected"));
-                            zebra_update_selected_nh(rn, rib, ifname, NULL,
-                                                     ZEBRA_NH_INSTALL);
-                          }
-                        break;
-
-                      default:
-                        VLOG_ERR("Unsupported option for zebra OVSDB route "
-                                 "cleanup");
-                        break;
-                    }
-                }
-
-              /*
-               * If 'nexthop' is legal, then walk the hash table
-               * 'zebra_updated_or_changed_l3_ports' to see if the L3 port
-               * with the IP subnet got deleted.
-               */
-              if (nexthop_str[0])
-                {
-                  switch (option)
-                    {
-                      case ZEBRA_L3_PORT_DELETE_UPDATE_OPTION:
-
-                        /*
-                         * Check if the next-hop occurs in the port cache for
-                         * deleted ports.
-                         */
-                        if (zebra_nh_address_in_deleted_cached_l3_ports_hash(
-                                                         nexthop_str, afi))
-                          {
-                            VLOG_DBG("The next-hop string %s found in the "
-                                     " deleted L3 port list", nexthop_str);
-                            zebra_route_list_add_data(rn, rib, nexthop);
-                            zebra_delete_route_nexthop_addr_from_db(rib,
-                                                                  nexthop_str);
-                          }
-                        else
-                          {
-                            /*
-                             * If the next-hop address does not occur in the
-                             * L3 port cache or if the next-hop address occurs
-                             * in some port node in L3 port cache but the port
-                             * is shut, then mark the next-hop as unselected in
-                             * OVSDB. Otherwise mark the next-hop as selected
-                             * in OVSDB.
-                             */
-                            if (!zebra_nh_addr_active_in_cached_l3_ports_hash(
-                                                                nexthop_str, afi))
-                              {
-                                VLOG_DBG("Mark the next-hop addr %s of the "
-                                         "route as unselected in OVSDB",
-                                         nexthop_str);
-                                log_event("ZEBRA_NEXTHOP_STATE",
-                                          EV_KV("nexthop_port", "%s",nexthop_str),
-                                          EV_KV("msg", "%s","unselected"));
-                                zebra_update_selected_nh(rn, rib, NULL,
-                                                         nexthop_str,
-                                                         ZEBRA_NH_UNINSTALL);
-                              }
-                            else
-                              {
-                                VLOG_DBG("Mark the next-hop addr %s of the "
-                                         "route as selected in OVSDB",
-                                         nexthop_str);
-                                log_event("ZEBRA_NEXTHOP_STATE",
-                                          EV_KV("nexthop_port", "%s",nexthop_str),
-                                          EV_KV("msg", "%s","selected"));
-                                log_event("ZEBRA_ROUTE",
-                                          EV_KV("routemsg", "%s", ""),
-                                          EV_KV("prefix", "%s", prefix_str));
-                                zebra_update_selected_nh(rn, rib, NULL,
-                                                         nexthop_str,
-                                                         ZEBRA_NH_INSTALL);
-                              }
-                          }
-                        break;
-
-                      case ZEBRA_L3_PORT_ACTIVE_STATE_CHN_OPTION:
-                        if (!zebra_nh_addr_active_in_cached_l3_ports_hash(
-                                                                nexthop_str, afi))
-                          {
-                            VLOG_DBG("Mark the next-hop addr %s of the "
-                                      "route as unselected in OVSDB", nexthop_str);
-                            log_event("ZEBRA_NEXTHOP_STATE",
-                                      EV_KV("nexthop_port", "%s",nexthop_str),
-                                      EV_KV("msg", "%s","unselected"));
-                            zebra_update_selected_nh(rn, rib, NULL, nexthop_str,
-                                                     ZEBRA_NH_UNINSTALL);
-                          }
-                        else
-                          {
-                            VLOG_DBG("Mark the next-hop addr %s of the "
-                                     "route as selected in OVSDB", nexthop_str);
-                            log_event("ZEBRA_NEXTHOP_STATE",
-                                      EV_KV("nexthop_port", "%s",nexthop_str),
-                                      EV_KV("msg", "%s","selected"));
-                            zebra_update_selected_nh(rn, rib, NULL, nexthop_str,
-                                                     ZEBRA_NH_INSTALL);
-                          }
-                        break;
-
-                      default:
-                        VLOG_ERR("Unsupported option for zebra OVSDB route "
-                                 "cleanup");
-                        break;
-                    }
-                }
+              nh_update_delete_on_port_status(ifname, prefix_str,
+                nexthop_str, rn, rib, nexthop, afi,option);
             }
         }
 
@@ -3277,6 +3289,9 @@ zebra_route_del_process (void)
   struct zebra_route_del_data *rdata;
   rib_table_info_t *info;
   struct prefix *pprefix;
+  struct in_addr* nh_ipv4_addr = NULL;
+  struct in6_addr* nh_ipv6_addr = NULL;
+  unsigned int nh_ifindex = 0;
 
   /* Loop through the local cache of deleted routes */
   for (ALL_LIST_ELEMENTS (zebra_route_del_list, node, nnode, rdata))
@@ -3299,17 +3314,27 @@ zebra_route_del_process (void)
                                          rdata->nexthop->ifname,
                                          rdata->rib->distance,
                                          info->vrf->id);
-	      else
+              else {
+                nh_ipv4_addr = NULL;
+                nh_ifindex = 0;
+                if (NEXTHOP_TYPE_IPV4_IFINDEX == rdata->nexthop->type)
+                {
+                    nh_ipv4_addr = &rdata->nexthop->gate.ipv4;
+                    nh_ifindex = rdata->nexthop->ifindex;
+                }
+                else if (NEXTHOP_TYPE_IPV4 == rdata->nexthop->type)
+                    nh_ipv4_addr = &rdata->nexthop->gate.ipv4;
+                else if (NEXTHOP_TYPE_IFNAME == rdata->nexthop->type)
+                    nh_ifindex = ifname2ifindex(rdata->nexthop->ifname);
                 rib_delete_ipv4(rdata->rib->type,              /*protocol*/
                                 0,                             /*flags*/
                                 (struct prefix_ipv4 *)pprefix, /*prefix*/
-                                (rdata->nexthop->ifname ?
-                                 NULL : &rdata->nexthop->gate.ipv4),/*gate*/
-                                ifname2ifindex(rdata->nexthop->ifname),
-                                                               /* ifindex */
+                                nh_ipv4_addr,                  /*gate*/
+                                nh_ifindex,                    /* ifindex */
                                 0,                             /*vrf_id*/
                                 info->safi                     /*safi*/
                                 );
+          }
 #ifdef HAVE_IPV6
 	    }
 	  else if (pprefix->family == AF_INET6)
@@ -3323,17 +3348,27 @@ zebra_route_del_process (void)
                                     rdata->nexthop->ifname,
                                     rdata->rib->distance,
                                     info->vrf->id);
-	      else
+              else {
+                nh_ipv6_addr = NULL;
+                nh_ifindex = 0;
+                if (NEXTHOP_TYPE_IPV6_IFINDEX == rdata->nexthop->type)
+                {
+                    nh_ipv6_addr = &rdata->nexthop->gate.ipv6;
+                    nh_ifindex = rdata->nexthop->ifindex;
+                }
+                else if (NEXTHOP_TYPE_IPV6 == rdata->nexthop->type)
+                    nh_ipv6_addr = &rdata->nexthop->gate.ipv6;
+                else if (NEXTHOP_TYPE_IFNAME == rdata->nexthop->type)
+                    nh_ifindex = ifname2ifindex(rdata->nexthop->ifname);
                 rib_delete_ipv6(rdata->rib->type,             /*protocol*/
                                 0,                            /*flags*/
                                 (struct prefix_ipv6 *)pprefix,/*prefix*/
-                                (rdata->nexthop->ifname ?
-                                 NULL : &rdata->nexthop->gate.ipv6),/*gate*/
-                                ifname2ifindex(rdata->nexthop->ifname),
-                                                              /* ifindex */
+                                nh_ipv6_addr,                 /*gate*/
+                                nh_ifindex,                   /* ifindex */
                                 0,                            /*vrf_id*/
                                 info->safi                    /*safi*/
                                 );
+              }
 #endif
 	    }
 	}
@@ -3393,45 +3428,55 @@ zebra_find_ovsdb_deleted_routes (afi_t afi, safi_t safi, u_int32_t id)
               memset(nexthop_str, 0, sizeof(nexthop_str));
 
               if (afi == AFI_IP)
-	        {
+              {
                   rkey.prefix.u.ipv4_addr = rn->p.u.prefix4;
                   rkey.prefix_len = rn->p.prefixlen;
-                  if (nexthop->type == NEXTHOP_TYPE_IPV4)
-		    {
+                  if ((nexthop->type == NEXTHOP_TYPE_IPV4_IFINDEX) ||
+                     (nexthop->type == NEXTHOP_TYPE_IPV4))
+                  {
                       rkey.nexthop.u.ipv4_addr = nexthop->gate.ipv4;
                       inet_ntop(AF_INET, &nexthop->gate.ipv4,
                                 nexthop_str, sizeof(nexthop_str));
-                    }
-                }
-	      else if (afi == AFI_IP6)
-	        {
+                  }
+              }
+              else if (afi == AFI_IP6)
+              {
                   rkey.prefix.u.ipv6_addr = rn->p.u.prefix6;
                   rkey.prefix_len = rn->p.prefixlen;
-                  if (nexthop->type == NEXTHOP_TYPE_IPV6)
-		    {
+                  if ((nexthop->type == NEXTHOP_TYPE_IPV6) ||
+                       (nexthop->type == NEXTHOP_TYPE_IPV6_IFINDEX))
+                  {
                       rkey.nexthop.u.ipv6_addr = nexthop->gate.ipv6;
                       inet_ntop(AF_INET6, &nexthop->gate.ipv6,
                                 nexthop_str, sizeof(nexthop_str));
-                    }
-                }
+                  }
+              }
 
               if ((nexthop->type == NEXTHOP_TYPE_IFNAME) ||
                   (nexthop->type == NEXTHOP_TYPE_IPV4_IFNAME) ||
-                  (nexthop->type == NEXTHOP_TYPE_IPV6_IFNAME))
-                strncpy(rkey.ifname, nexthop->ifname, IF_NAMESIZE);
+                  (nexthop->type == NEXTHOP_TYPE_IPV6_IFNAME) ||
+                  (nexthop->type == NEXTHOP_TYPE_IPV4_IFINDEX) ||
+                  (nexthop->type == NEXTHOP_TYPE_IPV6_IFINDEX))
+              {
+                   if ((nexthop->type == NEXTHOP_TYPE_IPV4_IFINDEX) ||
+                      (nexthop->type == NEXTHOP_TYPE_IPV6_IFINDEX))
+                         nexthop->ifname = (char*)ifindex2ifname(nexthop->ifindex);
+                   if (nexthop->ifname)
+                         strncpy(rkey.ifname, nexthop->ifname, IF_NAMESIZE);
+              }
 
               if (VLOG_IS_DBG_ENABLED())
                 print_key(&rkey);
 
               if (!hash_get(zebra_route_hash, &rkey, NULL))
-	        {
+              {
                   zebra_route_list_add_data(rn, rib, nexthop);
                   prefix2str(&rn->p, prefix_str, sizeof(prefix_str));
                   VLOG_DBG("Delete route, prefix %s, nexthop %s, interface %s",
                            prefix_str[0] ? prefix_str : "NONE",
                            nexthop_str[0] ? nexthop_str : "NONE",
                            nexthop->ifname ? nexthop->ifname : "NONE");
-                }
+               }
             }
         } /* RNODE_FOREACH_RIB */
     }
@@ -5260,6 +5305,7 @@ zebra_update_selected_route_nexthops_to_db (struct route_node *rn,
                 /*
                  * Case when the next-hop is of IP address.
                  */
+                case NEXTHOP_TYPE_IPV4_IFINDEX:
                 case NEXTHOP_TYPE_IPV4:
                   if (inet_ntop(AF_INET, &nexthop->gate.ipv4,
                                 nexthop_str, sizeof(nexthop_str)))
@@ -5372,6 +5418,7 @@ zebra_update_selected_route_nexthops_to_db (struct route_node *rn,
                 /*
                  * Case when the next-hop is of IPv6 address.
                  */
+                case NEXTHOP_TYPE_IPV6_IFINDEX:
                 case NEXTHOP_TYPE_IPV6:
                   if (inet_ntop(AF_INET6, &nexthop->gate.ipv6,
                                 nexthop_str, sizeof(nexthop_str)))
@@ -5490,6 +5537,7 @@ zebra_add_route (bool is_ipv6, struct prefix *p, int type, safi_t safi,
   struct in_addr ipv4_dest_addr;
   struct in6_addr ipv6_dest_addr;
   struct uuid* route_uuid = NULL;
+  unsigned int ifindex = 0;
   int count;
   int rc = 1;
 
@@ -5527,50 +5575,81 @@ zebra_add_route (bool is_ipv6, struct prefix *p, int type, safi_t safi,
              (idl_nexthop->selected[0] != true) ) )
         continue;
 
-      /* If next hop is port */
-      if(idl_nexthop->ports != NULL)
-        {
-          VLOG_DBG("Processing %d-next-hop %s", count,
-                     idl_nexthop->ports[0]->name);
-          log_event("ZEBRA_ROUTE_ADD_NEXTHOP_EVENTS", EV_KV("prefix", "%s",
-                   route->prefix),EV_KV("nexthop", "%s",
-                   idl_nexthop->ports[0]->name));
-          nexthop_ifname_add(rib, idl_nexthop->ports[0]->name);
-        }
-      else
-        {
+      if (idl_nexthop->ports != NULL &&
+          idl_nexthop->ip_address != NULL) {
           memset(&ipv4_dest_addr, 0, sizeof(struct in_addr));
           memset(&ipv6_dest_addr, 0, sizeof(struct in6_addr));
-          /* Check if ipv4 or ipv6 */
-          if (inet_pton(AF_INET, idl_nexthop->ip_address,
-                        &ipv4_dest_addr) != 1)
-	    {
-               if (inet_pton(AF_INET6, idl_nexthop->ip_address,
-                             &ipv6_dest_addr) != 1)
-	         {
-                   VLOG_DBG("Invalid next-hop ip %s",idl_nexthop->ip_address);
-                   continue;
-                 }
-	       else
-	         {
-                   VLOG_DBG("Processing %d-next-hop ipv6 %s",
-                             count, idl_nexthop->ip_address);
-                   log_event("ZEBRA_ROUTE_ADD_NEXTHOP_EVENTS", EV_KV("prefix", "%s",
-                             route->prefix),EV_KV("nexthop", "%s",
-                             idl_nexthop->ip_address));
-                   nexthop_ipv6_add(rib, &ipv6_dest_addr);
-                 }
-            }
-	  else
-	    {
+
+          ifindex = ifname2ifindex(idl_nexthop->ports[0]->name);
+          if (1 == inet_pton(AF_INET, idl_nexthop->ip_address,
+                        &ipv4_dest_addr))
+          {
               VLOG_DBG("Processing ipv4 %d-next-hop ipv4 %s",
-                        count, idl_nexthop->ip_address);
+                       count, idl_nexthop->ip_address);
+              nexthop_ipv4_ifindex_add(rib, &ipv4_dest_addr, NULL, ifindex);
+          }
+          else
+          {
+              if (1 == inet_pton(AF_INET6, idl_nexthop->ip_address,
+                             &ipv6_dest_addr))
+               {
+                   VLOG_DBG("Processing %d-next-hop ipv6 %s",
+                           count, idl_nexthop->ip_address);
+                   nexthop_ipv6_ifindex_add(rib, &ipv6_dest_addr, ifindex);
+               }
+               else
+               {
+                   VLOG_DBG("Invalid next-hop ip %s", idl_nexthop->ip_address);
+                   continue;
+               }
+          }
+      }
+      else {
+          /* If next hop is port */
+          if(idl_nexthop->ports != NULL)
+            {
+              VLOG_DBG("Processing %d-next-hop %s", count,
+                         idl_nexthop->ports[0]->name);
               log_event("ZEBRA_ROUTE_ADD_NEXTHOP_EVENTS", EV_KV("prefix", "%s",
-                        route->prefix),EV_KV("nexthop", "%s",
-                        idl_nexthop->ip_address));
-              nexthop_ipv4_add(rib, &ipv4_dest_addr, NULL);
+                       route->prefix),EV_KV("nexthop", "%s",
+                       idl_nexthop->ports[0]->name));
+              nexthop_ifname_add(rib, idl_nexthop->ports[0]->name);
             }
-        }
+          else
+          {
+              memset(&ipv4_dest_addr, 0, sizeof(struct in_addr));
+              memset(&ipv6_dest_addr, 0, sizeof(struct in6_addr));
+              /* Check if ipv4 or ipv6 */
+              if (inet_pton(AF_INET, idl_nexthop->ip_address,
+                            &ipv4_dest_addr) != 1)
+              {
+                   if (inet_pton(AF_INET6, idl_nexthop->ip_address,
+                                 &ipv6_dest_addr) != 1)
+                   {
+                       VLOG_DBG("Invalid next-hop ip %s", idl_nexthop->ip_address);
+                       continue;
+                   }
+                   else
+                   {
+                       VLOG_DBG("Processing %d-next-hop ipv6 %s",
+                                 count, idl_nexthop->ip_address);
+                       log_event("ZEBRA_ROUTE_ADD_NEXTHOP_EVENTS", EV_KV("prefix", "%s",
+                                 route->prefix),EV_KV("nexthop", "%s",
+                                 idl_nexthop->ip_address));
+                       nexthop_ipv6_add(rib, &ipv6_dest_addr);
+                   }
+              }
+              else
+              {
+                  VLOG_DBG("Processing ipv4 %d-next-hop ipv4 %s",
+                             count, idl_nexthop->ip_address);
+                  log_event("ZEBRA_ROUTE_ADD_NEXTHOP_EVENTS", EV_KV("prefix", "%s",
+                            route->prefix),EV_KV("nexthop", "%s",
+                            idl_nexthop->ip_address));
+                  nexthop_ipv4_add(rib, &ipv4_dest_addr, NULL);
+              }
+          }
+      }
     }
 
   /* Distance. */

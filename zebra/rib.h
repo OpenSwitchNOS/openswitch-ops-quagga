@@ -412,6 +412,11 @@ extern struct nexthop *nexthop_ipv4_ifindex_add (struct rib *,
                                                  struct in_addr *,
                                                  struct in_addr *,
                                                  unsigned int);
+#ifdef ENABLE_OVSDB
+extern struct nexthop *
+nexthop_ipv6_ifindex_add (struct rib *rib, struct in6_addr *ipv6,
+                          unsigned int ifindex);
+#endif
 extern int nexthop_has_fib_child(struct nexthop *);
 extern void rib_lookup_and_dump (struct prefix_ipv4 *);
 extern void rib_lookup_and_pushup (struct prefix_ipv4 *);

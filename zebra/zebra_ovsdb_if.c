@@ -85,6 +85,15 @@ static struct hash *zebra_route_hash;
 /* List of delete route */
 struct list *zebra_route_del_list;
 
+struct nexthop *
+nexthop_ipv6_ifindex_add (struct rib *rib, struct in6_addr *ipv6,
+                         unsigned int ifindex);
+
+struct nexthop *
+nexthop_ipv4_ifindex_add (struct rib *rib, struct in_addr *ipv4,
+                          struct in_addr *src, unsigned int ifindex);
+
+
 static int zebra_ovspoll_enqueue (zebra_ovsdb_t *zovs_g);
 static int zovs_read_cb (struct thread *thread);
 int zebra_add_route (bool is_ipv6, struct prefix *p, int type, safi_t safi,
@@ -4521,6 +4530,7 @@ zebra_update_selected_route_nexthops_to_db (struct route_node *rn,
                 /*
                  * Case when the next-hop is of IP address.
                  */
+                case NEXTHOP_TYPE_IPV4_IFINDEX:
                 case NEXTHOP_TYPE_IPV4:
                   if (inet_ntop(AF_INET, &nexthop->gate.ipv4,
                                 nexthop_str, sizeof(nexthop_str)))
@@ -4750,6 +4760,7 @@ zebra_add_route (bool is_ipv6, struct prefix *p, int type, safi_t safi,
   struct ovsrec_nexthop *idl_nexthop;
   struct in_addr ipv4_dest_addr;
   struct in6_addr ipv6_dest_addr;
+  unsigned int ifindex = 0;
   int count;
   int rc = 1;
 
@@ -4774,41 +4785,72 @@ zebra_add_route (bool is_ipv6, struct prefix *p, int type, safi_t safi,
              (idl_nexthop->selected[0] != true) ) )
         continue;
 
-      /* If next hop is port */
-      if(idl_nexthop->ports != NULL)
-        {
-          VLOG_DBG("Processing %d-next-hop %s", count,
-                     idl_nexthop->ports[0]->name);
-          nexthop_ifname_add(rib, idl_nexthop->ports[0]->name);
-        }
-      else
-        {
+      if (idl_nexthop->ports != NULL &&
+          idl_nexthop->ip_address != NULL) {
           memset(&ipv4_dest_addr, 0, sizeof(struct in_addr));
           memset(&ipv6_dest_addr, 0, sizeof(struct in6_addr));
-          /* Check if ipv4 or ipv6 */
+
+          ifindex = ifname2ifindex(idl_nexthop->ports[0]->name);
           if (inet_pton(AF_INET, idl_nexthop->ip_address,
                         &ipv4_dest_addr) != 1)
-	    {
+          {
                if (inet_pton(AF_INET6, idl_nexthop->ip_address,
                              &ipv6_dest_addr) != 1)
-	         {
+               {
                    VLOG_DBG("Invalid next-hop ip %s",idl_nexthop->ip_address);
                    continue;
-                 }
-	       else
-	         {
+               }
+               else
+               {
                    VLOG_DBG("Processing %d-next-hop ipv6 %s",
                              count, idl_nexthop->ip_address);
-                   nexthop_ipv6_add(rib, &ipv6_dest_addr);
-                 }
-            }
-	  else
-	    {
+                   nexthop_ipv6_ifindex_add(rib,&ipv6_dest_addr,ifindex);
+               }
+          }
+          else
+          {
               VLOG_DBG("Processing ipv4 %d-next-hop ipv4 %s",
                          count, idl_nexthop->ip_address);
-              nexthop_ipv4_add(rib, &ipv4_dest_addr, NULL);
+              nexthop_ipv4_ifindex_add(rib,&ipv4_dest_addr,NULL,ifindex);
+          }
+      }
+      else {
+          /* If next hop is port */
+          if(idl_nexthop->ports != NULL)
+            {
+              VLOG_DBG("Processing %d-next-hop %s", count,
+                         idl_nexthop->ports[0]->name);
+              nexthop_ifname_add(rib, idl_nexthop->ports[0]->name);
             }
-        }
+          else
+          {
+              memset(&ipv4_dest_addr, 0, sizeof(struct in_addr));
+              memset(&ipv6_dest_addr, 0, sizeof(struct in6_addr));
+              /* Check if ipv4 or ipv6 */
+              if (inet_pton(AF_INET, idl_nexthop->ip_address,
+                            &ipv4_dest_addr) != 1)
+              {
+                   if (inet_pton(AF_INET6, idl_nexthop->ip_address,
+                                 &ipv6_dest_addr) != 1)
+                   {
+                       VLOG_DBG("Invalid next-hop ip %s",idl_nexthop->ip_address);
+                       continue;
+                   }
+                   else
+                   {
+                       VLOG_DBG("Processing %d-next-hop ipv6 %s",
+                                 count, idl_nexthop->ip_address);
+                       nexthop_ipv6_add(rib, &ipv6_dest_addr);
+                   }
+              }
+              else
+              {
+                  VLOG_DBG("Processing ipv4 %d-next-hop ipv4 %s",
+                             count, idl_nexthop->ip_address);
+                  nexthop_ipv4_add(rib, &ipv4_dest_addr, NULL);
+              }
+          }
+      }
     }
 
   /* Distance. */

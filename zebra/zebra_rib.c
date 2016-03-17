@@ -404,7 +404,11 @@ nexthop_ipv6_ifname_add (struct rib *rib, struct in6_addr *ipv6,
   return nexthop;
 }
 
+#ifdef ENABLE_OVSDB
+struct nexthop *
+#else
 static struct nexthop *
+#endif
 nexthop_ipv6_ifindex_add (struct rib *rib, struct in6_addr *ipv6,
 			  unsigned int ifindex)
 {

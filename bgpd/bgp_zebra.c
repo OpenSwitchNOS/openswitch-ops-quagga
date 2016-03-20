@@ -67,8 +67,15 @@ bgp_router_id_update (int command, struct zclient *zclient, zebra_size_t length)
 
   for (ALL_LIST_ELEMENTS (bm->bgp, node, nnode, bgp))
     {
-      if (!bgp->router_id_static.s_addr)
+      if (!bgp->router_id_static.s_addr) {
         bgp_router_id_set (bgp, &router_id.u.prefix4);
+       /* Update router_id_zebra in the database, if there is no router-id
+        * configured in the database */
+#ifdef ENABLE_OVSDB
+        update_bgp_router_id_in_ovsdb((int64_t)bgp->as,
+                                       inet_ntoa(router_id_zebra));
+#endif
+      }
     }
 
   return 0;

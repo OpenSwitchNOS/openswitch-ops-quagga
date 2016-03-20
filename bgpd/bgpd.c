@@ -10,6 +10,7 @@ Free Software Foundation; either version 2, or (at your option) any
 later version.
 
 GNU Zebra is distributed in the hope that it will be useful, but
+export ftp_proxy="https://web-proxy.rose.hpecorp.net:8080"
 WITHOUT ANY WARRANTY; without even the implied warranty of
 MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
 General Public License for more details.
@@ -2124,10 +2125,9 @@ bgp_get (struct bgp **bgp_val, as_t *as, const char *name)
     }
 
   bgp = bgp_create (as, name);
+#ifndef ENABLE_OVSDB
   bgp_router_id_set(bgp, &router_id_zebra);
-#ifdef ENABLE_OVSDB
-  update_bgp_router_id_in_ovsdb((int64_t)bgp->as,inet_ntoa(router_id_zebra));
-#endif
+#endif/* ENABLE_OVSDB */
   *bgp_val = bgp;
 
   /* Create BGP server socket, if first instance.  */

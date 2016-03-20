@@ -1003,10 +1003,14 @@ modify_bgp_router_id_config (struct bgp *bgp_cfg,
     struct in_addr addr;
 
     addr.s_addr = inet_addr(bgp_mod_row->router_id);
-    if (addr.s_addr != 0)
+    if (addr.s_addr != 0) {
+        bgp_cfg->router_id_static = addr;
         return bgp_router_id_set(bgp_cfg, &addr);
-    else
+    }
+    else {
+        bgp_cfg->router_id_static.s_addr = 0;
         return bgp_router_id_unset(bgp_cfg, &addr);
+    }
 }
 
 void

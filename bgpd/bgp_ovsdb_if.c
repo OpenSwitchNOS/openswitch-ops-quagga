@@ -2413,6 +2413,39 @@ bovs_read_cb (struct thread *thread)
     return 1;
 }
 
+/* Callback function to handle write events
+ * In the event of an update to the idl cache, this callback is triggered.
+ * In this event, the changes are processed in the daemon and the cb
+ * functions are re-registered.
+ */
+static int
+bovs_write_cb (struct thread *thread)
+{
+    bgp_ovsdb_t *bovs_g;
+    if (!thread) {
+        VLOG_ERR("NULL thread in write cb function\n");
+        return -1;
+    }
+    bovs_g = THREAD_ARG(thread);
+    if (!bovs_g) {
+        VLOG_ERR("NULL args in write cb function\n");
+        return -1;
+    }
+
+    bovs_g->write_cb_count++;
+
+    bgp_ovs_clear_fds();
+    bgp_ovs_run();
+    bgp_ovs_wait();
+
+    if (0 != bgp_ovspoll_enqueue(bovs_g)) {
+        /* Could not enqueue the events. Retry in 1 sec */
+        thread_add_timer(bovs_g->master, bovs_write_cb, bovs_g, 1);
+    }
+    return 1;
+}
+
+
 /*
  * Add the list of OVS poll fd to the master thread of the daemon
  */
@@ -2427,6 +2460,7 @@ bgp_ovspoll_enqueue (bgp_ovsdb_t *bovs_g)
     /* Populate with all the fds events. */
     HMAP_FOR_EACH(node, hmap_node, &loop->poll_nodes) {
         thread_add_read(bovs_g->master, bovs_read_cb, bovs_g, node->pollfd.fd);
+        thread_add_write(bovs_g->master, bovs_write_cb, bovs_g, node->pollfd.fd);
         /*
          * If we successfully connected to OVS return 0.
          * Else return -1 so that we try to reconnect.
@@ -2441,6 +2475,7 @@ bgp_ovspoll_enqueue (bgp_ovsdb_t *bovs_g)
         /* Convert msec to sec */
         timeout = (timeout + 999)/1000;
         thread_add_timer(bovs_g->master, bovs_read_cb, bovs_g, timeout);
+        thread_add_timer(bovs_g->master, bovs_write_cb, bovs_g, timeout);
     }
 
     return retval;

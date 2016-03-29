@@ -96,7 +96,7 @@ static int system_configured = false;
 static boolean sys_ecmp_status = true;
 boolean exiting = false;
 static int bgp_ovspoll_enqueue (bgp_ovsdb_t *bovs_g);
-static int bovs_read_cb (struct thread *thread);
+static int bovs_cb (struct thread *thread);
 
 /*
  * ovs appctl dump function for this daemon
@@ -2387,7 +2387,7 @@ bgp_ovs_wait (void)
  * functions are re-registered.
  */
 static int
-bovs_read_cb (struct thread *thread)
+bovs_cb (struct thread *thread)
 {
     bgp_ovsdb_t *bovs_g;
     if (!thread) {
@@ -2400,7 +2400,7 @@ bovs_read_cb (struct thread *thread)
         return -1;
     }
 
-    bovs_g->read_cb_count++;
+    //bovs_g->read_cb_count++;
 
     bgp_ovs_clear_fds();
     bgp_ovs_run();
@@ -2408,7 +2408,7 @@ bovs_read_cb (struct thread *thread)
 
     if (0 != bgp_ovspoll_enqueue(bovs_g)) {
         /* Could not enqueue the events. Retry in 1 sec */
-        thread_add_timer(bovs_g->master, bovs_read_cb, bovs_g, 1);
+        thread_add_timer(bovs_g->master, bovs_cb, bovs_g, 1);
     }
     return 1;
 }
@@ -2426,7 +2426,15 @@ bgp_ovspoll_enqueue (bgp_ovsdb_t *bovs_g)
 
     /* Populate with all the fds events. */
     HMAP_FOR_EACH(node, hmap_node, &loop->poll_nodes) {
-        thread_add_read(bovs_g->master, bovs_read_cb, bovs_g, node->pollfd.fd);
+        if(node->pollfd.events == POLLOUT || node->pollfd.events == POLLWRNORM){
+            bovs_g->read_cb_count++;
+            thread_add_read(bovs_g->master, bovs_cb, bovs_g, node->pollfd.fd);
+        }
+        else if(node->pollfd.events == POLLIN || node->pollfd.events == POLLPRI){
+            bovs_g->write_cb_count++;
+            thread_add_write(bovs_g->master, bovs_cb, bovs_g, node->pollfd.fd);
+        }
+
         /*
          * If we successfully connected to OVS return 0.
          * Else return -1 so that we try to reconnect.
@@ -2440,7 +2448,7 @@ bgp_ovspoll_enqueue (bgp_ovsdb_t *bovs_g)
        loop->timeout_when < LLONG_MAX) {
         /* Convert msec to sec */
         timeout = (timeout + 999)/1000;
-        thread_add_timer(bovs_g->master, bovs_read_cb, bovs_g, timeout);
+        thread_add_timer(bovs_g->master, bovs_cb, bovs_g, timeout);
     }
 
     return retval;

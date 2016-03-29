@@ -31,6 +31,7 @@
 #define OSPF_STRING_NULL    "null"
 #define OSPF_TIME_INTERVAL_HELLO_DUE 0
 #define OSPF_TIME_INTERVAL_DEAD_DUE 1
+#define OSPF_DEFAULT_INSTANCE 1
 
 #define OSPF_STAT_NAME_LEN 64
 #define OSPF_MAX_NBR_OPTIONS 7
@@ -67,6 +68,9 @@
 
 #define OSPF_EXT_TYPE_STRING_TYPE1             "ext_type_1"
 #define OSPF_EXT_TYPE_STRING_TYPE2             "ext_type_2"
+
+#define OSPF_DEFAULT_INFO_ORIGINATE            "default_info_originate"
+#define OSPF_DEFAULT_INFO_ORIGINATE_ALWAYS     "always"
 
 #define BOOLEAN_STRING_FALSE                   "false"
 #define BOOLEAN_STRING_TRUE                    "true"

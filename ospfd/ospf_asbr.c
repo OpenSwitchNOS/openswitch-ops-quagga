@@ -111,7 +111,11 @@ ospf_external_info_new (u_char type)
   return new;
 }
 
+#ifdef ENABLE_OVSDB
+void
+#else
 static void
+#endif
 ospf_external_info_free (struct external_info *ei)
 {
   XFREE (MTYPE_OSPF_EXTERNAL_INFO, ei);

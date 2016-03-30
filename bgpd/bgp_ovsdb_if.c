@@ -182,7 +182,7 @@ ovsdb_bgp_router_from_row_to_asn (struct ovsdb_idl *idl,
  */
 static char *
 ovsdb_nbr_from_row_to_peer_name (struct ovsdb_idl *idl,
-    const struct ovsrec_bgp_neighbor *ovs_nbr, int *asn)
+    const struct ovsrec_bgp_neighbor *ovs_nbr, int64_t *asn)
 {
     int i, j;
     const struct ovsrec_vrf *ovs_vrf;
@@ -889,7 +889,7 @@ modify_bgp_redistribute_config(struct ovsdb_idl *idl,struct bgp *bgp_cfg,
 
 void
 insert_bgp_router_config (struct ovsdb_idl *idl,
-    const struct ovsrec_bgp_router *bgp_first, int asn)
+    const struct ovsrec_bgp_router *bgp_first, int64_t asn)
 {
     struct bgp *bgp_cfg;
     int ret_status;
@@ -935,7 +935,7 @@ modify_bgp_log_neighbor_changes_config (struct bgp *bgp_cfg,
 
 void
 modify_bgp_router_config (struct ovsdb_idl *idl,
-    const struct ovsrec_bgp_router *bgp_first, int asn)
+    const struct ovsrec_bgp_router *bgp_first, int64_t asn)
 {
     const struct ovsrec_bgp_router *bgp_mod_row = bgp_first;
     const struct ovsdb_idl_column *column;
@@ -1216,7 +1216,7 @@ bgp_router_read_ovsdb_apply_changes (struct ovsdb_idl *idl)
     const struct ovsrec_bgp_router *ovs_bgp;
     const struct ovsrec_bgp_neighbor *ovs_bgpnbr;
     struct smap_node *node;
-    int asn;
+    int64_t asn;
     char peer[80];
 
     struct bgp *bgp_instance;
@@ -1363,7 +1363,7 @@ delete_bgp_neighbors_and_peer_groups (struct ovsdb_idl *idl)
     const struct ovsrec_vrf *ovs_vrf = NULL;
     const struct ovsrec_bgp_router *ovs_bgp;
     struct smap_node *node;
-    int asn;
+    int64_t asn;
     int i;
     struct bgp *pbgp;
 
@@ -1389,7 +1389,7 @@ delete_bgp_neighbors_and_peer_groups (struct ovsdb_idl *idl)
 static const struct ovsrec_bgp_neighbor *
 get_bgp_neighbor_with_VrfName_BgpRouterAsn_Ipaddr (struct ovsdb_idl *idl,
     char *vrf_name,
-    int asn,
+    int64_t asn,
     const char *ipaddr)
 {
     int i, j;
@@ -2095,7 +2095,7 @@ bgp_nbr_read_ovsdb_apply_changes (struct ovsdb_idl *idl)
     const struct ovsrec_bgp_router *ovs_bgp;
     const struct ovsrec_bgp_neighbor *ovs_nbr;
     struct smap_node *node;
-    int asn;
+    int64_t asn;
     char peer[80];
     int i, j;
     struct bgp *bgp_instance;

@@ -30,6 +30,10 @@
 #include "filter.h"
 #include "log.h"
 
+#ifdef ENABLE_OVSDB
+#include "eventlog.h"
+#endif
+
 #define OSPF_VERSION            2
 
 /* VTY port number. */

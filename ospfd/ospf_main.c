@@ -195,6 +195,7 @@ main (int argc, char **argv)
   int dryrun = 0;
 
 #ifdef ENABLE_OVSDB
+  event_log_init("OSPFv2");
   ospf_ovsdb_init(argc, argv);
 #endif
 

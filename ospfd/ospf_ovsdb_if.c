@@ -2611,7 +2611,7 @@ ovsdb_ospf_remove_interface_from_area (int instance, struct in_addr area_id,
 
 static int
 ovsdb_ospf_add_route_nexthops (const struct ovsdb_idl_txn *txn,
-                   const struct ovsrec_route *ovs_rib, struct ospf_route *or)
+ const struct ovsrec_route *ovs_rib, struct ospf_route *or, char** next_hop_str)
 {
     struct ovsrec_nexthop **nexthop_list = NULL;
     struct ovsrec_nexthop *pnexthop = NULL;
@@ -2623,6 +2623,10 @@ ovsdb_ospf_add_route_nexthops (const struct ovsdb_idl_txn *txn,
     char nexthop_buf[INET_ADDRSTRLEN];
     bool selected = true;
     int n_nexthops = 0, i = 0;
+
+    int len_str = 0;
+    char temp_str [64] = {0};
+    char * pnexthopstr = NULL;
 
     n_nexthops = listcount(or->paths);
     if (!n_nexthops)
@@ -2636,12 +2640,19 @@ ovsdb_ospf_add_route_nexthops (const struct ovsdb_idl_txn *txn,
         VLOG_DBG ("Error in allocation memory");
         return -1;
     }
+
+    pnexthopstr = calloc(n_nexthops+1,sizeof(temp_str));
+
     for (ALL_LIST_ELEMENTS_RO (or->paths, node, path))
     {
+        snprintf(temp_str,99," ");
+        len_str = strlen(temp_str);
         pnexthop = ovsrec_nexthop_insert(txn);
         if (path->nexthop.s_addr != INADDR_ANY)
         {
             inet_ntop(AF_INET,&path->nexthop,nexthop_buf,sizeof(nexthop_buf));
+            snprintf(temp_str,99," %s ",nexthop_buf);
+            len_str = strlen(temp_str);
             ovsrec_nexthop_set_ip_address(pnexthop, nexthop_buf);
         }
         if (path->ifindex != 0)
@@ -2649,6 +2660,9 @@ ovsdb_ospf_add_route_nexthops (const struct ovsdb_idl_txn *txn,
             ifname = ifindex2ifname(path->ifindex);
             if (ifname)
             {
+                snprintf(temp_str + len_str,99 - len_str,
+                         "interface:%s",ifname);
+                len_str = strlen(temp_str);
                 ovs_port = find_port_by_name(ifname);
                 if (ovs_port)
                 {
@@ -2656,10 +2670,18 @@ ovsdb_ospf_add_route_nexthops (const struct ovsdb_idl_txn *txn,
                 }
             }
         }
+        strcat (temp_str,",");
+        if (pnexthopstr)
+           strncat (pnexthopstr, temp_str, strlen(temp_str));
+
         ovsrec_nexthop_set_type(pnexthop, saf_str);
         ovsrec_nexthop_set_selected(pnexthop, &selected, 1);
         nexthop_list[i++] = (struct ovsrec_nexthop*) pnexthop;
     }
+    if (pnexthopstr)
+      *next_hop_str = pnexthopstr;
+    else
+      *next_hop_str = strdup(" ");
     ovsrec_route_set_nexthops(ovs_rib, nexthop_list, n_nexthops);
     free(nexthop_list);
     return 0;
@@ -2679,6 +2701,8 @@ ovsdb_ospf_add_rib_entry (struct prefix_ipv4 *p, struct ospf_route *or)
     char* addr_family = OVSREC_ROUTE_ADDRESS_FAMILY_IPV4;
     char* from = OVSREC_ROUTE_FROM_OSPF;
     char prefix_str[OSPF_MAX_PREFIX_LEN] = {0};
+
+    char * next_hop_str =NULL;
 
     /* OPS_TODO : Will change when getting default VRF */
     ovs_vrf = ovsrec_vrf_first(idl);
@@ -2725,7 +2749,15 @@ ovsdb_ospf_add_rib_entry (struct prefix_ipv4 *p, struct ospf_route *or)
     }
     ovsrec_route_set_prefix(ovs_rib,prefix_str);
     /* Set Nexthops for the route */
-    (void)ovsdb_ospf_add_route_nexthops(txn,ovs_rib,or);
+    (void)ovsdb_ospf_add_route_nexthops(txn,ovs_rib,or,&next_hop_str);
+    /* Event logging */
+    log_event("OSPFv2_ROUTE",
+       EV_KV("event","OSPFv2 ROUTE ADD"),
+       EV_KV("destination","%s",prefix_str),
+       EV_KV("nexthops","nexthop:%s distance:%d metric:%d",
+              next_hop_str,distance,metric));
+    if (next_hop_str)
+      free(next_hop_str);
 
     status = ovsdb_idl_txn_commit_block(txn);
     if (TXN_SUCCESS != status &&
@@ -2764,6 +2796,7 @@ ovsdb_ospf_delete_rib_entry (struct prefix_ipv4 *p,
     int i = 0;
 
     prefix2str(p,pr,sizeof (pr));
+
     node = shash_find(&all_routes,pr);
     if (!node)
     {
@@ -2776,6 +2809,11 @@ ovsdb_ospf_delete_rib_entry (struct prefix_ipv4 *p,
         VLOG_DBG ("No route data found in local hash");
         return;
     }
+    /* Event logging */
+    log_event("OSPFv2_ROUTE",
+              EV_KV("event","OSPFv2 ROUTE DELETE"),
+              EV_KV("destination","%s",pr),
+              EV_KV("nexthops",""));
     txn = ovsdb_idl_txn_create(idl);
     if (!txn)
     {
@@ -2800,6 +2838,7 @@ ovsdb_ospf_delete_rib_entry (struct prefix_ipv4 *p,
         shash_delete(&all_routes,node);
     }
     ovsdb_idl_txn_destroy(txn);
+
 }
 
 int

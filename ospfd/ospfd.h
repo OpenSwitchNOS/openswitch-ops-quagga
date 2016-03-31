@@ -29,6 +29,7 @@
 
 #include "filter.h"
 #include "log.h"
+#include "eventlog.h"
 
 #define OSPF_VERSION            2
 

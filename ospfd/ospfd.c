@@ -116,6 +116,11 @@ ospf_router_id_update (struct ospf *ospf)
 
   if (!IPV4_ADDR_SAME (&router_id_old, &router_id))
     {
+#ifdef ENABLE_OVSDB
+      log_event("OSPFv2_ROUTER_ID",
+                EV_KV("old","%s",inet_ntoa(router_id_old)),
+                EV_KV("new","%s",inet_ntoa(router_id)));
+#endif
       for (ALL_LIST_ELEMENTS_RO (ospf->oiflist, node, oi))
       {
         /* Update self-neighbor's router_id. */

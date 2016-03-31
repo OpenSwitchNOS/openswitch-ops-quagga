@@ -618,16 +618,25 @@ nsm_notice_state_change (struct ospf_neighbor *nbr, int next_state, int event)
                LOOKUP (ospf_nsm_state_msg, nbr->state),
                LOOKUP (ospf_nsm_state_msg, next_state),
                ospf_nsm_event_str [event]);
-
+  /* TODO: This function call must be removed once the CLI is in place*/
+  SET_FLAG(nbr->oi->ospf->config, OSPF_LOG_ADJACENCY_CHANGES);
   /* Optionally notify about adjacency changes */
   if (CHECK_FLAG(nbr->oi->ospf->config, OSPF_LOG_ADJACENCY_CHANGES) &&
       (CHECK_FLAG(nbr->oi->ospf->config, OSPF_LOG_ADJACENCY_DETAIL) ||
        (next_state == NSM_Full) || (next_state < nbr->state)))
+  {
     zlog_notice("AdjChg: Nbr %s on %s: %s -> %s (%s)",
                 inet_ntoa (nbr->router_id), IF_NAME (nbr->oi),
                 LOOKUP (ospf_nsm_state_msg, nbr->state),
                 LOOKUP (ospf_nsm_state_msg, next_state),
                 ospf_nsm_event_str [event]);
+    log_event("OSPF_OVSDB_NSM_STATE",
+              EV_KV("routerid","%s",inet_ntoa (nbr->router_id)),
+              EV_KV("oi","%s", IF_NAME (nbr->oi)),
+              EV_KV("state","%s", LOOKUP (ospf_nsm_state_msg, nbr->state)),
+              EV_KV("next_state","%s", LOOKUP (ospf_nsm_state_msg, next_state)),
+              EV_KV("event","%s", ospf_nsm_event_str [event]));
+  }
 
   /* Advance in NSM */
   if (next_state > nbr->state)

@@ -56,6 +56,7 @@
 #include "ospfd/ospf_ovsdb_if.h"
 #include "ospfd/ospf_interface.h"
 
+
 COVERAGE_DEFINE(ospf_ovsdb_cnt);
 VLOG_DEFINE_THIS_MODULE(ospf_ovsdb_if);
 
@@ -600,6 +601,7 @@ void ospf_ovsdb_init (int argc, char *argv[])
    VLOG_INFO_ONCE("%s (Halon Ospfd Daemon) started", program_name);
 
    glob_ospf_ovs.enabled = 1;
+   log_event("OSPF_OVSDB_INIT", EV_KV("pid","%d",getpid()));
    return;
 }
 

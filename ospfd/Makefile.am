@@ -41,7 +41,7 @@ endif
 if ENABLE_OVSDB
 ops_ospfd_SOURCES = ospf_main.c
 ops_ospfd_LDADD = libospf.la ../lib/libzebra.la @LIBCAP@
-ops_ospfd_LDADD += -lovscommon -lovsdb -lpthread
+ops_ospfd_LDADD += -lovscommon -lovsdb -lpthread -lsupportability
 else
 ospfd_SOURCES = ospf_main.c
 ospfd_LDADD = libospf.la ../lib/libzebra.la @LIBCAP@

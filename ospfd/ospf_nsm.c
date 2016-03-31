@@ -629,6 +629,16 @@ nsm_notice_state_change (struct ospf_neighbor *nbr, int next_state, int event)
                 LOOKUP (ospf_nsm_state_msg, next_state),
                 ospf_nsm_event_str [event]);
 
+#ifdef ENABLE_OVSDB
+  if ((next_state == NSM_Full) || (next_state < nbr->state))
+    log_event("OSPFv2_NSM_STATE",
+              EV_KV("router-id","%s",inet_ntoa (nbr->router_id)),
+              EV_KV("ospf-interface","%s", IF_NAME (nbr->oi)),
+              EV_KV("state","%s", LOOKUP (ospf_nsm_state_msg, nbr->state)),
+              EV_KV("next_state","%s", LOOKUP (ospf_nsm_state_msg, next_state)),
+              EV_KV("event","%s", ospf_nsm_event_str [event]));
+#endif
+
   /* Advance in NSM */
   if (next_state > nbr->state)
     nbr->ts_last_progress = recent_relative_time ();

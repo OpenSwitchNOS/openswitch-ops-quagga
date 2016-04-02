@@ -60,8 +60,8 @@
 #include "ospfd/ospf_interface.h"
 #include "ospfd/ospf_route.h"
 #include "ospfd/ospf_zebra.h"
-#include "ospfd/ospf_ovsdb_if.h"
 #include "ospfd/ospf_asbr.h"
+#include "ospfd/ospf_ovsdb_if.h"
 #include "ospfd/ospf_dump.h"
 
 #define NEXTHOP_STR_SIZE 64
@@ -3592,6 +3592,325 @@ insert_ospf_router_instance(struct ovsdb_idl *idl, struct ovsrec_ospf_router* ov
         return;
     }
 }
+int
+ospf_update_redistribute_nh (const struct ovsrec_route* route_row,
+                struct ospf *ospf, struct in_addr *fwd,unsigned int *nh_ifindex)
+{
+    const struct ovsrec_port* nh_port = NULL;
+    struct in_addr nh_addr;
+    struct listnode *node;
+    struct ospf_interface *oi;
+    struct prefix nh;
+    int nh_index = 0,inactive_nh = 0;
+    bool nh_ipv4_found = false;
+
+    for (nh_index = 0 ; nh_index < route_row->n_nexthops;nh_index++)
+    {
+      /* FIXME : ISSUE with connected routes, even if installed the
+         selected column is always NULL. It shows as selected in `show rib`
+         because NULL there means selected */
+      if ((NULL == route_row->nexthops[nh_index]->selected)||
+        (route_row->nexthops[nh_index]->n_selected &&
+         route_row->nexthops[nh_index]->selected[0])) {
+          if (!nh_port && route_row->nexthops[nh_index]->n_ports)
+               nh_port = route_row->nexthops[nh_index]->ports[0];
+          if (route_row->nexthops[nh_index]->ip_address ) {
+                inet_aton(route_row->nexthops[nh_index]->ip_address,&nh_addr);
+                nh.family = AF_INET;
+                nh.u.prefix4 = nh_addr;
+                nh.prefixlen = IPV4_MAX_BITLEN;
+                for (ALL_LIST_ELEMENTS_RO (ospf->oiflist, node, oi))
+                {
+                   if (if_is_operative (oi->ifp))
+                      if (oi->address->family == AF_INET)
+                         if (prefix_match (oi->address, &nh)) {
+                            fwd->s_addr= nh_addr.s_addr;
+                            *nh_ifindex = oi->ifp->ifindex;
+                            nh_ipv4_found = true;
+                            break;
+                         }
+                }
+                if (nh_ipv4_found)
+                   break;
+          }
+      }
+      else
+        inactive_nh++; //If no nexthop is active shouldn't redistribute the route
+    }
+    if (!nh_ipv4_found)
+    {
+       if (inactive_nh == route_row->n_nexthops)
+         return 1;
+       else {
+         fwd->s_addr = 0;
+         if (nh_port)
+           *nh_ifindex = ifname2ifindex(nh_port->name);
+         else
+           *nh_ifindex = 0;
+       }
+    }
+    return 0;
+}
+
+int
+ops_ospf_external_lsa_generate (struct ospf *ospf,
+                     struct external_info *ei)
+{
+    struct ospf_lsa *current;
+
+    if (ei) {
+       current = ospf_external_info_find_lsa (ospf, &ei->p);
+       if (!current)
+          ospf_external_lsa_originate (ospf, ei);
+       else if (IS_LSA_MAXAGE (current))
+          ospf_external_lsa_refresh (ospf, current,
+                        ei, LSA_REFRESH_FORCE);
+       else
+          VLOG_WARN("%s already exists",
+                     inet_ntoa (ei->p.prefix));
+    }
+    else {
+       VLOG_ERR ("No external info present");
+       return 1;
+    }
+    return 0;
+}
+
+static unsigned char
+route_from2type(const char* from)
+{
+    if (!strcmp(from,OVSREC_ROUTE_FROM_CONNECTED))
+        return ZEBRA_ROUTE_CONNECT;
+    else if (!strcmp(from,OVSREC_ROUTE_FROM_STATIC))
+        return ZEBRA_ROUTE_STATIC;
+    else if (!strcmp(from,OVSREC_ROUTE_FROM_BGP))
+        return ZEBRA_ROUTE_BGP;
+
+    return ZEBRA_ROUTE_MAX;
+}
+
+static unsigned char
+redistribute_str_to_type(const char* redistribute_str)
+{
+    if (!redistribute_str)
+        return ZEBRA_ROUTE_MAX;
+
+    if (!strcmp(redistribute_str,OVSREC_OSPF_ROUTER_REDISTRIBUTE_CONNECTED))
+        return ZEBRA_ROUTE_CONNECT;
+    if (!strcmp(redistribute_str,OVSREC_OSPF_ROUTER_REDISTRIBUTE_STATIC))
+        return ZEBRA_ROUTE_STATIC;
+    if (!strcmp(redistribute_str,OVSREC_OSPF_ROUTER_REDISTRIBUTE_BGP))
+        return ZEBRA_ROUTE_BGP;
+
+    return ZEBRA_ROUTE_MAX;
+}
+
+int
+ops_ospf_redistribute_check (struct ospf* ospf,
+            u_char* set_flag,u_char* delete_flag,u_char type)
+{
+    if(!redist[type]) {
+         ospf->redistribute++;
+         *set_flag = 1;
+         *delete_flag = 1;
+         ospf->dmetric[type].type = -1;
+         ospf->dmetric[type].value = -1;
+         redist[type] = 1;
+         ospf_asbr_status_update (ospf, ospf->redistribute);
+    }
+    else
+         *delete_flag = 1;
+
+    return 0;
+}
+
+int
+ops_ospf_redistribute_set (const struct ovsrec_route* route_row,
+                    struct ospf* ospf, u_char*redist_type_set,u_char type)
+{
+    struct prefix_ipv4 rt_prefix_ipv4;
+    struct prefix rt_prefix;
+    struct external_info *ei;
+    struct in_addr fwd;
+    unsigned int nh_ifindex =0;
+
+    if (!redist_type_set[type])
+        return 1;
+
+    str2prefix(route_row->prefix,&rt_prefix);
+    if(ospf_update_redistribute_nh(route_row,ospf, &fwd,&nh_ifindex)) {
+        VLOG_DBG ("No active nexthop");
+        return 1;
+    }
+    rt_prefix_ipv4.family = AF_INET;
+    rt_prefix_ipv4.prefix = rt_prefix.u.prefix4;
+    rt_prefix_ipv4.prefixlen = rt_prefix.prefixlen;
+    ei = ospf_external_info_add (type,rt_prefix_ipv4,
+                         nh_ifindex, fwd);
+    if (ospf->router_id.s_addr == 0)
+         /* Set flags to generate AS-external-LSA originate event
+         for each redistributed protocols later. */
+         ospf->external_origin |= (1 << type);
+    else {
+           if(ops_ospf_external_lsa_generate(ospf,ei))
+              return 1;
+    }
+    return 0;
+}
+
+int
+ops_ospf_redistribute_default_set(struct ospf* ospf)
+{
+    struct ovsrec_route* route_mod_row = NULL;
+
+    if (ospf->router_id.s_addr == 0)
+        ospf->external_origin |= (1 << DEFAULT_ROUTE);
+    else {
+        if (ospf->default_originate != DEFAULT_ORIGINATE_ALWAYS)
+        {
+           OVSREC_ROUTE_FOR_EACH(route_mod_row,idl) {
+              struct prefix p;
+              struct prefix_ipv4 p_ipv4;
+              if (route_mod_row->address_family &&
+                  !strcmp(route_mod_row->address_family,OVSREC_ROUTE_ADDRESS_FAMILY_IPV6))
+                   continue;
+
+              str2prefix(route_mod_row->prefix,&p);
+              str2prefix_ipv4(route_mod_row->prefix,&p_ipv4);
+              if(is_prefix_default(&p_ipv4)) {
+                 /* Only is route is selected */
+                 if (route_mod_row->n_selected && route_mod_row->selected[0]) {
+                       ospf_external_info_add(DEFAULT_ROUTE,p_ipv4,0,p_ipv4.prefix);
+                       ospf_external_lsa_refresh_default (ospf);
+                       break;
+                 }
+              }
+           }
+        }
+        else
+           thread_add_timer (master, ospf_default_originate_timer, ospf, 1);
+    }
+    return 0;
+}
+
+static int
+modify_ospf_redistribute_default_config(const struct ovsrec_ospf_router* ovs_ospf,
+                                                                   struct ospf* ospf)
+{
+    bool redist_def = false,redist_def_always = false;
+
+    redist_def = smap_get_bool(&(ovs_ospf->default_information),
+                    OSPF_DEFAULT_INFO_ORIGINATE,BOOLEAN_STRING_FALSE);
+    redist_def_always = smap_get_bool(&(ovs_ospf->default_information),
+                    OSPF_DEFAULT_INFO_ORIGINATE_ALWAYS,BOOLEAN_STRING_FALSE);
+    if (!redist_default && redist_def) {
+        ospf->dmetric[DEFAULT_ROUTE].type = -1;
+        ospf->dmetric[DEFAULT_ROUTE].value = -1;
+        if (redist_def_always)
+            ospf->default_originate = DEFAULT_ORIGINATE_ALWAYS;
+        else
+            ospf->default_originate = DEFAULT_ORIGINATE_ZEBRA;
+
+            ospf_asbr_status_update (ospf, ++ospf->redistribute);
+            redist_default = 1;
+            ops_ospf_redistribute_default_set(ospf);
+    }
+    else if (redist_default && redist_def_always &&
+        (ospf->default_originate != DEFAULT_ORIGINATE_ALWAYS))
+    {
+        ospf->default_originate = DEFAULT_ORIGINATE_ALWAYS;
+        if (EXTERNAL_INFO (DEFAULT_ROUTE) == NULL)
+            thread_add_timer (master, ospf_default_originate_timer, ospf, 1);
+        else
+            ospf_external_lsa_refresh_default (ospf);
+    }
+    //OPS_TODO : Handle case when always flag is cleared but meanwhile a default route has come to route table
+    else if (redist_default && !redist_def)
+    {
+        struct prefix_ipv4 p;
+
+        p.family = AF_INET;
+        p.prefix.s_addr = 0;
+        p.prefixlen = 0;
+        ospf_external_lsa_flush (ospf, DEFAULT_ROUTE, &p, 0);
+        if (EXTERNAL_INFO (DEFAULT_ROUTE)) {
+            ospf_external_info_delete (DEFAULT_ROUTE, p);
+            route_table_finish (EXTERNAL_INFO (DEFAULT_ROUTE));
+            EXTERNAL_INFO (DEFAULT_ROUTE) = NULL;
+        }
+        ospf->default_originate = DEFAULT_ORIGINATE_NONE;
+        ospf_asbr_status_update (ospf, --ospf->redistribute);
+        redist_default = 0;
+    }
+    return 0;
+}
+
+static int
+modify_ospf_redistribute_config (struct ospf *ospf_instance,
+                                    const struct ovsrec_ospf_router* ovs_ospf)
+{
+    const struct ovsrec_route *route_mod_row = NULL;
+    int i = 0;
+
+    do {
+        u_char is_redist_set[ZEBRA_ROUTE_MAX] = {0},is_redist_withdraw[ZEBRA_ROUTE_MAX] = {0};
+        int type = ZEBRA_ROUTE_MAX;
+        for (i = 0 ; i < ovs_ospf->n_redistribute ; i++) {
+            type = redistribute_str_to_type(ovs_ospf->redistribute[i]);
+            if (ZEBRA_ROUTE_MAX == type)
+                continue;
+            (void)ops_ospf_redistribute_check (ospf_instance,
+                             &is_redist_set[type],&is_redist_withdraw[type],type);
+        }
+
+        if (!is_redist_withdraw[ZEBRA_ROUTE_CONNECT] && redist[ZEBRA_ROUTE_CONNECT])
+        {
+            ospf_redistribute_withdraw (ospf_instance, ZEBRA_ROUTE_CONNECT);
+            ospf_asbr_status_update (ospf_instance, --ospf_instance->redistribute);
+            redist[ZEBRA_ROUTE_CONNECT] = 0;
+        }
+        if (!is_redist_withdraw[ZEBRA_ROUTE_STATIC] && redist[ZEBRA_ROUTE_STATIC])
+        {
+            ospf_redistribute_withdraw (ospf_instance, ZEBRA_ROUTE_STATIC);
+            ospf_asbr_status_update (ospf_instance, --ospf_instance->redistribute);
+            redist[ZEBRA_ROUTE_STATIC] = 0;
+        }
+        if (!is_redist_withdraw[ZEBRA_ROUTE_BGP] && redist[ZEBRA_ROUTE_BGP])
+        {
+            ospf_redistribute_withdraw (ospf_instance, ZEBRA_ROUTE_BGP);
+            ospf_asbr_status_update (ospf_instance, --ospf_instance->redistribute);
+            redist[ZEBRA_ROUTE_BGP] = 0;
+        }
+
+        if (0 == ospf_instance->redistribute ||
+            (!is_redist_set[ZEBRA_ROUTE_CONNECT] &&
+             !is_redist_set[ZEBRA_ROUTE_STATIC] &&
+             !is_redist_set[ZEBRA_ROUTE_STATIC]))
+            break;
+
+        OVSREC_ROUTE_FOR_EACH(route_mod_row,idl) {
+            struct prefix_ipv4 p_temp;
+            u_char rt_type = ZEBRA_ROUTE_MAX;
+            if ((route_mod_row->address_family &&
+                !strcmp(route_mod_row->address_family,OVSREC_ROUTE_ADDRESS_FAMILY_IPV6))||
+                !strcmp (route_mod_row->from,OVSREC_ROUTE_FROM_OSPF) ||
+                (route_mod_row->n_selected &&
+                (false == route_mod_row->selected[0])))
+                 continue;
+            rt_type = route_from2type(route_mod_row->from);
+            if (ZEBRA_ROUTE_MAX == rt_type)
+                continue;
+            str2prefix_ipv4(route_mod_row->prefix,&p_temp);
+            if (is_prefix_default(&p_temp))
+                continue;
+            if (ops_ospf_redistribute_set(route_mod_row,ospf_instance,is_redist_set,rt_type)) {
+                VLOG_WARN ("Unable to redistribute routes");
+                continue;
+            }
+        }
+    }while(0);
+    return 0;
+}
 
 void
 modify_ospf_router_instance(struct ovsdb_idl *idl,
@@ -3599,20 +3918,9 @@ modify_ospf_router_instance(struct ovsdb_idl *idl,
 {
     const struct ovsrec_route *route_mod_row = NULL;
     const struct ovsdb_idl_column *column = NULL;
-    const struct ovsrec_port* nh_port = NULL;
-    struct prefix rt_prefix;
     struct ospf *ospf_instance;
-    struct in_addr fwd;
-    unsigned int nh_ifindex =0;
-    struct prefix nh;
-    struct prefix_ipv4 rt_prefix_ipv4;
-    struct listnode *node;
-    struct ospf_interface *oi;
-    struct external_info *ei;
-    struct in_addr nh_addr;
-    bool nh_ipv4_found = false;
     int ret_status = -1;
-    int i = 0,nh_index = 0;
+    int i = 0;
 
     ospf_instance = ospf_lookup_by_instance(instance_number);
     if (!ospf_instance)
@@ -3683,354 +3991,16 @@ modify_ospf_router_instance(struct ovsdb_idl *idl,
         VLOG_DBG("OSPF Admin distance not set");
 
     if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_ospf_router_col_redistribute, idl_seqno)) {
-        do {
-            int is_connected = 0, is_static = 0, is_bgp = 0;
-            /* For checking if redistribution is ceased */
-            int is_redist_connect = 0, is_redist_static = 0, is_redist_bgp =0;
-            for (i = 0 ; i < ovs_ospf->n_redistribute ; i++) {
-                if(!redist[ZEBRA_ROUTE_CONNECT] &&
-                    !strcmp(ovs_ospf->redistribute[i],OVSREC_OSPF_ROUTER_REDISTRIBUTE_CONNECTED)) {
-                    ospf_instance->redistribute++;
-                    is_connected = 1;
-                    is_redist_connect = 1;
-                    ospf_instance->dmetric[ZEBRA_ROUTE_CONNECT].type = -1;
-                    ospf_instance->dmetric[ZEBRA_ROUTE_CONNECT].value = -1;
-                    redist[ZEBRA_ROUTE_CONNECT] = 1;
-                    ospf_asbr_status_update (ospf_instance, ospf_instance->redistribute);
-                    continue;
-                 }
-                else if (!strcmp(ovs_ospf->redistribute[i],OVSREC_OSPF_ROUTER_REDISTRIBUTE_CONNECTED))
-                    is_redist_connect = 1;
-
-                if(!redist[ZEBRA_ROUTE_STATIC] &&
-                    !strcmp(ovs_ospf->redistribute[i],OVSREC_OSPF_ROUTER_REDISTRIBUTE_STATIC)) {
-                    ospf_instance->redistribute++;
-                    is_static = 1;
-                    is_redist_static = 1;
-                    ospf_instance->dmetric[ZEBRA_ROUTE_STATIC].type = -1;
-                    ospf_instance->dmetric[ZEBRA_ROUTE_STATIC].value = -1;
-                    redist[ZEBRA_ROUTE_STATIC] = 1;
-                    ospf_asbr_status_update (ospf_instance, ospf_instance->redistribute);
-                    continue;
-                }
-                else if (!strcmp(ovs_ospf->redistribute[i],OVSREC_OSPF_ROUTER_REDISTRIBUTE_STATIC))
-                    is_redist_static = 1;
-
-                if(!redist[ZEBRA_ROUTE_BGP] &&
-                    !strcmp(ovs_ospf->redistribute[i],OVSREC_OSPF_ROUTER_REDISTRIBUTE_BGP)) {
-                    ospf_instance->redistribute++;
-                    is_bgp = 1;
-                    is_redist_bgp = 1;
-                    ospf_instance->dmetric[ZEBRA_ROUTE_BGP].type = -1;
-                    ospf_instance->dmetric[ZEBRA_ROUTE_BGP].value = -1;
-                    redist[ZEBRA_ROUTE_BGP] = 1;
-                    ospf_asbr_status_update (ospf_instance, ospf_instance->redistribute);
-                    continue;
-                }
-                else if (!strcmp(ovs_ospf->redistribute[i],OVSREC_OSPF_ROUTER_REDISTRIBUTE_BGP))
-                    is_redist_bgp = 1;
-            }
-
-            if (!is_redist_connect && redist[ZEBRA_ROUTE_CONNECT])
-            {
-                ospf_redistribute_withdraw (ospf_instance, ZEBRA_ROUTE_CONNECT);
-                ospf_asbr_status_update (ospf_instance, --ospf_instance->redistribute);
-                redist[ZEBRA_ROUTE_CONNECT] = 0;
-            }
-            if (!is_redist_static && redist[ZEBRA_ROUTE_STATIC])
-            {
-                ospf_redistribute_withdraw (ospf_instance, ZEBRA_ROUTE_STATIC);
-                ospf_asbr_status_update (ospf_instance, --ospf_instance->redistribute);
-                redist[ZEBRA_ROUTE_STATIC] = 0;
-            }
-            if (!is_redist_bgp && redist[ZEBRA_ROUTE_BGP])
-            {
-                ospf_redistribute_withdraw (ospf_instance, ZEBRA_ROUTE_BGP);
-                ospf_asbr_status_update (ospf_instance, --ospf_instance->redistribute);
-                redist[ZEBRA_ROUTE_BGP] = 0;
-            }
-
-            if (0 == ospf_instance->redistribute ||
-                (!is_connected && !is_static && !is_bgp))
-                break;
-
-            OVSREC_ROUTE_FOR_EACH(route_mod_row,idl) {
-                struct prefix_ipv4 p_temp;
-                nh_ipv4_found = false;
-                rt_prefix_ipv4.family = AF_INET;
-                if (route_mod_row->address_family &&
-                    !strcmp(route_mod_row->address_family,OVSREC_ROUTE_ADDRESS_FAMILY_IPV6))
-                     continue;
-                str2prefix_ipv4(route_mod_row->prefix,&p_temp);
-                if (is_prefix_default(&p_temp))
-                    continue;
-
-                if (is_connected && (route_mod_row->from &&
-                     !strcmp(route_mod_row->from,OVSREC_ROUTE_FROM_CONNECTED))) {
-                       str2prefix(route_mod_row->prefix,&rt_prefix);
-                       nh_port = NULL;
-                       for (nh_index = 0 ; nh_index < route_mod_row->n_nexthops;nh_index++)
-                       {
-                           if (!nh_port && route_mod_row->nexthops[nh_index]->n_ports)
-                            nh_port = route_mod_row->nexthops[nh_index]->ports[0];
-                           /* Zebra takes time to update the selected flag. Not sure
-                            whether to check or not
-                            if (route_mod_row->nexthops[nh_index]->ip_address &&
-                                route_mod_row->nexthops[nh_index]->selected[0]) { */
-                           if (route_mod_row->nexthops[nh_index]->ip_address) {
-                               inet_aton(route_mod_row->nexthops[nh_index]->ip_address,&nh_addr);
-                               nh.family = AF_INET;
-                               nh.u.prefix4 = nh_addr;
-                               nh.prefixlen = IPV4_MAX_BITLEN;
-                               for (ALL_LIST_ELEMENTS_RO (ospf_instance->oiflist, node, oi))
-                               {
-                                  if (if_is_operative (oi->ifp))
-                                    if (oi->address->family == AF_INET)
-                                      if (prefix_match (oi->address, &nh)) {
-                                         fwd = nh_addr;
-                                         nh_ifindex = oi->ifp->ifindex;
-                                         nh_ipv4_found = true;
-                                         break;
-                                       }
-                               }
-                               if (nh_ipv4_found)
-                                break;
-                           }
-                       }
-                       if (!nh_ipv4_found)
-                       {
-                           fwd.s_addr = 0;
-                           if (nh_port)
-                            nh_ifindex = ifname2ifindex(nh_port->name);
-                           else
-                            nh_ifindex = 0;
-                        }
-                       rt_prefix_ipv4.prefix = rt_prefix.u.prefix4;
-                       rt_prefix_ipv4.prefixlen = rt_prefix.prefixlen;
-                        ei = ospf_external_info_add (ZEBRA_ROUTE_CONNECT,rt_prefix_ipv4,
-                                                    nh_ifindex, fwd);
-                        if (ospf_instance->router_id.s_addr == 0)
-                         /* Set flags to generate AS-external-LSA originate event
-                           for each redistributed protocols later. */
-                            ospf_instance->external_origin |= (1 << ZEBRA_ROUTE_CONNECT);
-                        else {
-                             if (ei) {
-                                struct ospf_lsa *current;
-                                current = ospf_external_info_find_lsa (ospf_instance, &ei->p);
-                                if (!current)
-                                  ospf_external_lsa_originate (ospf_instance, ei);
-                                else if (IS_LSA_MAXAGE (current))
-                                  ospf_external_lsa_refresh (ospf_instance, current,
-                                                             ei, LSA_REFRESH_FORCE);
-                                else
-                                  VLOG_WARN("%s already exists",
-                                             inet_ntoa (rt_prefix.u.prefix4));
-                             }
-                        }
-                 }
-                 else if (is_static && (route_mod_row->from &&
-                      !strcmp(route_mod_row->from,OVSREC_ROUTE_FROM_STATIC))) {
-                        str2prefix(route_mod_row->prefix,&rt_prefix);
-                        nh_port = NULL;
-                        for (nh_index = 0 ; nh_index < route_mod_row->n_nexthops;nh_index++)
-                        {
-                            if (!nh_port && route_mod_row->nexthops[nh_index]->n_ports)
-                             nh_port = route_mod_row->nexthops[nh_index]->ports[0];
-                            /* Zebra takes time to update the selected flag. Not sure
-                            whether to check or not
-                            if (route_mod_row->nexthops[nh_index]->ip_address &&
-                                route_mod_row->nexthops[nh_index]->selected[0]) { */
-                            if (route_mod_row->nexthops[nh_index]->ip_address){
-                                inet_aton(route_mod_row->nexthops[nh_index]->ip_address,&nh_addr);
-                                nh.family = AF_INET;
-                                nh.u.prefix4 = nh_addr;
-                                nh.prefixlen = IPV4_MAX_BITLEN;
-                                for (ALL_LIST_ELEMENTS_RO (ospf_instance->oiflist, node, oi))
-                                {
-                                     if (if_is_operative (oi->ifp))
-                                       if (oi->address->family == AF_INET)
-                                         if (prefix_match (oi->address, &nh)) {
-                                           fwd = nh_addr;
-                                           nh_ifindex = oi->ifp->ifindex;
-                                           nh_ipv4_found = true;
-                                           break;
-                                         }
-                                }
-                                if (nh_ipv4_found)
-                                    break;
-                            }
-                        }
-                        if (!nh_ipv4_found)
-                        {
-                            fwd.s_addr = 0;
-                            if (nh_port)
-                             nh_ifindex = ifname2ifindex(nh_port->name);
-                            else
-                             nh_ifindex = 0;
-                        }
-                        rt_prefix_ipv4.prefix = rt_prefix.u.prefix4;
-                        rt_prefix_ipv4.prefixlen = rt_prefix.prefixlen;
-                        ei = ospf_external_info_add (ZEBRA_ROUTE_STATIC,rt_prefix_ipv4,
-                                                     nh_ifindex, fwd);
-                        if (ospf_instance->router_id.s_addr == 0)
-                         /* Set flags to generate AS-external-LSA originate event
-                            for each redistributed protocols later. */
-                            ospf_instance->external_origin |= (1 << ZEBRA_ROUTE_STATIC);
-                        else {
-                           if (ei) {
-                              struct ospf_lsa *current;
-                              current = ospf_external_info_find_lsa (ospf_instance, &ei->p);
-                              if (!current)
-                                ospf_external_lsa_originate (ospf_instance, ei);
-                              else if (IS_LSA_MAXAGE (current))
-                                ospf_external_lsa_refresh (ospf_instance, current,
-                                                           ei, LSA_REFRESH_FORCE);
-                              else
-                                VLOG_WARN("%s already exists",
-                                           inet_ntoa (rt_prefix.u.prefix4));
-                           }
-                        }
-                 }
-                 else if (is_bgp && (route_mod_row->from &&
-                      !strcmp(route_mod_row->from,OVSREC_ROUTE_FROM_BGP))) {
-                        str2prefix(route_mod_row->prefix,&rt_prefix);
-                        nh_port = NULL;
-                        for (nh_index = 0 ; nh_index < route_mod_row->n_nexthops;nh_index++)
-                        {
-                            if (!nh_port && route_mod_row->nexthops[nh_index]->n_ports)
-                             nh_port = route_mod_row->nexthops[nh_index]->ports[0];
-                            /* Zebra takes time to update the selected flag. Not sure
-                            whether to check or not
-                            if (route_mod_row->nexthops[nh_index]->ip_address &&
-                                route_mod_row->nexthops[nh_index]->selected[0]) { */
-                            if (route_mod_row->nexthops[nh_index]->ip_address) {
-                                inet_aton(route_mod_row->nexthops[nh_index]->ip_address,&nh_addr);
-                                nh.family = AF_INET;
-                                nh.u.prefix4 = nh_addr;
-                                nh.prefixlen = IPV4_MAX_BITLEN;
-                                for (ALL_LIST_ELEMENTS_RO (ospf_instance->oiflist, node, oi))
-                                {
-                                     if (if_is_operative (oi->ifp))
-                                       if (oi->address->family == AF_INET)
-                                         if (prefix_match (oi->address, &nh)) {
-                                           fwd = nh_addr;
-                                           nh_ifindex = oi->ifp->ifindex;
-                                           nh_ipv4_found = true;
-                                           break;
-                                         }
-                                }
-                                if (nh_ipv4_found)
-                                    break;
-                            }
-                        }
-                        if (!nh_ipv4_found)
-                        {
-                            fwd.s_addr = 0;
-                            if (nh_port)
-                             nh_ifindex = ifname2ifindex(nh_port->name);
-                            else
-                             nh_ifindex = 0;
-                        }
-                        rt_prefix_ipv4.prefix = rt_prefix.u.prefix4;
-                        rt_prefix_ipv4.prefixlen = rt_prefix.prefixlen;
-                        ei = ospf_external_info_add (ZEBRA_ROUTE_BGP,rt_prefix_ipv4,
-                                                     nh_ifindex, fwd);
-                        if (ospf_instance->router_id.s_addr == 0)
-                         /* Set flags to generate AS-external-LSA originate event
-                            for each redistributed protocols later. */
-                            ospf_instance->external_origin |= (1 << ZEBRA_ROUTE_BGP);
-                        else {
-                           if (ei) {
-                              struct ospf_lsa *current;
-                              current = ospf_external_info_find_lsa (ospf_instance, &ei->p);
-                              if (!current)
-                                ospf_external_lsa_originate (ospf_instance, ei);
-                              else if (IS_LSA_MAXAGE (current))
-                                ospf_external_lsa_refresh (ospf_instance, current,
-                                                           ei, LSA_REFRESH_FORCE);
-                              else
-                                VLOG_WARN("%s already exists",
-                                           inet_ntoa (rt_prefix.u.prefix4));
-                           }
-                        }
-                 }
-             }
-       }while(0);
-  }
-  else
-     VLOG_DBG("OSPF Redistribute not set");
+        modify_ospf_redistribute_config(ospf_instance,ovs_ospf);
+    }
+    else
+       VLOG_DBG("OSPF Redistribute not set");
 
   if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_ospf_router_col_default_information, idl_seqno)) {
-        bool redist_def = false,redist_def_always = false;
-        redist_def = smap_get_bool(&(ovs_ospf->default_information),
-            OSPF_DEFAULT_INFO_ORIGINATE,BOOLEAN_STRING_FALSE);
-        redist_def_always = smap_get_bool(&(ovs_ospf->default_information),
-            OSPF_DEFAULT_INFO_ORIGINATE_ALWAYS,BOOLEAN_STRING_FALSE);
-        if (!redist_default && redist_def) {
-            ospf_instance->dmetric[DEFAULT_ROUTE].type = -1;
-            ospf_instance->dmetric[DEFAULT_ROUTE].value = -1;
-            if (redist_def_always)
-                ospf_instance->default_originate = DEFAULT_ORIGINATE_ALWAYS;
-            else
-                ospf_instance->default_originate = DEFAULT_ORIGINATE_ZEBRA;
-
-            ospf_asbr_status_update (ospf_instance, ++ospf_instance->redistribute);
-            redist_default = 1;
-            if (ospf_instance->router_id.s_addr == 0)
-                ospf_instance->external_origin |= (1 << DEFAULT_ROUTE);
-            else {
-                if (ospf_instance->default_originate != DEFAULT_ORIGINATE_ALWAYS)
-                {
-                    OVSREC_ROUTE_FOR_EACH(route_mod_row,idl) {
-                        struct prefix p;
-                        struct prefix_ipv4 p_ipv4;
-                        if (route_mod_row->address_family &&
-                            !strcmp(route_mod_row->address_family,OVSREC_ROUTE_ADDRESS_FAMILY_IPV6))
-                            continue;
-
-                        str2prefix(route_mod_row->prefix,&p);
-                        str2prefix_ipv4(route_mod_row->prefix,&p_ipv4);
-                        if(is_prefix_default(&p_ipv4)) {
-                            /* Only is route is selected */
-                            if (route_mod_row->n_selected && route_mod_row->selected[0]) {
-                                ospf_external_info_add(DEFAULT_ROUTE,p_ipv4,0,p_ipv4.prefix);
-                                ospf_external_lsa_refresh_default (ospf_instance);
-                            }
-                        }
-                    }
-                }
-                else
-                    thread_add_timer (master, ospf_default_originate_timer, ospf_instance, 1);
-            }
-        }
-        else if (redist_default && redist_def_always &&
-            (ospf_instance->default_originate != DEFAULT_ORIGINATE_ALWAYS))
-        {
-            ospf_instance->default_originate = DEFAULT_ORIGINATE_ALWAYS;
-            if (EXTERNAL_INFO (DEFAULT_ROUTE) == NULL)
-                thread_add_timer (master, ospf_default_originate_timer, ospf_instance, 1);
-            else
-                ospf_external_lsa_refresh_default (ospf_instance);
-        }
-        //OPS_TODO : Handle case when always flag is cleared but meanwhile a default route has come to route table
-        else if (redist_default && !redist_def)
-        {
-            struct prefix_ipv4 p;
-
-            p.family = AF_INET;
-            p.prefix.s_addr = 0;
-            p.prefixlen = 0;
-            ospf_external_lsa_flush (ospf_instance, DEFAULT_ROUTE, &p, 0);
-            if (EXTERNAL_INFO (DEFAULT_ROUTE)) {
-                ospf_external_info_delete (DEFAULT_ROUTE, p);
-                route_table_finish (EXTERNAL_INFO (DEFAULT_ROUTE));
-                EXTERNAL_INFO (DEFAULT_ROUTE) = NULL;
-            }
-            ospf_instance->default_originate = DEFAULT_ORIGINATE_NONE;
-            ospf_asbr_status_update (ospf_instance, --ospf_instance->redistribute);
-            redist_default = 0;
-        }
+         modify_ospf_redistribute_default_config(ovs_ospf,ospf_instance);
   }
+  else
+       VLOG_DBG("OSPF default redistribute not set");
 }
 
 static void
@@ -5065,31 +5035,15 @@ ospf_apply_ospf_area_changes (struct ovsdb_idl *idl)
     return 1;
 }
 
-static unsigned char
-route_from2type(const char* from)
-{
-    if (!strcmp(from,OVSREC_ROUTE_FROM_CONNECTED))
-        return ZEBRA_ROUTE_CONNECT;
-    else if (!strcmp(from,OVSREC_ROUTE_FROM_STATIC))
-        return ZEBRA_ROUTE_STATIC;
-    else if (!strcmp(from,OVSREC_ROUTE_FROM_BGP))
-        return ZEBRA_ROUTE_BGP;
-
-    return ZEBRA_ROUTE_MAX;
-}
-
 static int
 ospf_apply_route_changes (struct ovsdb_idl *idl)
 {
    const struct ovsrec_route* route_first = NULL;
    const struct ovsrec_route* route_iter = NULL;
    const struct ovsrec_route* route_redist = NULL;
-   const struct ovsrec_port* nh_port = NULL;
-   struct in_addr nh_addr;
    struct in_addr fwd;
    struct ospf* ospf_instance = NULL;
    struct prefix_ipv4 p_redist;
-   struct prefix nh;
    struct external_info* ei = NULL;
    struct external_info* ei_iter = NULL;
    struct listnode* node;
@@ -5097,8 +5051,6 @@ ospf_apply_route_changes (struct ovsdb_idl *idl)
    struct ospf_interface* oi;
    unsigned int nh_ifindex = 0;
    unsigned char type;
-   int nh_index = 0;
-   bool nh_ipv4_found = false;
    bool route_found = false;
    bool def_route_found = false;
 
@@ -5130,10 +5082,10 @@ ospf_apply_route_changes (struct ovsdb_idl *idl)
        FIXME:Need route optimization*/
     if (OVSREC_IDL_ANY_TABLE_ROWS_DELETED(route_first,idl_seqno)) {
         for (type = ZEBRA_ROUTE_CONNECT; type <= ZEBRA_ROUTE_MAX; type++) {
-            if ((type == ZEBRA_ROUTE_MAX) &&
+            if (DEFAULT_ROUTE_TYPE(type) &&
                 !redist_default)
                 continue;
-            else if ((type != ZEBRA_ROUTE_MAX) &&
+            else if (!DEFAULT_ROUTE_TYPE(type) &&
                 !redist[type])
                 continue;
 
@@ -5158,7 +5110,7 @@ ospf_apply_route_changes (struct ovsdb_idl *idl)
                         continue;
                     str2prefix(route_iter->prefix,&p_temp);
                     str2prefix_ipv4(route_iter->prefix,&p_ipv4_temp);
-                    if (type == ZEBRA_ROUTE_MAX)
+                    if (DEFAULT_ROUTE_TYPE(type))
                     {
                         if (is_prefix_default(&p_ipv4_temp)) {
                             def_route_found = true;
@@ -5174,7 +5126,7 @@ ospf_apply_route_changes (struct ovsdb_idl *idl)
                         break;
                     }
                   }
-                  if ((type == ZEBRA_ROUTE_MAX) &&
+                  if (DEFAULT_ROUTE_TYPE(type) &&
                     !def_route_found) {
                     if (ospf_instance->default_originate != DEFAULT_ORIGINATE_ALWAYS) {
                         if (ospf_external_info_find_lsa (ospf_instance, &ei_iter->p))
@@ -5187,7 +5139,7 @@ ospf_apply_route_changes (struct ovsdb_idl *idl)
                         }
                     }
                   }
-                  else if ((type != ZEBRA_ROUTE_MAX) &&
+                  else if (!DEFAULT_ROUTE_TYPE(type) &&
                     !route_found) {
                     /* Flush the LSA */
                     if (ospf_external_info_find_lsa (ospf_instance, &ei_iter->p))
@@ -5213,6 +5165,12 @@ ospf_apply_route_changes (struct ovsdb_idl *idl)
                 OVSREC_IDL_IS_ROW_MODIFIED(route_redist,idl_seqno)) {
                 str2prefix_ipv4(route_redist->prefix,&p_redist);
                 type = route_from2type(route_redist->from);
+                if ((route_redist->address_family &&
+                !strcmp(route_redist->address_family,OVSREC_ROUTE_ADDRESS_FAMILY_IPV6))||
+                !strcmp (route_redist->from,OVSREC_ROUTE_FROM_OSPF) ||
+                (route_redist->n_selected &&
+                (false == route_redist->selected[0])))
+                    continue;
                 if (is_prefix_default(&p_redist) &&
                     redist_default)
                 {
@@ -5228,44 +5186,11 @@ ospf_apply_route_changes (struct ovsdb_idl *idl)
                 else if (!is_prefix_default(&p_redist) &&
                     redist[type])
                 {
-                   if((NULL == EXTERNAL_INFO (DEFAULT_ROUTE)) ||
+                   if((NULL == EXTERNAL_INFO (type)) ||
                     !(ei = ospf_external_info_lookup(type,&p_redist))) {
-                       nh_ipv4_found = false;
-                       for (nh_index = 0 ; nh_index < route_redist->n_nexthops;nh_index++)
-                       {
-                           if (!nh_port && route_redist->nexthops[nh_index]->n_ports)
-                            nh_port = route_redist->nexthops[nh_index]->ports[0];
-                           /* Zebra takes time to update the selected flag. Not sure
-                           whether to check or not
-                           if (route_first->nexthops[nh_index]->ip_address &&
-                              route_first->nexthops[nh_index]->selected[0]) { */
-                           if (route_redist->nexthops[nh_index]->ip_address) {
-                               inet_aton(route_redist->nexthops[nh_index]->ip_address,&nh_addr);
-                               nh.family = AF_INET;
-                               nh.u.prefix4 = nh_addr;
-                               nh.prefixlen = IPV4_MAX_BITLEN;
-                               for (ALL_LIST_ELEMENTS_RO (ospf_instance->oiflist, node, oi))
-                               {
-                                    if (if_is_operative (oi->ifp))
-                                      if (oi->address->family == AF_INET)
-                                        if (prefix_match (oi->address, &nh)) {
-                                          fwd = nh_addr;
-                                          nh_ifindex = oi->ifp->ifindex;
-                                          nh_ipv4_found = true;
-                                          break;
-                                        }
-                               }
-                               if (nh_ipv4_found)
-                                   break;
-                           }
-                       }
-                       if (!nh_ipv4_found)
-                       {
-                          fwd.s_addr = 0;
-                          if (nh_port)
-                            nh_ifindex = ifname2ifindex(nh_port->name);
-                          else
-                            nh_ifindex = 0;
+                       if(ospf_update_redistribute_nh(route_redist,ospf_instance, &fwd,&nh_ifindex)) {
+                            VLOG_DBG ("No active nexthops");
+                            continue;
                        }
                        ospf_external_info_add(type,p_redist,nh_ifindex,fwd);
                    }
@@ -5276,6 +5201,97 @@ ospf_apply_route_changes (struct ovsdb_idl *idl)
         }
     }
     return 1;
+}
+
+static int
+ovs_ospf_check_nh_change (struct ovsdb_idl *idl,
+                            const struct ovsrec_route* route_row)
+{
+    int i = 0;
+    const struct ovsrec_nexthop* nh_row = NULL;
+
+    for (i = 0 ; i < route_row->n_nexthops; i++)
+    {
+        nh_row = route_row->nexthops[i];
+        if (OVSREC_IDL_IS_ROW_INSERTED(nh_row,idl_seqno) ||
+            OVSREC_IDL_IS_ROW_MODIFIED(nh_row,idl_seqno))
+            return 1;
+    }
+    return 0;
+}
+
+static int
+ospf_apply_nh_changes (struct ovsdb_idl *idl)
+{
+    const struct ovsrec_nexthop* ovs_nh_first = NULL;
+    const struct ovsrec_route* route_redist = NULL;
+    unsigned int nh_ifindex = 0;
+    unsigned char type;
+    struct prefix_ipv4 p_redist;
+    struct in_addr fwd;
+    struct ospf *ospf_instance;
+    struct external_info *ei = NULL;
+
+    ovs_nh_first = ovsrec_nexthop_first (idl);
+    /*
+     * Check if any table changes present.
+     * If no change just return from here
+     */
+     if (ovs_nh_first && !OVSREC_IDL_ANY_TABLE_ROWS_INSERTED(ovs_nh_first, idl_seqno)
+         && !OVSREC_IDL_ANY_TABLE_ROWS_DELETED(ovs_nh_first, idl_seqno)
+         && !OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED(ovs_nh_first, idl_seqno)) {
+             VLOG_DBG("No Nexthop changes");
+             return 0;
+     }
+
+     if (ovs_nh_first == NULL) {
+            VLOG_DBG("No OSPF interface present!\n");
+            return 1;
+     }
+
+     ospf_instance = ospf_lookup_by_instance(OSPF_DEFAULT_INSTANCE);
+     if (!ospf_instance)
+     {
+         VLOG_ERR ("No OSPF instance found to apply NH changes");
+         return 0;
+     }
+
+     if (OVSREC_IDL_ANY_TABLE_ROWS_DELETED(ovs_nh_first,idl_seqno)) {
+        // OPS_TODO : Handle case when the deleted nexthop is selected for redistribution
+     }
+
+     if (redist[ZEBRA_ROUTE_CONNECT] ||
+      redist[ZEBRA_ROUTE_STATIC] ||
+      redist[ZEBRA_ROUTE_BGP] ||
+      redist_default) {
+         OVSREC_ROUTE_FOR_EACH(route_redist,idl)
+         {
+             if (!ovs_ospf_check_nh_change (idl,route_redist))
+                continue;
+             if ((route_redist->address_family &&
+               !strcmp(route_redist->address_family,OVSREC_ROUTE_ADDRESS_FAMILY_IPV6))||
+               !strcmp (route_redist->from,OVSREC_ROUTE_FROM_OSPF) ||
+               (route_redist->n_selected &&
+               (false == route_redist->selected[0])))
+                  continue;
+                str2prefix_ipv4(route_redist->prefix,&p_redist);
+                type = route_from2type(route_redist->from);
+                if (!is_prefix_default(&p_redist) &&
+                   redist[type]) {
+                    if((NULL == EXTERNAL_INFO (type)) ||
+                     !(ei = ospf_external_info_lookup(type,&p_redist))) {
+                        if (ospf_update_redistribute_nh(route_redist,ospf_instance,
+                            &fwd,&nh_ifindex)) {
+                            VLOG_DBG ("No active nexthops");
+                            continue;
+                        }
+                        ospf_external_info_add(type,p_redist,nh_ifindex,fwd);
+                        ospf_external_lsa_refresh_type(ospf_instance,type,LSA_REFRESH_FORCE);
+                     }
+                }
+         }
+     }
+     return 0;
 }
 
 static int
@@ -5994,6 +6010,7 @@ ospf_reconfigure(struct ovsdb_idl *idl)
         ospf_apply_ospf_router_changes(idl) |
         ospf_apply_ospf_area_changes(idl) |
         ospf_apply_route_changes(idl)|
+        ospf_apply_nh_changes(idl) |
         ospf_apply_vlink_changes(idl))
     {
          /* Some OSPF configuration changed. */

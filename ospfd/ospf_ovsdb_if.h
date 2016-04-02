@@ -221,4 +221,23 @@ if_set_value_from_ovsdb (struct ovsdb_idl *, const struct ovsrec_port *, struct 
 extern void
 ovsdb_ospf_vl_update (const struct ospf_interface*);
 
+extern int
+ospf_update_redistribute_nh (const struct ovsrec_route* route_row,
+                struct ospf *ospf, struct in_addr *fwd,unsigned int *nh_ifindex);
+
+extern int
+ops_ospf_external_lsa_generate (struct ospf *ospf,
+                                    struct external_info *ei);
+
+extern int
+ops_ospf_redistribute_check (struct ospf* ospf,
+            u_char* set_flag,u_char* delete_flag,u_char type);
+
+extern int
+ops_ospf_redistribute_set (const struct ovsrec_route* route_row,
+                    struct ospf* ospf, u_char*redist_type_set,u_char type);
+
+extern int
+ops_ospf_redistribute_default_set(struct ospf* ospf);
+
 #endif /* OSPF_OVSDB_IF_H */

@@ -1,9 +1,9 @@
 /* bgp daemon ovsdb integration.
  *
  * Hewlett-Packard Company Confidential (C)
- * Copyright 2015 Hewlett-Packard Development Company, L.P.
+ * Copyright 2016 Hewlett-Packard Development Company, L.P.
  *
- * (c) Copyright 2015 Hewlett Packard Enterprise Development LP.
+ * (c) Copyright 2016 Hewlett Packard Enterprise Development LP.
  *
  * GNU Zebra is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -81,6 +81,7 @@ enum clear_sort
 static bgp_ovsdb_t glob_bgp_ovs;
 #define MAX_BUF_LEN 10
 COVERAGE_DEFINE(bgp_ovsdb_cnt);
+COVERAGE_DEFINE(poll_zero_timeout);
 VLOG_DEFINE_THIS_MODULE(bgp_ovsdb_if);
 
 struct ovsdb_idl *idl;
@@ -96,7 +97,7 @@ static int system_configured = false;
 static boolean sys_ecmp_status = true;
 boolean exiting = false;
 static int bgp_ovspoll_enqueue (bgp_ovsdb_t *bovs_g);
-static int bovs_read_cb (struct thread *thread);
+static int bovs_cb (struct thread *thread);
 
 /*
  * ovs appctl dump function for this daemon
@@ -2387,7 +2388,7 @@ bgp_ovs_wait (void)
  * functions are re-registered.
  */
 static int
-bovs_read_cb (struct thread *thread)
+bovs_cb (struct thread *thread)
 {
     bgp_ovsdb_t *bovs_g;
     if (!thread) {
@@ -2400,7 +2401,6 @@ bovs_read_cb (struct thread *thread)
         return -1;
     }
 
-    bovs_g->read_cb_count++;
 
     bgp_ovs_clear_fds();
     bgp_ovs_run();
@@ -2408,7 +2408,7 @@ bovs_read_cb (struct thread *thread)
 
     if (0 != bgp_ovspoll_enqueue(bovs_g)) {
         /* Could not enqueue the events. Retry in 1 sec */
-        thread_add_timer(bovs_g->master, bovs_read_cb, bovs_g, 1);
+        thread_add_timer(bovs_g->master, bovs_cb, bovs_g, 1);
     }
     return 1;
 }
@@ -2421,16 +2421,40 @@ bgp_ovspoll_enqueue (bgp_ovsdb_t *bovs_g)
 {
     struct poll_loop *loop = poll_loop();
     struct poll_node *node;
+    struct pollfd *pollfds;
     long int timeout;
     int retval = -1;
+    int i = 0;
+    int ret = -1;
+
+    pollfds = xmalloc(hmap_count(&loop->poll_nodes) * sizeof *pollfds);
+
+    HMAP_FOR_EACH (node, hmap_node, &loop->poll_nodes) {
+        pollfds[i] = node->pollfd;
+        i++;
+    }
+
+    ret = poll(pollfds, hmap_count(&loop->poll_nodes),
+               100);
 
     /* Populate with all the fds events. */
+    i = 0;
     HMAP_FOR_EACH(node, hmap_node, &loop->poll_nodes) {
-        thread_add_read(bovs_g->master, bovs_read_cb, bovs_g, node->pollfd.fd);
+        if(pollfds[i].revents & POLLOUT){
+            bovs_g->write_cb_count++;
+            thread_add_write(bovs_g->master, bovs_cb, bovs_g, pollfds[i].fd);
+        }
+        else {
+            bovs_g->read_cb_count++;
+            thread_add_read(bovs_g->master, bovs_cb, bovs_g, pollfds[i].fd);
+        }
+
         /*
          * If we successfully connected to OVS return 0.
          * Else return -1 so that we try to reconnect.
          */
+        i++;
+
         retval = 0;
     }
 
@@ -2440,9 +2464,9 @@ bgp_ovspoll_enqueue (bgp_ovsdb_t *bovs_g)
        loop->timeout_when < LLONG_MAX) {
         /* Convert msec to sec */
         timeout = (timeout + 999)/1000;
-        thread_add_timer(bovs_g->master, bovs_read_cb, bovs_g, timeout);
+        thread_add_timer(bovs_g->master, bovs_cb, bovs_g, timeout);
     }
-
+    free(pollfds);
     return retval;
 }
 

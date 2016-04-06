@@ -108,6 +108,18 @@
 struct stream;
 #endif /* ORIGINAL_CODING */
 
+/*Macro for strings*/
+#define PACKET_STR        "packet"
+#define ISM_STR           "ism"
+#define LSA_STR           "lsa"
+#define NSM_STR           "nsm"
+#define NSSA_STR          "nssa"
+#define EVENT_STR         "event"
+
+#define BUF_LEN 16000
+#define REM_BUF_LEN (buflen - 1 - strlen(buf))
+#define MAX_ERR_STR_LEN 255
+
 #define AREA_NAME(A)    ospf_area_name_string ((A))
 #define IF_NAME(I)      ospf_if_name_string ((I))
 

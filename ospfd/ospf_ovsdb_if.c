@@ -57,6 +57,7 @@
 #include "ospfd/ospf_interface.h"
 #include "ospfd/ospf_asbr.h"
 #include "ospfd/ospf_zebra.h"
+#include "ospfd/ospf_dump.h"
 
 COVERAGE_DEFINE(ospf_ovsdb_cnt);
 VLOG_DEFINE_THIS_MODULE(ospf_ovsdb_if);
@@ -173,6 +174,151 @@ enum OSPF_INTERVALS_KEY_SORTED {
 static int ospf_ovspoll_enqueue (ospf_ovsdb_t *ospf_ovs_g);
 static int ospf_ovs_read_cb (struct thread *thread);
 
+/*
+ * function for displaying logging configurations
+ */
+void show_debug_info(char *buf, int buflen)
+{
+    char arr[1000];
+    char *NEW_LINE = "\n";
+    int i;
+
+    strncat (buf, "OSPF debugging status: ", REM_BUF_LEN);
+    strncat (buf, NEW_LINE, REM_BUF_LEN);
+
+    /* Show debug status for events. */
+    if (IS_DEBUG_OSPF(event, EVENT))
+    {
+        strncat (buf, " OSPF event debugging is on\n", REM_BUF_LEN);
+    }
+
+    /* Show debug status for ISM. */
+    if (IS_DEBUG_OSPF (ism, ISM) == OSPF_DEBUG_ISM)
+    {
+        strncat (buf, "  OSPF ISM debugging is on\n", REM_BUF_LEN);
+    }
+    else
+    {
+        if (IS_DEBUG_OSPF (ism, ISM_STATUS))
+        {
+            strncat (buf, "  OSPF ISM status debugging is on\n",
+                          REM_BUF_LEN);
+        }
+        if (IS_DEBUG_OSPF (ism, ISM_EVENTS))
+        {
+            strncat (buf, "  OSPF ISM event debugging is on\n",
+                          REM_BUF_LEN);
+        }
+        if (IS_DEBUG_OSPF (ism, ISM_TIMERS))
+        {
+            strncat (buf, "  OSPF ISM timer debugging is on\n",
+                          REM_BUF_LEN);
+        }
+    }
+
+    /* Show debug status for NSM. */
+    if (IS_DEBUG_OSPF (nsm, NSM) == OSPF_DEBUG_NSM)
+    {
+        strncat (buf, "  OSPF NSM debugging is on\n",
+                      REM_BUF_LEN);
+    }
+    else
+    {
+        if (IS_DEBUG_OSPF (nsm, NSM_STATUS))
+            strncat (buf, "  OSPF NSM status debugging is on\n",
+                          REM_BUF_LEN);
+        if (IS_DEBUG_OSPF (nsm, NSM_EVENTS))
+            strncat (buf, "  OSPF NSM event debugging is on\n",
+                          REM_BUF_LEN);
+        if (IS_DEBUG_OSPF (nsm, NSM_TIMERS))
+            strncat (buf, "  OSPF NSM timer debugging is on\n",
+                          REM_BUF_LEN);
+    }
+
+    /* Show debug status for OSPF Packets. */
+    for (i = 0; i < 5; i++)
+    {
+        if (IS_DEBUG_OSPF_PACKET (i, SEND) && IS_DEBUG_OSPF_PACKET (i, RECV))
+        {
+            sprintf(arr, "  OSPF packet %s%s debugging is on%s",
+                    LOOKUP (ospf_packet_type_str, i + 1),
+                    IS_DEBUG_OSPF_PACKET (i, DETAIL) ? " detail" : "",
+                    NEW_LINE);
+            strncat (buf, arr, REM_BUF_LEN);
+        }
+        else
+        {
+            if (IS_DEBUG_OSPF_PACKET (i, SEND))
+            {
+                sprintf (arr, "  OSPF packet %s send%s debugging is on%s",
+                         LOOKUP (ospf_packet_type_str, i + 1),
+                         IS_DEBUG_OSPF_PACKET (i, DETAIL) ? " detail" : "",
+                         NEW_LINE);
+                strncat (buf, arr, REM_BUF_LEN);
+            }
+            if (IS_DEBUG_OSPF_PACKET (i, RECV))
+            {
+                sprintf (arr, "  OSPF packet %s receive%s debugging is on%s",
+                         LOOKUP (ospf_packet_type_str, i + 1),
+                         IS_DEBUG_OSPF_PACKET (i, DETAIL) ? " detail" : "",
+                         NEW_LINE);
+                strncat (buf, arr, REM_BUF_LEN);
+            }
+        }
+    }
+
+    /* Show debug status for OSPF LSAs. */
+    if (IS_DEBUG_OSPF (lsa, LSA) == OSPF_DEBUG_LSA)
+    {
+        strncat (buf, "  OSPF LSA debugging is on\n", REM_BUF_LEN);
+    }
+    else
+    {
+        if (IS_DEBUG_OSPF (lsa, LSA_GENERATE))
+            strncat (buf, "  OSPF LSA generation debugging is on\n",
+                          REM_BUF_LEN);
+        if (IS_DEBUG_OSPF (lsa, LSA_FLOODING))
+            strncat (buf, "  OSPF LSA flooding debugging is on\n",
+                          REM_BUF_LEN);
+        if (IS_DEBUG_OSPF (lsa, LSA_INSTALL))
+            strncat (buf, "  OSPF LSA install debugging is on\n",
+                          REM_BUF_LEN);
+        if (IS_DEBUG_OSPF (lsa, LSA_REFRESH))
+            strncat (buf, "  OSPF LSA refresh debugging is on\n",
+                          REM_BUF_LEN);
+    }
+
+    /* Show debug status for NSSA. */
+    if (IS_DEBUG_OSPF (nssa, NSSA) == OSPF_DEBUG_NSSA)
+    {
+        strncat (buf, "  OSPF NSSA debugging is on\n", REM_BUF_LEN);
+    }
+}
+
+static void
+ospfd_unixctl_show_debug_info(struct unixctl_conn *conn, int argc,
+                  const char *argv[], void *aux)
+{
+    char *buf = NULL;
+    buf = xcalloc(1, BUF_LEN);
+    char err_str[MAX_ERR_STR_LEN];
+
+    if (buf)
+    {
+        strcpy (buf, "--------------------------------------------\n");
+        show_debug_info (buf, BUF_LEN);
+        unixctl_command_reply (conn, buf);
+        free (buf);
+    }
+    else
+    {
+        snprintf (err_str, sizeof(err_str),
+                 "ospf daemon failed to allocate %d bytes", BUF_LEN);
+        unixctl_command_reply (conn, err_str);
+    }
+    return;
+}
+
 /* ovs appctl dump function for this daemon
  * This is useful for debugging
  */
@@ -181,6 +327,248 @@ ospf_unixctl_dump(struct unixctl_conn *conn, int argc OVS_UNUSED,
                   const char *argv[] OVS_UNUSED, void *aux OVS_UNUSED)
 {
     unixctl_command_reply_error(conn, "Nothing to dump :)");
+}
+
+static void
+ospf_unixctl_debug(struct unixctl_conn *conn, int argc,
+                  const char *argv[], void *aux OVS_UNUSED)
+{
+    char *buf = NULL;
+    char err_str[MAX_ERR_STR_LEN];
+    buf = xcalloc(1, BUF_LEN);
+
+    int type = 0;
+    int flag = 0;
+    int i;
+
+    if (!strncmp (argv[2], PACKET_STR, strlen(argv[2])))
+    {
+         /* Check packet type. */
+        if (strncmp (argv[3], "h", 1) == 0)
+            type = OSPF_DEBUG_HELLO;
+        else if (strncmp (argv[3], "d", 1) == 0)
+            type = OSPF_DEBUG_DB_DESC;
+        else if (strncmp (argv[3], "ls-r", 4) == 0)
+            type = OSPF_DEBUG_LS_REQ;
+        else if (strncmp (argv[3], "ls-u", 4) == 0)
+            type = OSPF_DEBUG_LS_UPD;
+        else if (strncmp (argv[3], "ls-a", 4) == 0)
+            type = OSPF_DEBUG_LS_ACK;
+        else if (strncmp (argv[3], "a", 1) == 0)
+            type = OSPF_DEBUG_ALL;
+
+        /* Default, both send and recv. */
+        if (argc == 4)
+            flag = OSPF_DEBUG_SEND | OSPF_DEBUG_RECV;
+
+        /* send or recv. */
+        if (argc >= 5)
+        {
+            if (strncmp (argv[4], "s", 1) == 0)
+                flag = OSPF_DEBUG_SEND;
+            else if (strncmp (argv[4], "r", 1) == 0)
+                flag = OSPF_DEBUG_RECV;
+            else if (strncmp (argv[4], "d", 1) == 0)
+                flag = OSPF_DEBUG_SEND | OSPF_DEBUG_RECV | OSPF_DEBUG_DETAIL;
+        }
+
+        /* detail. */
+        if (argc == 5)
+            if (strncmp (argv[4], "d", 1) == 0)
+                flag |= OSPF_DEBUG_DETAIL;
+
+        for (i = 0; i < 5; i++)
+            if (type & (0x01 << i))
+            {
+                TERM_DEBUG_PACKET_ON (i, flag);
+            }
+    }
+    else if (!strncmp (argv[2], ISM_STR, strlen(argv[2])))
+    {
+        /* ENABLE_NODE. */
+        if (argc == 3)
+            TERM_DEBUG_ON (ism, ISM);
+        else if (argc == 4)
+        {
+            if (strncmp (argv[3], "s", 1) == 0)
+                TERM_DEBUG_ON (ism, ISM_STATUS);
+            else if (strncmp (argv[3], "e", 1) == 0)
+                TERM_DEBUG_ON (ism, ISM_EVENTS);
+            else if (strncmp (argv[3], "t", 1) == 0)
+                TERM_DEBUG_ON (ism, ISM_TIMERS);
+        }
+    }
+    else if (!strncmp (argv[2], LSA_STR, strlen(argv[2])))
+    {
+        /* ENABLE_NODE. */
+        if (argc == 3)
+            TERM_DEBUG_ON (lsa, LSA);
+        else if (argc == 4)
+        {
+            if (strncmp (argv[3], "g", 1) == 0)
+                TERM_DEBUG_ON (lsa, LSA_GENERATE);
+            else if (strncmp (argv[3], "f", 1) == 0)
+                TERM_DEBUG_ON (lsa, LSA_FLOODING);
+            else if (strncmp (argv[3], "i", 1) == 0)
+                TERM_DEBUG_ON (lsa, LSA_INSTALL);
+            else if (strncmp (argv[3], "r", 1) == 0)
+                TERM_DEBUG_ON (lsa, LSA_REFRESH);
+        }
+    }
+    else if (!strncmp (argv[2], NSM_STR, strlen(argv[2])))
+    {
+        /* ENABLE_NODE. */
+        if (argc == 3)
+            TERM_DEBUG_ON (nsm, NSM);
+        else if (argc == 4)
+        {
+            if (strncmp (argv[3], "s", 1) == 0)
+                TERM_DEBUG_ON (nsm, NSM_STATUS);
+            else if (strncmp (argv[3], "e", 1) == 0)
+                TERM_DEBUG_ON (nsm, NSM_EVENTS);
+            else if (strncmp (argv[3], "t", 1) == 0)
+                TERM_DEBUG_ON (nsm, NSM_TIMERS);
+        }
+    }
+    else if (!strncmp (argv[2], NSSA_STR, strlen(argv[2])))
+    {
+        TERM_DEBUG_ON (nssa, NSSA);
+    }
+    else if (!strncmp (argv[2], EVENT_STR, strlen(argv[2])))
+    {
+        TERM_DEBUG_ON (event, EVENT);
+    }
+    else
+    {
+        sprintf(err_str, "\nError occured while changing debug variables.\n");
+        unixctl_command_reply(conn, err_str);
+         return;
+    }
+
+    unixctl_command_reply(conn, "");
+    return;
+
+}
+
+static void
+ospf_unixctl_no_debug(struct unixctl_conn *conn, int argc,
+                  const char *argv[], void *aux OVS_UNUSED)
+{
+    char *buf = NULL;
+    char err_str[MAX_ERR_STR_LEN];
+    buf = xcalloc(1, BUF_LEN);
+
+    int type = 0;
+    int flag = 0;
+    int i;
+
+    if (!strncmp (argv[2], PACKET_STR, strlen(argv[2])))
+    {
+        /* Check packet type. */
+        if (strncmp (argv[3], "h", 1) == 0)
+            type = OSPF_DEBUG_HELLO;
+        else if (strncmp (argv[3], "d", 1) == 0)
+            type = OSPF_DEBUG_DB_DESC;
+        else if (strncmp (argv[3], "ls-r", 4) == 0)
+            type = OSPF_DEBUG_LS_REQ;
+        else if (strncmp (argv[3], "ls-u", 4) == 0)
+            type = OSPF_DEBUG_LS_UPD;
+        else if (strncmp (argv[3], "ls-a", 4) == 0)
+            type = OSPF_DEBUG_LS_ACK;
+        else if (strncmp (argv[3], "a", 1) == 0)
+            type = OSPF_DEBUG_ALL;
+
+        /* Default, both send and recv. */
+        if (argc == 4)
+            flag = OSPF_DEBUG_SEND | OSPF_DEBUG_RECV;
+
+        /* send or recv. */
+        if (argc >= 5)
+        {
+            if (strncmp (argv[4], "s", 1) == 0)
+                flag = OSPF_DEBUG_SEND;
+            else if (strncmp (argv[4], "r", 1) == 0)
+                flag = OSPF_DEBUG_RECV;
+            else if (strncmp (argv[4], "d", 1) == 0)
+                flag = OSPF_DEBUG_SEND | OSPF_DEBUG_RECV | OSPF_DEBUG_DETAIL;
+        }
+
+        /* detail. */
+        if (argc == 5)
+            if (strncmp (argv[4], "d", 1) == 0)
+                flag |= OSPF_DEBUG_DETAIL;
+
+        for (i = 0; i < 5; i++)
+            if (type & (0x01 << i))
+            {
+                TERM_DEBUG_PACKET_OFF (i, flag);
+            }
+    }
+    else if (!strncmp (argv[2], ISM_STR, strlen(argv[2])))
+    {
+        /* ENABLE_NODE. */
+        if (argc == 3)
+            TERM_DEBUG_OFF (ism, ISM);
+        else if (argc == 4)
+        {
+            if (strncmp (argv[3], "s", 1) == 0)
+                TERM_DEBUG_OFF (ism, ISM_STATUS);
+            else if (strncmp (argv[3], "e", 1) == 0)
+                TERM_DEBUG_OFF (ism, ISM_EVENTS);
+            else if (strncmp (argv[3], "t", 1) == 0)
+                TERM_DEBUG_OFF (ism, ISM_TIMERS);
+        }
+    }
+    else if (!strncmp (argv[2], LSA_STR, strlen(argv[2])))
+    {
+        /* ENABLE_NODE. */
+        if (argc == 3)
+            TERM_DEBUG_OFF (lsa, LSA);
+        else if (argc == 4)
+        {
+            if (strncmp (argv[3], "g", 1) == 0)
+                TERM_DEBUG_OFF (lsa, LSA_GENERATE);
+            else if (strncmp (argv[3], "f", 1) == 0)
+                TERM_DEBUG_OFF (lsa, LSA_FLOODING);
+            else if (strncmp (argv[3], "i", 1) == 0)
+                TERM_DEBUG_OFF (lsa, LSA_INSTALL);
+            else if (strncmp (argv[3], "r", 1) == 0)
+                TERM_DEBUG_OFF (lsa, LSA_REFRESH);
+        }
+    }
+    else if (!strncmp (argv[2], NSM_STR, strlen(argv[2])))
+    {
+        /* ENABLE_NODE. */
+        if (argc == 3)
+            TERM_DEBUG_OFF (nsm, NSM);
+        else if (argc == 4)
+        {
+            if (strncmp (argv[3], "s", 1) == 0)
+                TERM_DEBUG_OFF (nsm, NSM_STATUS);
+            else if (strncmp (argv[3], "e", 1) == 0)
+                TERM_DEBUG_OFF (nsm, NSM_EVENTS);
+            else if (strncmp (argv[3], "t", 1) == 0)
+                TERM_DEBUG_OFF (nsm, NSM_TIMERS);
+        }
+    }
+    else if (!strncmp (argv[2], NSSA_STR, strlen(argv[2])))
+    {
+        TERM_DEBUG_OFF (nssa, NSSA);
+    }
+    else if (!strncmp (argv[2], EVENT_STR, strlen(argv[2])))
+    {
+        TERM_DEBUG_OFF (event, EVENT);
+    }
+    else
+    {
+        sprintf(err_str, "\nError occured while changing debug variables.\n");
+        unixctl_command_reply(conn, err_str);
+        return;
+    }
+
+    unixctl_command_reply(conn, "");
+    return;
+
 }
 
 /* Register OSPF tables to idl */
@@ -421,6 +809,12 @@ ovsdb_init (const char *db_path)
 
     /* Register ovs-appctl commands for this daemon. */
     unixctl_command_register("ospfd/dump", "", 0, 0, ospf_unixctl_dump, NULL);
+    unixctl_command_register("ospf/debug", "packet|ism|nsm|lsa|event|nssa", 2,
+                                         5, ospf_unixctl_debug, NULL);
+    unixctl_command_register("ospf/no-debug", "packet|ism|nsm|lsa|event|nssa",
+                                            2, 5, ospf_unixctl_no_debug, NULL);
+    unixctl_command_register("ospf/show-debug", "ospfv2", 1, 1,
+                                              ospfd_unixctl_show_debug_info, NULL);
 }
 
 static void

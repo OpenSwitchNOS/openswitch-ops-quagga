@@ -64,6 +64,7 @@
 #include "ospfd/ospf_zebra.h"
 #include "ospfd/ospf_ovsdb_if.h"
 #include "ospfd/ospf_asbr.h"
+#include "ospfd/ospf_dump.h"
 
 #define NEXTHOP_STR_SIZE 64
 
@@ -194,6 +195,30 @@ enum OSPF_INTERVALS_KEY_SORTED {
 static int ospf_ovspoll_enqueue (ospf_ovsdb_t *ospf_ovs_g);
 static int ospf_ovs_read_cb (struct thread *thread);
 
+static void
+ospfd_unixctl_show_debug_info(struct unixctl_conn *conn, int argc,
+                  const char *argv[], void *aux)
+{
+    char *buf = NULL;
+    buf = xcalloc(1, BUF_LEN);
+    char err_str[MAX_ERR_STR_LEN];
+
+    if (buf)
+    {
+        strcpy (buf, "--------------------------------------------\n");
+        show_debug_info (buf, BUF_LEN);
+        unixctl_command_reply (conn, buf);
+        free (buf);
+    }
+    else
+    {
+        snprintf (err_str, sizeof(err_str),
+                 "ospf daemon failed to allocate %d bytes", BUF_LEN);
+        unixctl_command_reply (conn, err_str);
+    }
+    return;
+}
+
 /* ovs appctl dump function for this daemon
  * This is useful for debugging
  */
@@ -202,6 +227,48 @@ ospf_unixctl_dump(struct unixctl_conn *conn, int argc OVS_UNUSED,
                   const char *argv[] OVS_UNUSED, void *aux OVS_UNUSED)
 {
     unixctl_command_reply_error(conn, "Nothing to dump :)");
+}
+
+static void
+ospf_unixctl_debug(struct unixctl_conn *conn, int argc,
+                  const char *argv[], void *aux OVS_UNUSED)
+{
+    int status;
+    char *buf = NULL;
+    char err_str[MAX_ERR_STR_LEN];
+    buf = xcalloc(1, BUF_LEN);
+
+    status = ospf_debug(buf, err_str, argc, argv);
+    if (status == 0)
+    {
+        unixctl_command_reply(conn, err_str);
+    }
+    else
+    {
+        unixctl_command_reply(conn, NULL);
+    }
+    return;
+}
+
+static void
+ospf_unixctl_no_debug(struct unixctl_conn *conn, int argc,
+                  const char *argv[], void *aux OVS_UNUSED)
+{
+    int status;
+    char *buf = NULL;
+    char err_str[MAX_ERR_STR_LEN];
+    buf = xcalloc(1, BUF_LEN);
+
+    status = ospf_no_debug(buf, err_str, argc, argv);
+    if (status == 0)
+    {
+        unixctl_command_reply(conn, err_str);
+    }
+    else
+    {
+        unixctl_command_reply(conn, NULL);
+    }
+    return;
 }
 
 /* Register OSPF tables to idl */
@@ -443,6 +510,12 @@ ovsdb_init (const char *db_path)
 
     /* Register ovs-appctl commands for this daemon. */
     unixctl_command_register("ospfd/dump", "", 0, 0, ospf_unixctl_dump, NULL);
+    unixctl_command_register("ospf/debug", "packet|ism|nsm|lsa|event|nssa", 2,
+                                         5, ospf_unixctl_debug, NULL);
+    unixctl_command_register("ospf/no-debug", "packet|ism|nsm|lsa|event|nssa",
+                                            2, 5, ospf_unixctl_no_debug, NULL);
+    unixctl_command_register("ospf/show-debug", "ospfv2", 1, 1,
+                                              ospfd_unixctl_show_debug_info, NULL);
 }
 
 static void

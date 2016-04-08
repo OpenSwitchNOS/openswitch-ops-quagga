@@ -82,11 +82,10 @@ struct rib
   u_char nexthop_fib_num;
 
 #ifdef ENABLE_OVSDB
-  /*
-   * Pointer to the row in the route database
-   * in OVS.
-   */
-  void *ovsdb_route_row_ptr;
+   /*
+    * Pointer to the uuid fpr the route row in OVSDB
+    */
+   void *ovsdb_route_row_uuid_ptr;
 #endif
 };
 

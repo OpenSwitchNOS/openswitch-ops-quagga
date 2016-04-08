@@ -43,6 +43,7 @@
 #include "unixctl.h"
 #include "openvswitch/vlog.h"
 #include "vswitch-idl.h"
+#include "uuid.h"
 #include "coverage.h"
 #include "hash.h"
 #include "jhash.h"
@@ -393,8 +394,7 @@ struct zebra_l3_port
                                             IP addresses */
   struct shash ip6_address_secondary;    /* Hash for the secondary
                                             IPv6 addresses */
-  const struct ovsrec_port *cfg;         /* Pointer to the OVSDB port
-                                            entry */
+  struct uuid ovsrec_port_uuid;          /* UUID to the OVSDB port entry */
   enum zebra_l3_port_cache_actions port_action;   /* Action performed on the
                                                      port */
   bool if_active;                        /* If the port is still active in
@@ -824,9 +824,10 @@ zebra_l3_port_node_create (const struct ovsrec_port* ovsrec_port)
     l3_port->ip6_address = xstrdup(ovsrec_port->ip6_address);
 
   /*
-   * Record the reference to the OVSDB port entry.
+   * Copy the uuid of the ovsrec_port row for future references.
    */
-  l3_port->cfg = ovsrec_port;
+  memcpy(&(l3_port->ovsrec_port_uuid), &(ovsrec_port->header_.uuid),
+         sizeof(struct uuid));
 
   /*
    * Record the port action as a new added prot.
@@ -891,7 +892,7 @@ zebra_l3_port_node_create (const struct ovsrec_port* ovsrec_port)
    * Set 'if_active' for the port to record if the interface resolving this
    * port are in admin UP or DOWN.
    */
-  l3_port->if_active = zebra_get_port_active_state(l3_port->cfg);
+  l3_port->if_active = zebra_get_port_active_state(ovsrec_port);
 
   /*
    * Return the pointer reference to the L3 port node.
@@ -930,7 +931,6 @@ zebra_l3_port_node_free (struct zebra_l3_port* l3_port)
    * Free the port IPv6 primary address.
    */
   free(l3_port->ip6_address);
-  l3_port->cfg = NULL;
 
   /*
    * Walk the IPv4 seocndary hash table, Free the secondary IPv4 address.
@@ -1018,7 +1018,11 @@ zebra_l3_port_node_print (struct zebra_l3_port* l3_port)
                                                   l3_port->ip6_address :
                                                   "NULL");
 
-  VLOG_DBG("     OVSDB port pointer is: %p", l3_port->cfg);
+  VLOG_DBG("     OVSDB port UUID is: %u-%u-%u-%u",
+           l3_port->ovsrec_port_uuid.parts[0],
+           l3_port->ovsrec_port_uuid.parts[1],
+           l3_port->ovsrec_port_uuid.parts[2],
+           l3_port->ovsrec_port_uuid.parts[3]);
 
   VLOG_DBG("     Port action is: %s", zebra_l3_port_cache_actions_str[
                                                      l3_port->port_action]);
@@ -1996,6 +2000,7 @@ struct zebra_l3_port*
 zebra_l3_port_node_lookup_by_interface_name (char* interface_name)
 {
   struct zebra_l3_port* l3_port = NULL;
+  const struct ovsrec_port* ovsrec_port = NULL;
   struct shash_node *node, *next;
   bool if_found;
   int interface_index;
@@ -2025,14 +2030,22 @@ zebra_l3_port_node_lookup_by_interface_name (char* interface_name)
 
       if_found = false;
 
+      ovsrec_port = ovsrec_port_get_for_uuid(idl,
+                            (const struct uuid *)&(l3_port->ovsrec_port_uuid));
+
+      if (!ovsrec_port) {
+        VLOG_DBG("No ovsrec port found when looked up by uuidn");
+        continue;
+      }
+
       VLOG_DBG("THe number of interface are: %u",
-                l3_port->cfg->n_interfaces);
+                ovsrec_port->n_interfaces);
 
       for (interface_index = 0;
-           interface_index < l3_port->cfg->n_interfaces;
+           interface_index < ovsrec_port->n_interfaces;
            ++interface_index)
         {
-          interface = l3_port->cfg->interfaces[interface_index];
+          interface = ovsrec_port->interfaces[interface_index];
 
           VLOG_DBG("Walking interface %s", interface->name);
 
@@ -2073,6 +2086,7 @@ static void
 zebra_update_port_active_state (const struct ovsrec_interface *interface)
 {
   struct zebra_l3_port* l3_port = NULL;
+  const struct ovsrec_port* ovsrec_port = NULL;
   bool new_active_state;
 
   /*
@@ -2101,10 +2115,18 @@ zebra_update_port_active_state (const struct ovsrec_interface *interface)
       return;
     }
 
+  ovsrec_port = ovsrec_port_get_for_uuid(idl,
+                            (const struct uuid *)&(l3_port->ovsrec_port_uuid));
+
+  if (!ovsrec_port) {
+    VLOG_DBG("No ovsrec port found when looked up by uuid");
+    return;
+  }
+
   /*
    * Get the new admin state from the interface entry.
    */
-  new_active_state = zebra_get_port_active_state(l3_port->cfg);
+  new_active_state = zebra_get_port_active_state(ovsrec_port);
 
   /*
    * Update the port active state. If the port state has changed,
@@ -2177,9 +2199,16 @@ zebra_find_routes_with_deleted_ports (
       RNODE_FOREACH_RIB (rn, rib)
         {
           #ifdef VRF_ENABLE
-          if (rib->ovsdb_route_row_ptr)
+          if (rib->ovsdb_route_row_uuid_ptr)
             {
-              ovs_route = (struct ovsrec_route *)(rib->ovsdb_route_row_ptr);
+              ovs_route = ovsrec_route_get_for_uuid(idl,
+                          (const struct uuid*)rib->ovsdb_route_row_uuid_ptr);
+
+              if (!ovs_route) {
+                  VLOG_DBG("Route not found using route UUID");
+                  continue;
+              }
+
               if (!(zebra_is_route_in_my_vrf(ovs_route)))
                 continue;
             }
@@ -3203,6 +3232,7 @@ zebra_handle_static_route_change (const struct ovsrec_route *route)
   int ret;
   int next_hop_index;
   bool if_selected;
+  struct uuid* route_uuid = NULL;
 
   VLOG_DBG("Rib prefix_str=%s", route->prefix);
 
@@ -3261,6 +3291,17 @@ zebra_handle_static_route_change (const struct ovsrec_route *route)
     distance = route->distance[0];
   else
     distance = ZEBRA_STATIC_DISTANCE_DEFAULT;
+
+  /*
+   * Cache the route's UUID within for use when setting and unsetting
+   * the selected bits on the route
+   */
+  route_uuid = (struct uuid*)xzalloc(sizeof(struct uuid));
+
+  /*
+   * Copy the uuid of the ovsrec_port row for future references.
+   */
+  memcpy(route_uuid, &(route->header_.uuid), sizeof(struct uuid));
 
   /*
    * Walk all the next-hops of the route and check if any of the next-hops
@@ -3331,12 +3372,12 @@ zebra_handle_static_route_change (const struct ovsrec_route *route)
            {
 #ifdef HAVE_IPV6
               static_add_ipv6(&p, type, &ipv6_gate, ifname, flag, distance, 0,
-                              (void*) route);
+                              (void*) route_uuid);
 #endif
             }
           else
             static_add_ipv4_safi(safi, &p, ifname ? NULL : &gate, ifname,
-                                 flag, distance, 0, (void*) route);
+                                 flag, distance, 0, (void*) route_uuid);
         }
     }
 }
@@ -3959,9 +4000,16 @@ void zebra_delete_route_nexthop_addr_from_db (struct rib *route,
       return;
     }
 
-  if (route && (route->ovsdb_route_row_ptr))
+  if (route && (route->ovsdb_route_row_uuid_ptr))
     {
-      route_row = (struct ovsrec_route *)(route->ovsdb_route_row_ptr);
+      route_row = (struct ovsrec_route*)ovsrec_route_get_for_uuid(idl,
+                     (const struct uuid*)route->ovsdb_route_row_uuid_ptr);
+
+      if (!route_row) {
+        VLOG_DBG("Route not found using UUID");
+        return;
+      }
+
       #ifdef VRF_ENABLE
       if (!(zebra_is_route_in_my_vrf(route_row)))
         return;
@@ -4048,9 +4096,16 @@ void zebra_delete_route_nexthop_port_from_db (struct rib *route,
       return;
     }
 
-  if (route && (route->ovsdb_route_row_ptr))
+  if (route && (route->ovsdb_route_row_uuid_ptr))
     {
-      route_row = (struct ovsrec_route *)(route->ovsdb_route_row_ptr);
+      route_row = (struct ovsrec_route *)ovsrec_route_get_for_uuid(idl,
+                    (const struct uuid*)route->ovsdb_route_row_uuid_ptr);
+
+      if (!route_row) {
+        VLOG_DBG("Route not found using UUID");
+        return;
+      }
+
       #ifdef VRF_ENABLE
       if (!(zebra_is_route_in_my_vrf(route_row)))
         return;
@@ -4177,16 +4232,20 @@ zebra_update_selected_route_to_db (struct route_node *rn, struct rib *route,
    * action == ZEBRA_RT_INSTALL => selected = 1
    * action == ZEBRA_RT_UNINSTALL => selected = 0
    *
-   * If the 'route' has a valid 'ovsdb_route_row_ptr' pointer,
-   * then reference the 'ovsrec_route' structure directly from
-   * 'ovsdb_route_row_ptr' pointer. Otherwise iterate through the
-   * OVSDB route to find out the relevant 'ovsrec_route' structure. We
-   * need to investigate more on how to set the route selected bit
-   * in cases when zebra adds/update/deletes the route from the kernel.
+   * If the 'route' has a valid 'ovsdb_route_row_uuid_ptr' pointer,
+   * then look-up the 'ovsrec_route' structure directly from
+   * 'ovsdb_route_row_uuid_ptr' pointer. Otherwise iterate through the
+   * OVSDB route to find out the relevant 'ovsrec_route' structure.
    */
-  if (route->ovsdb_route_row_ptr)
+  if (route->ovsdb_route_row_uuid_ptr)
     {
-      ovs_route = (struct ovsrec_route *)(route->ovsdb_route_row_ptr);
+      ovs_route = ovsrec_route_get_for_uuid(idl,
+                     (const struct uuid*)route->ovsdb_route_row_uuid_ptr);
+
+      if (!ovs_route) {
+        VLOG_DBG("Route not found using UUID");
+        return;
+      }
 
       #ifdef VRF_ENABLE
       if (!(zebra_is_route_in_my_vrf(ovs_route)))
@@ -4327,9 +4386,16 @@ void zebra_update_selected_nh (struct route_node *rn, struct rib *route,
       return;
     }
 
-  if (route->ovsdb_route_row_ptr)
+  if (route->ovsdb_route_row_uuid_ptr)
     {
-      route_row = (struct ovsrec_route *)(route->ovsdb_route_row_ptr);
+      route_row = (struct ovsrec_route *)ovsrec_route_get_for_uuid(idl,
+                     (const struct uuid*)route->ovsdb_route_row_uuid_ptr);
+
+      if (!route_row) {
+        VLOG_DBG("Route not found using UUID");
+        return;
+      }
+
       #ifdef VRF_ENABLE
       if (!(zebra_is_route_in_my_vrf(route_row)))
         return;
@@ -4754,6 +4820,7 @@ zebra_add_route (bool is_ipv6, struct prefix *p, int type, safi_t safi,
   struct ovsrec_nexthop *idl_nexthop;
   struct in_addr ipv4_dest_addr;
   struct in6_addr ipv6_dest_addr;
+  struct uuid* route_uuid = NULL;
   int count;
   int rc = 1;
 
@@ -4765,7 +4832,19 @@ zebra_add_route (bool is_ipv6, struct prefix *p, int type, safi_t safi,
   rib->flags = flags;
   rib->uptime = time (NULL);
   rib->nexthop_num = 0; /* Start with zero */
-  rib->ovsdb_route_row_ptr = (void*) route;
+
+  /*
+   * Cache the route's UUID within for use when setting and unsetting
+   * the selected bits on the route
+   */
+  route_uuid = (struct uuid*)xzalloc(sizeof(struct uuid));
+
+  /*
+   * Copy the uuid of the ovsrec_port row for future references.
+   */
+  memcpy(route_uuid, &(route->header_.uuid), sizeof(struct uuid));
+
+  rib->ovsdb_route_row_uuid_ptr = (void*) route_uuid;
 
   VLOG_DBG("Going through %d next-hops", route->n_nexthops);
   for (count = 0; count < route->n_nexthops; count++)

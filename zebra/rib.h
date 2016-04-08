@@ -82,11 +82,10 @@ struct rib
   u_char nexthop_fib_num;
 
 #ifdef ENABLE_OVSDB
-  /*
-   * Pointer to the row in the route database
-   * in OVS.
-   */
-  void *ovsdb_route_row_ptr;
+   /*
+    * Pointer to the uuid fpr the route row in OVSDB
+    */
+   void *ovsdb_route_row_uuid_ptr;
 #endif
 };
 
@@ -460,7 +459,7 @@ extern unsigned long rib_score_proto (u_char proto);
 extern int
 static_add_ipv4_safi (safi_t safi, struct prefix *p, struct in_addr *gate,
 		      const char *ifname, u_char flags, u_char distance,
-		      u_int32_t vrf_id, void* ovsdb_route_row_ptr);
+		      u_int32_t vrf_id, void* ovsdb_route_row_uuid_ptr);
 #else
 extern int
 static_add_ipv4_safi (safi_t safi, struct prefix *p, struct in_addr *gate,
@@ -492,7 +491,7 @@ extern struct route_table *rib_table_ipv6;
 extern int
 static_add_ipv6 (struct prefix *p, u_char type, struct in6_addr *gate,
 		 const char *ifname, u_char flags, u_char distance,
-		 u_int32_t vrf_id, void* ovsdb_route_row_ptr);
+		 u_int32_t vrf_id, void* ovsdb_route_row_uuid_ptr);
 #else
 extern int
 static_add_ipv6 (struct prefix *p, u_char type, struct in6_addr *gate,

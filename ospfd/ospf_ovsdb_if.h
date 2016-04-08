@@ -77,6 +77,8 @@
 
 #define MAX_PATH_STRING_LEN                    128
 
+#define OVSDB_OSPF_DEFAULT_REF_BANDWIDTH       (40000 * 1000)   /* kbps */
+
 typedef struct
 {
    unsigned char lsa_type;

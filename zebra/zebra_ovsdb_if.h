@@ -28,6 +28,13 @@
 #define ZEBRA_NH_UNINSTALL  ZEBRA_RT_UNINSTALL
 #define ZEBRA_NH_INSTALL    ZEBRA_RT_INSTALL
 
+/*
+ * TODO: Remove this macro once the macro is available through OVSDB IDL
+ *       libraries.
+ */
+#define OVSREC_IDL_GET_TABLE_ROW_UUID(ovsrec_row_struct) \
+                             (ovsrec_row_struct->header_.uuid)
+
 struct ipv4v6_addr
 {
   union {

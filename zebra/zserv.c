@@ -837,7 +837,7 @@ zread_ipv4_add (struct zserv *client, u_short length)
   safi = stream_getw (s);
   rib->uptime = time (NULL);
 #ifdef ENABLE_OVSDB
-  rib->ovsdb_route_row_ptr = NULL;
+  rib->ovsdb_route_row_uuid_ptr = NULL;
 #endif
 
   /* IPv4 prefix. */
@@ -897,7 +897,7 @@ zread_ipv4_add (struct zserv *client, u_short length)
 
   /* OVSDB route pointer */
 #ifdef ENABLE_OVSDB
-  rib->ovsdb_route_row_ptr = NULL;
+  rib->ovsdb_route_row_uuid_ptr = NULL;
 #endif
 
   rib_add_ipv4_multipath (&p, rib, safi);

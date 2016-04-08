@@ -2036,7 +2036,7 @@ rib_add_ipv4 (int type, int flags, struct prefix_ipv4 *p,
   rib->nexthop_num = 0;
   rib->uptime = time (NULL);
 #ifdef ENABLE_OVSDB
-  rib->ovsdb_route_row_ptr = NULL;
+  rib->ovsdb_route_row_uuid_ptr = NULL;
 #endif
 
   /* Nexthop settings. */
@@ -2512,7 +2512,7 @@ static_install_ipv4 (safi_t safi, struct prefix *p, struct static_ipv4 *si)
       rib->table = zebrad.rtm_table_default;
       rib->nexthop_num = 0;
 #ifdef ENABLE_OVSDB
-      rib->ovsdb_route_row_ptr = ovsrec_route_ptr;
+      rib->ovsdb_route_row_uuid_ptr = ovsrec_route_ptr;
 #endif
 
       switch (si->type)
@@ -2851,7 +2851,7 @@ rib_add_ipv6 (int type, int flags, struct prefix_ipv6 *p,
   rib->nexthop_num = 0;
   rib->uptime = time (NULL);
 #ifdef ENABLE_OVSDB
-  rib->ovsdb_route_row_ptr = NULL;
+  rib->ovsdb_route_row_uuid_ptr = NULL;
 #endif
 
   /* Nexthop settings. */
@@ -3088,7 +3088,7 @@ static_install_ipv6 (struct prefix *p, struct static_ipv6 *si)
       rib->table = zebrad.rtm_table_default;
       rib->nexthop_num = 0;
 #ifdef ENABLE_OVSDB
-      rib->ovsdb_route_row_ptr = ovsrec_route_ptr;
+      rib->ovsdb_route_row_uuid_ptr = ovsrec_route_ptr;
 #endif
 
       switch (si->type)

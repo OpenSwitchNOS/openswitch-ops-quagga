@@ -270,16 +270,12 @@ ospf_ovsdb_tables_init()
     ovsdb_idl_add_column(idl, &ovsrec_port_col_name);
     ovsdb_idl_add_column(idl, &ovsrec_port_col_ospf_intervals);
     ovsdb_idl_add_column(idl, &ovsrec_port_col_ospf_if_out_cost);
-    ovsdb_idl_omit_alert(idl, &ovsrec_port_col_ospf_if_out_cost);
     ovsdb_idl_add_column(idl, &ovsrec_port_col_ospf_priority);
-    ovsdb_idl_omit_alert(idl, &ovsrec_port_col_ospf_priority);
     ovsdb_idl_add_column(idl, &ovsrec_port_col_ospf_if_type);
-    ovsdb_idl_omit_alert(idl, &ovsrec_port_col_ospf_if_type);
     ovsdb_idl_add_column(idl, &ovsrec_port_col_ospf_auth_type);
     ovsdb_idl_add_column(idl, &ovsrec_port_col_ospf_auth_text_key);
     ovsdb_idl_add_column(idl, &ovsrec_port_col_ospf_auth_md5_keys);
     ovsdb_idl_add_column(idl, &ovsrec_port_col_ospf_mtu_ignore);
-    ovsdb_idl_omit_alert(idl, &ovsrec_port_col_ospf_mtu_ignore);
     ovsdb_idl_add_column(idl, &ovsrec_port_col_other_config);
     ovsdb_idl_add_column(idl, &ovsrec_port_col_statistics);
     ovsdb_idl_add_column(idl, &ovsrec_port_col_status);
@@ -3547,6 +3543,7 @@ modify_ospf_interface (struct ovsdb_idl *idl,
     struct listnode *node;
     unsigned char key_id;
     u_int32_t seconds = 0;
+    u_int32_t val = 0;
     int ret_status = -1;
     int i =0;
     bool is_key_found = false;
@@ -3587,8 +3584,111 @@ modify_ospf_interface (struct ovsdb_idl *idl,
                     if ((oi = rn->info))
                         ospf_nbr_timer_update (oi);
             }
+
+            /* Retransmit Interval */
+            seconds = ovs_port->value_ospf_intervals [OVS_OSPF_RETRANSMIT_INTERVAL_SORTED];
+            if (seconds < 3 || seconds > 65535)
+                VLOG_DBG("Retransmit Interval is invalid");
+            else {
+                SET_IF_PARAM (params, retransmit_interval);
+                params->retransmit_interval = seconds;
+            }
+
+            /* Transmit Delay */
+            seconds = ovs_port->value_ospf_intervals [OVS_OSPF_TRANSMIT_INTERVAL_SORTED];
+            if (seconds < 1 || seconds > 65535)
+                VLOG_DBG("Transmit delay is invalid");
+            else {
+                SET_IF_PARAM (params, retransmit_interval);
+                params->retransmit_interval = seconds;
+            }
         }
     }
+
+    /* Priority */
+    if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_port_col_ospf_priority, idl_seqno)) {
+        if (ovs_port->n_ospf_priority){
+            val = *ovs_port->ospf_priority;
+            if (val < 0 || val > 255)
+                    VLOG_DBG("Priority value is invalid");
+            else {
+                SET_IF_PARAM (params, priority);
+                params->priority = val;
+
+                for (rn = route_top (IF_OIFS (ifp)); rn; rn = route_next (rn)){
+                    struct ospf_interface *oi = rn->info;
+
+                    if (!oi)
+                        continue;
+
+                    if (PRIORITY (oi) != OSPF_IF_PARAM (oi, priority)) {
+                        PRIORITY (oi) = OSPF_IF_PARAM (oi, priority);
+                        OSPF_ISM_EVENT_SCHEDULE (oi, ISM_NeighborChange);
+                    }
+                }
+            }
+        }
+    }
+
+    /* MTU ignore */
+    if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_port_col_ospf_mtu_ignore, idl_seqno)) {
+        if (ovs_port->n_ospf_mtu_ignore){
+            val = *ovs_port->ospf_mtu_ignore;
+            params->mtu_ignore = val;
+            if (val)
+                SET_IF_PARAM (params, mtu_ignore);
+            else
+                UNSET_IF_PARAM (params, mtu_ignore);
+        }
+        else
+            VLOG_DBG("MTU ignore flag is not present");
+    }
+
+    /* Cost */
+    if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_port_col_ospf_if_out_cost, idl_seqno)) {
+        if (ovs_port->n_ospf_if_out_cost){
+            val = *ovs_port->ospf_if_out_cost;
+            if (val < 1 || val > 65535)
+                    VLOG_DBG("Cost value is invalid");
+            else {
+                SET_IF_PARAM (params, output_cost_cmd);
+                params->output_cost_cmd = val;
+
+                ospf_if_recalculate_output_cost (ifp);
+            }
+        }
+        else
+            VLOG_DBG("Interface cost is not present");
+    }
+
+    /* Network Type */
+    if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_port_col_ospf_if_type, idl_seqno)) {
+        val = IF_DEF_PARAMS (ifp)->type;
+        if (!strcmp(ovs_port->ospf_if_type, OVSREC_PORT_OSPF_IF_TYPE_OSPF_IFTYPE_BROADCAST)){
+            IF_DEF_PARAMS (ifp)->type = OSPF_IFTYPE_BROADCAST;
+        }
+        else if (!strcmp(ovs_port->ospf_if_type, OVSREC_PORT_OSPF_IF_TYPE_OSPF_IFTYPE_POINTOPOINT)){
+            IF_DEF_PARAMS (ifp)->type = OSPF_IFTYPE_POINTOPOINT;
+        }
+
+        if (val != IF_DEF_PARAMS (ifp)->type) {
+            SET_IF_PARAM (IF_DEF_PARAMS (ifp), type);
+            for (rn = route_top (IF_OIFS (ifp)); rn; rn = route_next (rn)){
+                struct ospf_interface *oi = rn->info;
+
+                if (!oi)
+                    continue;
+
+                oi->type = IF_DEF_PARAMS (ifp)->type;
+
+                if (oi->state > ISM_Down){
+                    OSPF_ISM_EVENT_EXECUTE (oi, ISM_InterfaceDown);
+                    OSPF_ISM_EVENT_EXECUTE (oi, ISM_InterfaceUp);
+                }
+            }
+        }
+    }
+
     if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_port_col_ospf_auth_type, idl_seqno))  {
         if (ovs_port->ospf_auth_type) {
             if (!strcmp(ovs_port->ospf_auth_type,OVSREC_PORT_OSPF_AUTH_TYPE_TEXT)) {

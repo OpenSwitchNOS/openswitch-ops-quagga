@@ -78,14 +78,21 @@ VLOG_DEFINE_THIS_MODULE(bgp_ovsdb_route);
  * with CLI daemon.
  */
 typedef struct route_psd_bgp_s {
-    int flags;
-    const char *aspath;
-    const char *origin;
-    int local_pref;
-    bool internal;
-    bool ibgp;
-    const char *uptime;
+    int flags;                    /* Route status flags. */
+    const char *aspath;           /* List of AS path number for a route. */
+    const char *origin;           /* Indicates route is IBGP or EBGP. */
+    bool internal;                /* Specifies route is internal or not. */
+    bool ibgp;                    /* Specifies router is IBGP or EBGP. */
+    const char *uptime;           /* Specifies uptime of route. */
+    int weight;                   /* Specifies weight of route. */
+    int local_pref;               /* Local preference path attribute. */
+    int aggregator_id;            /* Specifies aggregator id of route. */
+    const char *aggregator_addr;  /* Specifies aggregator address of route */
+    const char *atomic_aggregate; /* Specifies if atomic aggregate has occured. */
+    const char *community;        /* Specifies community attribute*/
+    const char *ecommunity;       /* Specifies extended community attribute*/
 } route_psd_bgp_t;
+
 
 
 enum txn_bgp_request {
@@ -180,7 +187,7 @@ txn_command_result(enum ovsdb_idl_txn_status status, char *msg, char *pr)
 #define END_DB_TXN(txn, msg, pr)                          \
     do {                                                  \
         enum ovsdb_idl_txn_status status;                 \
-        status = ovsdb_idl_txn_commit(txn);               \
+        status = ovsdb_idl_txn_commit_block(txn);               \
         return txn_command_result(status, msg, pr);       \
     } while (0)
 
@@ -240,137 +247,230 @@ bgp_ovsdb_get_vrf(struct bgp *bgp)
 
 
 static int
-bgp_ovsdb_set_rib_path_attributes(struct smap *smap,
+bgp_ovsdb_set_rib_path_attributes(const struct ovsrec_bgp_route **rib_row,
                                   struct bgp_info *info,
                                   struct bgp *bgp)
 {
+    const struct ovsrec_bgp_route *rib = NULL;
     struct attr *attr;
     struct peer *peer;
     char *comm = NULL;
     char *ecomm = NULL;
     time_t tbuf;
+    route_psd_bgp_t psd, *ppsd = NULL;
+    int64_t flags, aggr_as, local_pref, weight;
+    char *aggr_addr = NULL;
+    char *uptime = NULL;
+    bool prot_internal, prot_ibgp;
+    char *aspath = NULL;
+    char *origin = NULL;
+    if (rib_row == NULL) {
+        VLOG_ERR("BGP row is null for set attributes\n");
+        return 0;
+    }
 
+    rib = *rib_row;
     attr = info->attr;
     peer = info->peer;
-    smap_add_format(smap,
-                    OVSDB_BGP_ROUTE_PATH_ATTRIBUTES_FLAGS,
-                    "%d",
-                    info->flags);
-    smap_add(smap,
-             OVSDB_BGP_ROUTE_PATH_ATTRIBUTES_AS_PATH,
-             aspath_print(info->attr->aspath));
-    smap_add(smap,
-             OVSDB_BGP_ROUTE_PATH_ATTRIBUTES_ORIGIN,
-             bgp_origin_str[info->attr->origin]);
+
+    if (info->flags) {
+        if (rib->n_flags) {
+            if (info->flags != *rib->flags) {
+                flags = info->flags;
+                ovsrec_bgp_route_set_flags(rib, &flags, 1);
+            }
+        } else {
+            flags = info->flags;
+            ovsrec_bgp_route_set_flags(rib, &flags, 1);
+        }
+    }
+
+    aspath = (char *)aspath_print(info->attr->aspath);
+    if (aspath) {
+        if (rib->aspath) {
+            if (strcmp(rib->aspath, aspath)) {
+                ovsrec_bgp_route_set_aspath(rib, aspath);
+            }
+        } else {
+             ovsrec_bgp_route_set_aspath(rib, aspath);
+        }
+    }
+
+    origin = (char *)bgp_origin_str[info->attr->origin];
+    if (origin) {
+        if (rib->origin) {
+            if (strcmp(rib->origin, origin)) {
+                ovsrec_bgp_route_set_origin(rib, origin);
+            }
+        } else {
+            ovsrec_bgp_route_set_origin(rib, origin);
+        }
+    }
 
     if (attr->community) {
-        comm = (char *)community_str(attr->community);
+        comm = community_str(attr->community);
     }
     if (attr->extra) {
         if (attr->extra->ecommunity) {
-            ecomm =  (char *)ecommunity_str(attr->extra->ecommunity);
+            ecomm =  ecommunity_str(attr->extra->ecommunity);
         }
     }
+
     if(comm != NULL) {
-        smap_add(smap,
-                 OVSDB_BGP_ROUTE_PATH_ATTRIBUTES_COMMUNITY,
-                 comm);
-    } else if(comm == NULL) {
-        smap_add(smap,
-                 OVSDB_BGP_ROUTE_PATH_ATTRIBUTES_COMMUNITY,
-                 "");
-    }
-    if(ecomm != NULL) {
-        smap_add(smap,
-                 OVSDB_BGP_ROUTE_PATH_ATTRIBUTES_ECOMMUNITY,
-                 ecomm);
-    } else if(ecomm == NULL) {
-        smap_add(smap,
-                 OVSDB_BGP_ROUTE_PATH_ATTRIBUTES_ECOMMUNITY,
-                 "");
+        if (rib->community) {
+            if (strcmp(rib->community, comm)) {
+                ovsrec_bgp_route_set_community(rib, comm);
+            }
+        } else {
+            ovsrec_bgp_route_set_community(rib, comm);
+        }
     }
 
-    smap_add_format(smap,
-                    OVSDB_BGP_ROUTE_PATH_ATTRIBUTES_LOC_PREF,
-                    "%d",
-                    attr->local_pref?attr->local_pref:0);
+    if(ecomm != NULL) {
+        if (rib->ecommunity) {
+            if (strcmp(rib->ecommunity, comm)) {
+                ovsrec_bgp_route_set_ecommunity(rib, ecomm);
+            }
+        } else {
+            ovsrec_bgp_route_set_ecommunity(rib, ecomm);
+        }
+    }
+
+    if (attr->local_pref) {
+        if (rib->n_local_pref) {
+            if (attr->local_pref != *rib->local_pref) {
+                local_pref = attr->local_pref;
+                ovsrec_bgp_route_set_local_pref(rib, &local_pref, 1);
+            }
+        } else {
+            local_pref = attr->local_pref;
+            ovsrec_bgp_route_set_local_pref(rib, &local_pref, 1);
+        }
+    }
+
     if (attr->extra) {
-        smap_add_format(smap,
-                        OVSDB_BGP_ROUTE_PATH_ATTRIBUTES_WEIGHT,
-                        "%d",
-                        attr->extra->weight?attr->extra->weight:0);
+        if (attr->extra->weight) {
+            if (rib->n_weight) {
+                if (attr->extra->weight != *rib->weight) {
+                    weight = attr->extra->weight;
+                    ovsrec_bgp_route_set_weight(rib, &weight, 1);
+                }
+            } else {
+                weight = attr->extra->weight;
+                ovsrec_bgp_route_set_weight(rib, &weight, 1);
+            }
+        }
+
 
         if (CHECK_FLAG(attr->flag, ATTR_FLAG_BIT(BGP_ATTR_AGGREGATOR))) {
-            smap_add_format(smap,
-                            OVSDB_BGP_ROUTE_PATH_ATTRIBUTES_AGGREGATOR_ID,
-                            "%d",
-                            attr->extra->aggregator_as?
-                            attr->extra->aggregator_as:0);
-            smap_add(smap,
-                     OVSDB_BGP_ROUTE_PATH_ATTRIBUTES_AGGREGATOR_ADDR,
-                     inet_ntoa(attr->extra->aggregator_addr));
-        } else {
-            smap_add_format(smap,
-                            OVSDB_BGP_ROUTE_PATH_ATTRIBUTES_AGGREGATOR_ID,
-                            "%d", 0);
-            smap_add(smap,
-                     OVSDB_BGP_ROUTE_PATH_ATTRIBUTES_AGGREGATOR_ADDR,
-                     "");
-        }
+            if (attr->extra->aggregator_as) {
+                if (rib->n_aggregator_as) {
+                    if (attr->extra->aggregator_as != *rib->aggregator_as) {
+                        aggr_as = attr->extra->aggregator_as;
+                        ovsrec_bgp_route_set_aggregator_as(rib, &aggr_as, 1);
+                    }
+                } else {
+                    aggr_as = attr->extra->aggregator_as;
+                    ovsrec_bgp_route_set_aggregator_as(rib, &aggr_as, 1);
+                }
+            }
 
-    } else {
-        smap_add_format(smap,
-                        OVSDB_BGP_ROUTE_PATH_ATTRIBUTES_WEIGHT,
-                        "%d", 0);
-        smap_add_format(smap,
-                        OVSDB_BGP_ROUTE_PATH_ATTRIBUTES_AGGREGATOR_ID,
-                        "%d", 0);
-        smap_add(smap,
-                 OVSDB_BGP_ROUTE_PATH_ATTRIBUTES_AGGREGATOR_ADDR,
-                 "");
-        smap_add(smap,
-                OVSDB_BGP_ROUTE_PATH_ATTRIBUTES_ECOMMUNITY,
-                 "");
+            aggr_addr = inet_ntoa(attr->extra->aggregator_addr);
+
+            if (aggr_addr) {
+                if (rib->aggregator_addr) {
+                    if (strcmp(rib->aggregator_addr,
+                               aggr_addr)) {
+                        ovsrec_bgp_route_set_aggregator_addr(rib, aggr_addr);
+                    }
+                } else {
+                    ovsrec_bgp_route_set_aggregator_addr(rib, aggr_addr);
+                }
+            }
+        }
     }
+
     if (attr->flag & ATTR_FLAG_BIT(BGP_ATTR_ATOMIC_AGGREGATE)) {
-        smap_add(smap,
-                 OVSDB_BGP_ROUTE_PATH_ATTRIBUTES_ATOMIC_AGGREGATE,
-                 "atomic-aggregate");
-    } else {
-        smap_add(smap,
-                 OVSDB_BGP_ROUTE_PATH_ATTRIBUTES_ATOMIC_AGGREGATE,
-                 "");
+        if (rib->atomic_aggregate) {
+            if (strcmp(rib->atomic_aggregate, "atomic-aggregate")) {
+                ovsrec_bgp_route_set_atomic_aggregate(rib, "atomic-aggregate");
+            }
+        } else {
+            ovsrec_bgp_route_set_atomic_aggregate(rib, "atomic-aggregate");
+        }
     }
+
     /* TODO: Check for confed flag later */
     if (peer->sort == BGP_PEER_IBGP) {
-        smap_add(smap,
-                 OVSDB_BGP_ROUTE_PATH_ATTRIBUTES_INTERNAL,
-                 "true");
-        smap_add(smap,
-                 OVSDB_BGP_ROUTE_PATH_ATTRIBUTES_IBGP,
-                 "true");
+        if (rib->n_protocol_internal) {
+            if (!(*(rib->protocol_internal))) {
+                prot_internal = true;
+                ovsrec_bgp_route_set_protocol_internal(rib, &prot_internal, 1);
+            }
+        } else {
+             prot_internal = true;
+             ovsrec_bgp_route_set_protocol_internal(rib, &prot_internal, 1);
+        }
+
+        if (rib->n_protocol_ibgp) {
+            if (!(*(rib->protocol_ibgp))) {
+                prot_ibgp = true;
+                ovsrec_bgp_route_set_protocol_ibgp(rib, &prot_ibgp, 1);
+            }
+        } else {
+             prot_ibgp = true;
+             ovsrec_bgp_route_set_protocol_ibgp(rib, &prot_ibgp, 1);
+        }
+
 
     } else if ((peer->sort == BGP_PEER_EBGP && peer->ttl != 1)
                || CHECK_FLAG (peer->flags, PEER_FLAG_DISABLE_CONNECTED_CHECK)) {
-        smap_add(smap,
-                 OVSDB_BGP_ROUTE_PATH_ATTRIBUTES_INTERNAL,
-                 "true");
+        if (rib->n_protocol_internal) {
+            if (!(*(rib->protocol_internal))) {
+                prot_internal = true;
+                ovsrec_bgp_route_set_protocol_internal(rib, &prot_internal, 1);
+            }
+        } else {
+             prot_internal = true;
+             ovsrec_bgp_route_set_protocol_internal(rib, &prot_internal, 1);
+        }
     } else {
-        smap_add(smap,
-                 OVSDB_BGP_ROUTE_PATH_ATTRIBUTES_INTERNAL,
-                 "false");
-        smap_add(smap,
-                 OVSDB_BGP_ROUTE_PATH_ATTRIBUTES_IBGP,
-                 "false");
+        if (rib->n_protocol_internal) {
+            if (*(rib->protocol_internal)) {
+                prot_internal = false;
+                ovsrec_bgp_route_set_protocol_internal(rib, &prot_internal, 1);
+            }
+        } else {
+             prot_internal = false;
+             ovsrec_bgp_route_set_protocol_internal(rib, &prot_internal, 1);
+        }
+
+        if (rib->n_protocol_ibgp) {
+            if (*(rib->protocol_ibgp)) {
+                prot_ibgp = false;
+                ovsrec_bgp_route_set_protocol_ibgp(rib, &prot_ibgp, 1);
+            }
+        } else {
+             prot_ibgp = false;
+             ovsrec_bgp_route_set_protocol_ibgp(rib, &prot_ibgp, 1);
+        }
     }
 #ifdef HAVE_CLOCK_MONOTONIC
     tbuf = time(NULL) - (bgp_clock() - info->uptime);
 #else
     tbuf = info->uptime;
 #endif
-    smap_add(smap,
-             OVSDB_BGP_ROUTE_PATH_ATTRIBUTES_UPTIME,
-             ctime(&tbuf));
+    uptime = ctime(&tbuf);
+    if (uptime) {
+        if (rib->uptime) {
+            if (strcmp(rib->uptime, uptime)) {
+                ovsrec_bgp_route_set_uptime(rib, uptime);
+            }
+        } else {
+             ovsrec_bgp_route_set_uptime(rib, uptime);
+        }
+    }
+
     return 0;
 }
 
@@ -624,29 +724,30 @@ bgp_ovsdb_get_rib_path_attributes(const struct ovsrec_bgp_route *rib_row,
     assert(data);
     memset(data, 0, sizeof(*data));
 
-    data->flags = smap_get_int(&rib_row->path_attributes,
-                               OVSDB_BGP_ROUTE_PATH_ATTRIBUTES_FLAGS, 0);
-    data->aspath = smap_get(&rib_row->path_attributes,
-                            OVSDB_BGP_ROUTE_PATH_ATTRIBUTES_AS_PATH);
-    data->origin = smap_get(&rib_row->path_attributes,
-                            OVSDB_BGP_ROUTE_PATH_ATTRIBUTES_ORIGIN);
-    data->local_pref = smap_get_int(&rib_row->path_attributes,
-                                    OVSDB_BGP_ROUTE_PATH_ATTRIBUTES_LOC_PREF, 0);
-    const char *value;
-    value = smap_get(&rib_row->path_attributes,
-                     OVSDB_BGP_ROUTE_PATH_ATTRIBUTES_INTERNAL);
-    if (!strcmp(value, "true")) {
-        data->internal = 1;
-    } else {
-        data->internal = 0;
+    if (rib_row->n_flags) {
+        data->flags = *rib_row->flags;
     }
-    value = smap_get(&rib_row->path_attributes,
-                     OVSDB_BGP_ROUTE_PATH_ATTRIBUTES_IBGP);
-    if (!strcmp(value, "true")) {
-        data->ibgp = 1;
-    } else {
-        data->ibgp = 0;
+
+    if (rib_row->aspath) {
+        data->aspath = rib_row->aspath;
     }
+
+    if (rib_row->origin) {
+        data->origin = rib_row->origin;
+    }
+
+    if (rib_row->n_local_pref) {
+        data->local_pref = *rib_row->local_pref;
+    }
+
+    if (rib_row->n_protocol_ibgp) {
+        data->ibgp = *rib_row->protocol_ibgp;
+    }
+
+    if (rib_row->n_protocol_internal) {
+        data->internal = *rib_row->protocol_internal;
+    }
+
     return;
 }
 
@@ -783,7 +884,6 @@ bgp_ovsdb_announce_rib_entry(struct prefix *p,
     int64_t distance = 0, nexthop_num;
     int64_t metric_val = 0;
     const struct ovsrec_vrf *vrf = NULL;
-    struct smap smap;
 
     prefix2str(p, pr, sizeof(pr));
     afi= get_str_from_afi(p->family);
@@ -855,9 +955,6 @@ bgp_ovsdb_announce_rib_entry(struct prefix *p,
             bgp_ovsdb_set_rib_nexthop(txn, rib, p, info, nexthop_num, safi);
         }
     }
-    smap_init(&smap);
-    bgp_ovsdb_set_rib_path_attributes(&smap, info, bgp);
-    smap_destroy(&smap);
     END_DB_TXN(txn, "announced route", pr);
 }
 
@@ -879,7 +976,6 @@ bgp_ovsdb_add_local_rib_entry(struct prefix *p,
     int64_t distance = 0, nexthop_num;
     int64_t metric_val = 0;
     const struct ovsrec_vrf *vrf = NULL;
-    struct smap smap;
 
     prefix2str(p, pr, sizeof(pr));
     afi= get_str_from_afi(p->family);
@@ -934,10 +1030,8 @@ bgp_ovsdb_add_local_rib_entry(struct prefix *p,
     /* Set VRF */
     ovsrec_bgp_route_set_vrf(rib, vrf);
     /* Set path attributes */
-    smap_init(&smap);
-    bgp_ovsdb_set_rib_path_attributes(&smap, info, bgp);
-    ovsrec_bgp_route_set_path_attributes(rib, &smap);
-    smap_destroy(&smap);
+
+    bgp_ovsdb_set_rib_path_attributes(&rib, info, bgp);
 
     END_DB_TXN(txn, "added route to local RIB, prefix:", pr);
 }
@@ -949,16 +1043,15 @@ bgp_ovsdb_update_local_rib_entry_attributes(struct prefix *p,
                                             struct bgp *bgp,
                                             safi_t safi)
 {
-    const struct ovsrec_bgp_route *rib_row = NULL;
+    const struct ovsrec_bgp_route *rib = NULL;
     char pr[PREFIX_MAXLEN];
     struct ovsdb_idl_txn *txn = NULL;
-    struct smap smap;
 
     prefix2str(p, pr, sizeof(pr));
     VLOG_DBG("%s: Updating flags for route %s, flags %d\n",
              __FUNCTION__, pr, info->flags);
-    rib_row = bgp_ovsdb_lookup_local_rib_entry(p, info, bgp, safi);
-    if (!rib_row) {
+    rib = bgp_ovsdb_lookup_local_rib_entry(p, info, bgp, safi);
+    if (!rib) {
         VLOG_ERR("%s: Failed to find route %s in Route table\n",
                  __FUNCTION__, pr);
         return -1;
@@ -967,10 +1060,7 @@ bgp_ovsdb_update_local_rib_entry_attributes(struct prefix *p,
              __FUNCTION__, pr, info->peer->host);
     START_DB_TXN(txn, "Failed to create route table txn",
                  TXN_BGP_UPD_ATTR, p, info, bgp->as, safi);
-    smap_init(&smap);
-    bgp_ovsdb_set_rib_path_attributes(&smap, info, bgp);
-    ovsrec_bgp_route_set_path_attributes(rib_row, &smap);
-    smap_destroy(&smap);
+    bgp_ovsdb_set_rib_path_attributes(&rib, info, bgp);
     END_DB_TXN(txn, "update route", pr);
 }
 
@@ -1136,7 +1226,7 @@ bgp_txn_complete_processing(void)
 
         /* log transaction */
         bgp_txn_log(txn, status);
-
+        VLOG_DBG("GANESH: txn_complete_processing: prefix: %s, status: %d", prefix_str, status);
         /* Clean up an free txn on success */
         if ((status == TXN_SUCCESS) || (status == TXN_UNCHANGED) ||
             (status == TXN_ABORTED) || (status == TXN_ERROR)) {

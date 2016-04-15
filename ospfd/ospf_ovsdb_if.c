@@ -20,15 +20,21 @@
  *
  * Purpose: Main file for integrating ospfd with ovsdb and ovs poll-loop.
  */
-#include <zebra.h>
 
+/* Linux headers */
+#include <net/if.h>
+
+/* Quagga lib headers */
+#include <zebra.h>
 #include <lib/version.h>
 #include "getopt.h"
 #include "command.h"
 #include "thread.h"
+#include "prefix.h"
+#include "if.h"
 #include "memory.h"
 #include "shash.h"
-#include "ospfd/ospfd.h"
+
 /* OVS headers */
 #include "config.h"
 #include "command-line.h"
@@ -42,21 +48,22 @@
 #include "unixctl.h"
 #include "table.h"
 #include "openvswitch/vlog.h"
+#include "openswitch-idl.h"
 #include "vswitch-idl.h"
 #include "coverage.h"
-#include "prefix.h"
 
-#include "openswitch-idl.h"
+/* Quagga ospfd headers */
+#include "ospfd/ospfd.h"
 #include "ospfd/ospf_lsa.h"
 #include "ospfd/ospf_lsdb.h"
 #include "ospfd/ospf_nsm.h"
 #include "ospfd/ospf_ism.h"
 #include "ospfd/ospf_neighbor.h"
-#include "ospfd/ospf_route.h"
-#include "ospfd/ospf_ovsdb_if.h"
 #include "ospfd/ospf_interface.h"
-#include "ospfd/ospf_asbr.h"
+#include "ospfd/ospf_route.h"
 #include "ospfd/ospf_zebra.h"
+#include "ospfd/ospf_ovsdb_if.h"
+#include "ospfd/ospf_asbr.h"
 
 #define NEXTHOP_STR_SIZE 64
 
@@ -75,11 +82,23 @@ ospf_external_info_free (struct external_info *ei);
 /*
  * Static Function Prototypes
  */
-static void ospf_route_add_to_area_route_table (struct route_table * oart, struct prefix *p_or, struct ospf_route *or);
+static void ospf_route_add_to_area_route_table (struct route_table * oart, struct prefix *p_or,
+                                                struct ospf_route *or);
 static void ospf_area_route_table_free (struct route_table *oart);
 
 static char * ospf_route_path_type_string (u_char path_type);
 static char * ospf_route_path_type_ext_string (u_char path_type);
+
+/* Interface/Port change related functions */
+static int ospf_interface_add_from_ovsdb (struct ovsdb_idl *idl, const struct ovsrec_vrf *ovs_vrf,
+                                          const struct ovsrec_port *ovs_port);
+static int ospf_interface_delete_from_ovsdb (struct ovsdb_idl *idl, const struct ovsrec_vrf *ovs_vrf,
+                                             struct interface *ifp);
+static int ospf_interface_update_from_ovsdb (struct ovsdb_idl *idl, const struct ovsrec_vrf *ovs_vrf,
+                                             const struct ovsrec_port *ovs_port);
+
+static void ospf_interface_state_update_from_ovsdb (struct ovsdb_idl *idl, const struct ovsrec_port *ovs_port,
+                              const struct ovsrec_interface *ovs_interface, struct interface *ifp);
 
 /* TODO This util function can be moved to common utils file */
 static char * boolean2string (bool flag);
@@ -194,6 +213,7 @@ ospf_ovsdb_tables_init()
     ovsdb_idl_add_table(idl, &ovsrec_table_vrf);
     ovsdb_idl_add_column(idl, &ovsrec_vrf_col_name);
     ovsdb_idl_add_column(idl, &ovsrec_vrf_col_ospf_routers);
+    ovsdb_idl_add_column(idl, &ovsrec_vrf_col_ports);
 
     /* Add interface columns */
     ovsdb_idl_add_table(idl, &ovsrec_table_interface);
@@ -628,20 +648,20 @@ ospf_ovs_clear_fds (void)
  */
 static inline void ospf_chk_for_system_configured(void)
 {
-    const struct ovsrec_system *ovs_vsw = NULL;
+  const struct ovsrec_system *ovs_vsw = NULL;
 
-    if (system_configured) {
-        /* Nothing to do if we're already configured. */
-        return;
-    }
+  if (system_configured) {
+    /* Nothing to do if we're already configured. */
+    return;
+  }
 
-    ovs_vsw = ovsrec_system_first(idl);
+  ovs_vsw = ovsrec_system_first(idl);
 
-    if (ovs_vsw && (ovs_vsw->cur_cfg > (int64_t) 0)) {
-        system_configured = true;
-        VLOG_INFO("System is now configured (cur_cfg=%d).",
-                 (int)ovs_vsw->cur_cfg);
-    }
+  if (ovs_vsw && (ovs_vsw->cur_cfg > (int64_t) 0)) {
+    system_configured = true;
+    VLOG_INFO("System is now configured (cur_cfg=%d).",
+    (int)ovs_vsw->cur_cfg);
+  }
 }
 
 static struct ovsrec_ospf_interface*
@@ -655,6 +675,23 @@ find_ospf_interface_by_name (const char* ifname)
             return ospf_intf_row;
     }
     return NULL;
+}
+
+static struct ovsrec_port*
+find_vrf_port_by_name (const struct ovsrec_vrf *vrf_row, const char *ifname)
+{
+  struct ovsrec_port* port_row = NULL;
+  int i;
+
+  if (vrf_row) {
+    for (i = 0; i < vrf_row->n_ports; i++) {
+      if (vrf_row->ports[i] && (0 == strcmp (vrf_row->ports[i]->name, ifname))) {
+        return vrf_row->ports[i];
+      }
+    }
+  }
+
+  return NULL;
 }
 
 static struct ovsrec_port*
@@ -3767,6 +3804,54 @@ ospf_area_read_ovsdb_apply_changes (struct ovsdb_idl *idl)
 }
 
 static void
+ospf_port_read_ovsdb_apply_changes (struct ovsdb_idl *idl)
+{
+  const struct ovsrec_vrf *ovs_vrf = NULL;
+  const struct ovsrec_port *ovs_port = NULL;
+  struct listnode *node, *nextnode;
+  int i = 0;
+
+  OVSREC_VRF_FOR_EACH (ovs_vrf, idl) {
+    for (i = 0 ; i < ovs_vrf->n_ports; i++) {
+      ovs_port = ovs_vrf->ports[i];
+      if (ovs_port) {
+        if (OVSREC_IDL_IS_ROW_INSERTED(ovs_port, idl_seqno)) {
+          ospf_interface_add_from_ovsdb (idl, ovs_vrf, ovs_port);
+        }
+        if (OVSREC_IDL_IS_ROW_MODIFIED(ovs_port, idl_seqno) ||
+           (OVSREC_IDL_IS_ROW_INSERTED(ovs_port, idl_seqno))) {
+          ospf_interface_update_from_ovsdb (idl, ovs_vrf, ovs_port);
+        }
+      }
+    }
+  }
+}
+
+static void
+ospf_intf_read_ovsdb_apply_changes (struct ovsdb_idl *idl)
+{
+  const struct ovsrec_vrf *ovs_vrf = NULL;
+  const struct ovsrec_port *ovs_port = NULL;
+  const struct ovsrec_interface *ovs_interface = NULL;
+  int i = 0;
+
+  OVSREC_VRF_FOR_EACH (ovs_vrf, idl) {
+    for (i = 0 ; i < ovs_vrf->n_ports; i++) {
+      ovs_port = ovs_vrf->ports[i];
+      if (ovs_port) {
+        ovs_interface = ovs_port->interfaces[0];
+        if (ovs_interface) {
+          if (OVSREC_IDL_IS_ROW_MODIFIED(ovs_interface, idl_seqno) ||
+             (OVSREC_IDL_IS_ROW_INSERTED(ovs_interface, idl_seqno))) {
+            ospf_interface_state_update_from_ovsdb (idl, ovs_port, ovs_interface, NULL);
+          }
+        }
+      }
+    }
+  }
+}
+
+static void
 ospf_interface_read_ovsdb_apply_changes(struct ovsdb_idl *idl)
 {
     const struct ovsrec_ospf_interface* ovs_oi = NULL;
@@ -3776,7 +3861,7 @@ ospf_interface_read_ovsdb_apply_changes(struct ovsdb_idl *idl)
      OVSREC_OSPF_INTERFACE_FOR_EACH(ovs_oi, idl) {
         ovs_port = ovs_oi->port;
         if (ovs_port && OVSREC_IDL_IS_ROW_MODIFIED(ovs_port, idl_seqno))
-           modify_ospf_interface (idl, ovs_port,ovs_oi->name);
+           modify_ospf_interface (idl, ovs_port, ovs_oi->name);
      }
 }
 
@@ -3818,55 +3903,83 @@ ospf_apply_global_changes (void)
 static int
 ospf_apply_port_changes (struct ovsdb_idl *idl)
 {
-   const struct ovsrec_port* port_first = NULL;
+  const struct ovsrec_vrf *ovs_vrf = NULL;
+  const struct ovsrec_port* port_first = NULL;
+  struct listnode *node, *nextnode;
+  struct interface *ifp;
 
-   port_first = ovsrec_port_first(idl);
-   /*
-    * Check if any table changes present.
-    * If no change just return from here
-    */
-    if (port_first && !OVSREC_IDL_ANY_TABLE_ROWS_INSERTED(port_first, idl_seqno)
-        && !OVSREC_IDL_ANY_TABLE_ROWS_DELETED(port_first, idl_seqno)
-        && !OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED(port_first, idl_seqno)) {
-            VLOG_DBG ("No Port changes");
-            return 0;
+  port_first = ovsrec_port_first(idl);
+
+  if (port_first == NULL) {
+    /* No row in the Port table present */
+    /* Delete all the interfaces in the iflist */
+    OVSREC_VRF_FOR_EACH (ovs_vrf, idl) {
+      for (ALL_LIST_ELEMENTS (iflist, node, nextnode, ifp)) {
+        ospf_interface_delete_from_ovsdb (idl, ovs_vrf, ifp);
+      }
     }
-    if (port_first == NULL) {
-            VLOG_DBG("No OSPF interface present!\n");
-            return 1;
-    }
-
-    /* Check if any row deletion. May or may not by CLI */
-    /* OPS_TODO : Handle Port related changes like IP change etc */
-    if (OVSREC_IDL_ANY_TABLE_ROWS_DELETED(port_first, idl_seqno)) {
-        VLOG_DBG("Some Port deleted!\n");
-    }
-
-    /* insert and modify cases */
-    ospf_interface_read_ovsdb_apply_changes(idl);
-
     return 1;
+  }
+
+  if (port_first && !OVSREC_IDL_ANY_TABLE_ROWS_INSERTED(port_first, idl_seqno)
+      && !OVSREC_IDL_ANY_TABLE_ROWS_DELETED(port_first, idl_seqno)
+      && !OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED(port_first, idl_seqno)) {
+    return 0;
+  }
+
+  if (OVSREC_IDL_ANY_TABLE_ROWS_DELETED(port_first, idl_seqno)) {
+    /* Delete the interface from the iflist */
+    OVSREC_VRF_FOR_EACH (ovs_vrf, idl) {
+      for (ALL_LIST_ELEMENTS (iflist, node, nextnode, ifp)) {
+        if (!find_vrf_port_by_name (ovs_vrf, ifp->name)) {
+          ospf_interface_delete_from_ovsdb (idl, ovs_vrf, ifp);
+        }
+      }
+    }
+  }
+
+  /* insert and modify cases */
+  ospf_port_read_ovsdb_apply_changes (idl);
+
+  /* Other ospf interface configuration  parameter changes */
+  ospf_interface_read_ovsdb_apply_changes(idl);
+
+  return 1;
 }
 
 static int
 ospf_apply_interface_changes (struct ovsdb_idl *idl)
 {
-   const struct ovsrec_interface* intf_first = NULL;
+  const struct ovsrec_interface* intf_first = NULL;
 
-   intf_first = ovsrec_interface_first(idl);
-   /*
-    * Check if any table changes present.
-    * If no change just return from here
-    */
-    if (intf_first && !OVSREC_IDL_ANY_TABLE_ROWS_INSERTED(intf_first, idl_seqno)
-        && !OVSREC_IDL_ANY_TABLE_ROWS_DELETED(intf_first, idl_seqno)
-        && !OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED(intf_first, idl_seqno)) {
-            VLOG_DBG ("No Interface changes");
-            return 0;
-    }
+  intf_first = ovsrec_interface_first(idl);
 
-    // TODO: Add reconfigurations that will be needed by OSPF daemon
+  if (intf_first == NULL) {
+    VLOG_DBG("No row in the Interface table present!\n");
     return 1;
+  }
+
+  /*
+   * Check if any table changes present.
+   * If no change just return from here
+   */
+  if (intf_first && !OVSREC_IDL_ANY_TABLE_ROWS_INSERTED (intf_first, idl_seqno)
+      && !OVSREC_IDL_ANY_TABLE_ROWS_DELETED (intf_first, idl_seqno)
+      && !OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED (intf_first, idl_seqno)) {
+    return 0;
+  }
+
+  if (OVSREC_IDL_ANY_TABLE_ROWS_DELETED (intf_first, idl_seqno)) {
+    VLOG_DBG ("Interface delete\n");
+    /*TODO Handle interface delete - Unlikely case*/
+  }
+  if (OVSREC_IDL_ANY_TABLE_ROWS_INSERTED (intf_first, idl_seqno)
+      || OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED (intf_first, idl_seqno)) {
+    /* Interface insert or modify */
+    ospf_intf_read_ovsdb_apply_changes (idl);
+  }
+
+  return 1;
 }
 
 static int
@@ -3875,16 +3988,13 @@ ospf_apply_ospf_router_changes (struct ovsdb_idl *idl)
    const struct ovsrec_ospf_router* ospf_router_first = NULL;
    struct ospf *ospf_instance;
 
-   ospf_router_first = ovsrec_ospf_router_first(idl);
-   /*
-    * Check if any table changes present.
-    * If no change just return from here
-    */
+    ospf_router_first = ovsrec_ospf_router_first(idl);
+
     if (ospf_router_first && !OVSREC_IDL_ANY_TABLE_ROWS_INSERTED(ospf_router_first, idl_seqno)
         && !OVSREC_IDL_ANY_TABLE_ROWS_DELETED(ospf_router_first, idl_seqno)
         && !OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED(ospf_router_first, idl_seqno)) {
-            VLOG_DBG("No OSPF router changes");
-            return 0;
+        /* No OSPF router changes */
+        return 0;
     }
     if (ospf_router_first == NULL) {
             /* Check if it is a first row deletion */
@@ -4156,47 +4266,48 @@ ospf_apply_route_changes (struct ovsdb_idl *idl)
 static int
 ospf_apply_ospf_interface_changes (struct ovsdb_idl *idl)
 {
-   const struct ovsrec_ospf_interface* ospf_intf_first = NULL;
-   struct ospf *ospf_instance;
+  const struct ovsrec_ospf_interface* ospf_intf_first = NULL;
+  struct ospf *ospf_instance;
 
-   ospf_intf_first = ovsrec_ospf_interface_first(idl);
-   /*
-    * Check if any table changes present.
-    * If no change just return from here
-    */
-    if (ospf_intf_first && !OVSREC_IDL_ANY_TABLE_ROWS_INSERTED(ospf_intf_first, idl_seqno)
-        && !OVSREC_IDL_ANY_TABLE_ROWS_DELETED(ospf_intf_first, idl_seqno)
-        && !OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED(ospf_intf_first, idl_seqno)) {
-            VLOG_DBG("No OSPF router changes");
-            return 0;
-    }
-    /* OPS_TODO : Not sure to handle forceful deletion
-       interfaces using external tools as interface will be
-       created and deleted by ospfd or "[no] router ospf" */
-    if (ospf_intf_first == NULL) {
-            VLOG_DBG("No OSPF interface present!\n");
-            return 1;
-        }
+  ospf_intf_first = ovsrec_ospf_interface_first(idl);
 
-    /* Check if any row deletion. May or may not by CLI */
-    if (OVSREC_IDL_ANY_TABLE_ROWS_DELETED(ospf_intf_first, idl_seqno)) {
-        VLOG_DBG("Some OSPF interfaces deleted externally!\n");
-    }
+  /* OPS_TODO : Not sure to handle forceful deletion
+   * interfaces using external tools as interface will be
+   * created and deleted by ospfd or "[no] router ospf"
+   */
 
-    /* insert and modify cases */
-    ospf_interface_read_ovsdb_apply_changes(idl);
-
-    // TODO: Add reconfigurations that will be needed by OSPF daemon
+  if (ospf_intf_first == NULL) {
+    /* No row in the OSPF_Interface table present */
     return 1;
+  }
+
+  if (ospf_intf_first && !OVSREC_IDL_ANY_TABLE_ROWS_INSERTED(ospf_intf_first, idl_seqno)
+      && !OVSREC_IDL_ANY_TABLE_ROWS_DELETED(ospf_intf_first, idl_seqno)
+      && !OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED(ospf_intf_first, idl_seqno)) {
+    /* No OSPF OSPF Interface changes */
+    return 0;
+  }
+
+
+  /* Check if any row deletion. May or may not by CLI */
+  if (OVSREC_IDL_ANY_TABLE_ROWS_DELETED(ospf_intf_first, idl_seqno)) {
+    /* Some OSPF interfaces deleted externally */
+    VLOG_ERR ("Some OSPF interfaces deleted externally!");
+  }
+
+  /* insert and modify cases */
+  ospf_interface_read_ovsdb_apply_changes(idl);
+
+  return 1;
 }
 
 /*
  * Update the ospf rib routes in the OSPF_Route table of the OVSDB database *
-*/
+ */
 
 /*
  * Update the ospf network routes in the OSPF_Route table of the OVSDB database *
-*/
+ */
 void
 ovsdb_ospf_update_network_routes (const struct ospf *ospf, const struct route_table *rt)
 {
@@ -4211,7 +4322,7 @@ ovsdb_ospf_update_network_routes (const struct ospf *ospf, const struct route_ta
   struct route_table *ospf_area_route_table = NULL, *per_area_rt_table = NULL;
   struct in_addr area_id;
   struct smap route_info;
-  char   cost[6] = {0};
+  char   cost[9] = {0};
   char   prefix_str[19] = {0};
   struct listnode *pnode, *pnnode;
   struct ospf_path *path;
@@ -4398,7 +4509,7 @@ ovsdb_ospf_update_router_routes (const struct ospf *ospf, const struct route_tab
   struct ospf_path *path;
   struct smap route_info;
   char   prefix_str[19] = {0};
-  char   cost[6] = {0};
+  char   cost[9] = {0};
   char   **pathstrs = NULL;
   int    i = 0, j = 0, k = 0, l = 0;
 
@@ -5092,4 +5203,314 @@ ospf_route_path_type_ext_string (u_char path_type)
     default:
            return "invalid";
   }
+}
+
+#define INTERFACE_HW_INTF_INFO_MAP_MEDIA_TYPE "media_type"
+
+#define INTERFACE_HW_INTF_INFO_MAP_HW_TYPE_BROADCAST "broadcast"
+#define INTERFACE_HW_INTF_INFO_MAP_HW_TYPE_POINT_TO_POINT "point-to-point"
+
+#define DEFAULT_ETH_MTU 1500
+
+/*
+ * check the port status from the ovsdb port row
+ * return value: 1 for up, 0 for down
+ */
+static int
+is_ovs_port_state_up (struct ovsdb_idl *idl, const struct ovsrec_port *ovs_port,
+      const struct ovsrec_interface *ovs_interface, const struct interface *ifp)
+{
+  assert (ovs_port && ovs_interface && ifp);
+
+  if (ifp->ifindex == IFINDEX_INTERNAL) {
+    return 0;
+  }
+
+  if ((ovs_interface->admin_state &&
+        (strncmp (ovs_interface->admin_state, OVSREC_INTERFACE_ADMIN_STATE_UP,
+                  sizeof (OVSREC_INTERFACE_ADMIN_STATE_UP)) == 0)) &&
+     (ovs_interface->link_state &&
+        (strncmp (ovs_interface->link_state, OVSREC_INTERFACE_LINK_STATE_UP,
+                  sizeof (OVSREC_INTERFACE_LINK_STATE_UP)) == 0))) {
+    return 1;
+  }
+
+  return 0;
+}
+
+void
+if_set_value_from_ovsdb (struct ovsdb_idl *idl, const struct ovsrec_port *ovs_port, struct interface *ifp)
+{
+  const struct ovsrec_interface *ovs_interface = NULL;
+  const struct ovsrec_ospf_router *ovs_ospf_router = NULL;
+  u_int32_t ifindex = IFINDEX_INTERNAL;
+  const char *data = NULL;
+  int i = 0;
+
+  assert (ovs_port && ifp);
+
+  VLOG_DBG ("Old interface %s - ifindex: %u status: %u flags: %u mtu %u bandwidth %u kbits\n",
+             ifp->name, ifp->ifindex, ifp->status, ifp->flags, ifp->mtu, ifp->bandwidth);
+
+  if (ifp->ifindex == IFINDEX_INTERNAL)
+    UNSET_FLAG (ifp->status, ZEBRA_INTERFACE_ACTIVE);
+  else
+    SET_FLAG (ifp->status, ZEBRA_INTERFACE_ACTIVE);
+
+  if (ovs_port->n_interfaces > 0)
+    ovs_interface = ovs_port->interfaces[0];
+
+  if (ovs_interface) {
+    if (ovs_interface->admin_state &&
+        (strncmp (ovs_interface->admin_state, OVSREC_INTERFACE_ADMIN_STATE_UP,
+                   sizeof (OVSREC_INTERFACE_ADMIN_STATE_UP)) == 0)) {
+      SET_FLAG (ifp->flags, IFF_UP);
+
+      if (ovs_interface->link_state &&
+          (strncmp (ovs_interface->link_state, OVSREC_INTERFACE_LINK_STATE_UP,
+                     sizeof (OVSREC_INTERFACE_LINK_STATE_UP)) == 0)) {
+        SET_FLAG (ifp->flags, IFF_RUNNING);
+      }
+      else {
+        UNSET_FLAG (ifp->flags, IFF_RUNNING);
+      }
+    }
+    else {
+      UNSET_FLAG (ifp->flags, IFF_UP|IFF_RUNNING);
+    }
+
+    if (ovs_interface->type &&
+        (strncmp (ovs_interface->type, OVSREC_INTERFACE_TYPE_LOOPBACK,
+                   sizeof (OVSREC_INTERFACE_TYPE_LOOPBACK)) == 0)) {
+      SET_FLAG (ifp->flags, IFF_LOOPBACK);
+    }
+    else {
+      UNSET_FLAG (ifp->flags, IFF_LOOPBACK);
+    }
+
+    SET_FLAG (ifp->flags, IFF_BROADCAST);
+
+    data = smap_get (&(ovs_interface->hw_intf_info), INTERFACE_HW_INTF_INFO_MAP_MEDIA_TYPE);
+    if (data && STR_EQ (data, INTERFACE_HW_INTF_INFO_MAP_HW_TYPE_POINT_TO_POINT)) {
+      SET_FLAG (ifp->flags, IFF_POINTOPOINT);
+    }
+    else {
+      UNSET_FLAG (ifp->flags, IFF_POINTOPOINT);
+    }
+
+    if (ovs_interface->mtu) {
+      ifp->mtu = *(ovs_interface->mtu);
+    }
+    else {
+      ifp->mtu = DEFAULT_ETH_MTU;
+    }
+
+    /* link_speed is bps and bandwidth is in kbps */
+    if (ovs_interface->link_speed) {
+      ifp->bandwidth = *(ovs_interface->link_speed) / 1024;
+    }
+  }
+
+  VLOG_DBG ("New interface %s - ifindex: %u status: %u flags: %u mtu %u bandwidth %u kbits\n",
+             ifp->name, ifp->ifindex, ifp->status, ifp->flags, ifp->mtu, ifp->bandwidth);
+}
+
+/* Interface/Port change related functions */
+static int
+ospf_interface_add_from_ovsdb (struct ovsdb_idl *idl, const struct ovsrec_vrf *ovs_vrf, const struct ovsrec_port *ovs_port)
+{
+  struct interface *ifp;
+  struct ospf *ospf;
+  const struct ovsrec_interface *ovs_interface = NULL;
+  const struct ovsrec_ospf_router *ovs_ospf_router = NULL;
+  u_int32_t ifindex = IFINDEX_INTERNAL;
+  const char *data = NULL;
+  int i = 0;
+
+  ifp = if_get_by_name_len (ovs_port->name, strnlen(ovs_port->name, INTERFACE_NAMSIZ));
+
+  if (ifp) {
+    ifindex = if_nametoindex(ifp->name);
+    if (ifindex == IFINDEX_INTERNAL) {
+      VLOG_ERR ("Interface %s created - Failed to get ifindex\n", ifp->name);
+      //return -1;
+    }
+    ifp->ifindex = ifindex;
+    VLOG_DBG ("Interface %s created - ifindex:%u\n", ifp->name, ifp->ifindex);
+  }
+  else {
+    VLOG_ERR ("Failed to create interface with ifname %s\n", ovs_port->name);
+    return -1;
+  }
+
+  if_set_value_from_ovsdb (idl, ovs_port, ifp);
+
+  ospf_interface_state_update_from_ovsdb (idl, ovs_port, ovs_interface, ifp);
+
+  for (i = 0 ; i < ovs_vrf->n_ospf_routers; i++) {
+    ovs_ospf_router = ovs_vrf->value_ospf_routers[i];
+    if (ovs_ospf_router) {
+      if (ospf = ospf_lookup_by_instance (ovs_vrf->key_ospf_routers[i]))
+        ospf_interface_add (ospf, ifp);
+    }
+  }
+
+  return 0;
+}
+
+static int
+ospf_interface_delete_from_ovsdb (struct ovsdb_idl *idl, const struct ovsrec_vrf *ovs_vrf, struct interface * ifp)
+{
+  const struct ovsrec_ospf_router *ovs_ospf_router = NULL;
+  struct ospf *ospf;
+  int i;
+
+  for (i = 0 ; i < ovs_vrf->n_ospf_routers; i++) {
+    ovs_ospf_router = ovs_vrf->value_ospf_routers[i];
+    if (ovs_ospf_router) {
+      if (ospf = ospf_lookup_by_instance (ovs_vrf->key_ospf_routers[i]))
+        ospf_interface_delete (ospf, ifp);
+    }
+  }
+
+  return 0;
+}
+static void
+ospf_interface_state_update_from_ovsdb (struct ovsdb_idl *idl, const struct ovsrec_port *ovs_port,
+                              const struct ovsrec_interface *ovs_interface, struct interface *ifp)
+{
+  assert (ovs_port);
+
+  if (!ovs_interface) {
+    if (ovs_port->n_interfaces > 0)
+      ovs_interface = ovs_port->interfaces[0];
+    if (!ovs_interface)
+      return;
+  }
+
+  if (!ifp) {
+    ifp = if_lookup_by_name_len (ovs_port->name, strnlen(ovs_port->name, INTERFACE_NAMSIZ));
+    if (!ifp || ifp->ifindex == IFINDEX_INTERNAL)
+      return;
+  }
+
+  if ((OVSREC_IDL_IS_COLUMN_MODIFIED (ovsrec_interface_col_admin_state, idl_seqno) ||
+       OVSREC_IDL_IS_COLUMN_MODIFIED (ovsrec_interface_col_link_state, idl_seqno))) {
+    if (is_ovs_port_state_up (idl, ovs_port, ovs_interface, ifp)) {
+      VLOG_DBG ("interface %s state UP\n", ifp->name);
+      ospf_interface_state_up (idl, ovs_port, ifp);
+    }
+    else {
+      VLOG_DBG ("interface %s state DOWN\n", ifp->name);
+      ospf_interface_state_down (idl, ovs_port, ifp);
+    }
+  }
+}
+
+static int
+ospf_interface_update_from_ovsdb (struct ovsdb_idl *idl, const struct ovsrec_vrf *ovs_vrf,
+                                  const struct ovsrec_port *ovs_port)
+{
+  struct interface *ifp;
+  struct ospf *ospf;
+  const struct ovsrec_ospf_router *ovs_ospf_router = NULL;
+  u_int32_t ifindex = IFINDEX_INTERNAL;
+  const char *data = NULL;
+  int i = 0;
+  struct connected *ifc;
+  struct listnode *node, *nextnode;
+  struct prefix p;
+  struct prefix *pfxlist = NULL, *pfx = NULL;
+
+  ifp = if_lookup_by_name_len (ovs_port->name, strnlen(ovs_port->name, INTERFACE_NAMSIZ));
+
+  if (ifp) {
+    if (ifp->ifindex == IFINDEX_INTERNAL) {
+      VLOG_ERR ("Interface %s is present - ifindex is %u\n", ifp->name, ifp->ifindex);
+      return -1;
+    }
+    VLOG_INFO ("Interface %s present - ifindex:%u\n", ifp->name, ifp->ifindex);
+  }
+  else {
+    VLOG_ERR ("No interface present with ifname %s\n", ovs_port->name);
+    return -1;
+  }
+
+  ospf_interface_state_update_from_ovsdb (idl, ovs_port, NULL, ifp);
+
+  if (OVSREC_IDL_IS_COLUMN_MODIFIED (ovsrec_port_col_ip4_address, idl_seqno)) {
+    if (ovs_port->ip4_address) {
+      if (ovs_port->ip4_address && str2prefix (ovs_port->ip4_address, &p)) {
+        if (ifc = connected_lookup_address (ifp, p.u.prefix4)) {
+          if (CHECK_FLAG (ifc->flags, ZEBRA_IFA_SECONDARY)) {
+            ospf_interface_address_delete (ifp, ifc);
+            UNSET_FLAG (ifc->flags, ZEBRA_IFA_SECONDARY);
+            ospf_interface_address_add (ifp, ifc);
+          }
+        }
+        else {
+          /* Primary ipv4 address is added */
+          ifc = connected_add_by_prefix (ifp, &p, NULL);
+          ospf_interface_address_add (ifp, ifc);
+        }
+      }
+    }
+    else {
+      /* Primary ipv4 address is deleted */
+      for (node = listhead (ifp->connected); node; node = nextnode) {
+        ifc = listgetdata (node);
+        nextnode = node->next;
+        if (ifc && !CHECK_FLAG (ifc->flags, ZEBRA_IFA_SECONDARY)) {
+          VLOG_DBG ("ifp %s: primary addr delete %s\n", ifp->name, ovs_port->ip4_address);
+          listnode_delete (ifp->connected, ifc);
+          ospf_interface_address_delete (ifp, ifc);
+        }
+      }
+    }
+  }
+
+  if (OVSREC_IDL_IS_COLUMN_MODIFIED (ovsrec_port_col_ip4_address_secondary, idl_seqno)) {
+    pfxlist = XCALLOC (MTYPE_PREFIX, sizeof(struct prefix) * ovs_port->n_ip4_address_secondary);
+    if (!pfxlist) {
+      VLOG_ERR ("Memory alloc Error\n");
+      return -1;
+    }
+    for (i = 0, pfx = pfxlist; i < ovs_port->n_ip4_address_secondary; i++, pfx++) {
+      if (ovs_port->ip4_address_secondary[i] && str2prefix (ovs_port->ip4_address_secondary[i], pfx)) {
+        if (ifc = connected_lookup_address (ifp, pfx->u.prefix4)) {
+          if (!CHECK_FLAG (ifc->flags, ZEBRA_IFA_SECONDARY)) {
+            ospf_interface_address_delete (ifp, ifc);
+            SET_FLAG (ifc->flags, ZEBRA_IFA_SECONDARY);
+            ospf_interface_address_add (ifp, ifc);
+          }
+        }
+        else {
+          /* Secondary ipv4 address is added */
+          ifc = connected_add_by_prefix (ifp, pfx, NULL);
+          SET_FLAG (ifc->flags, ZEBRA_IFA_SECONDARY);
+          ospf_interface_address_add (ifp, ifc);
+        }
+      }
+    }
+
+    /* If any Secondary ipv4 address is deleted */
+    for (node = listhead (ifp->connected); node; node = nextnode) {
+      ifc = listgetdata (node);
+      nextnode = node->next;
+      if (ifc && CHECK_FLAG (ifc->flags, ZEBRA_IFA_SECONDARY)) {
+        for (i = 0, pfx = pfxlist; i < ovs_port->n_ip4_address_secondary; i++, pfx++) {
+          if (prefix_same (ifc->address, pfx)) {
+            VLOG_DBG ("ifp %s: secondary addr delete %s\n", ifp->name, ovs_port->ip4_address_secondary[i]);
+            listnode_delete (ifp->connected, ifc);
+            ospf_interface_address_delete (ifp, ifc);
+          }
+        }
+      }
+    }
+
+    XFREE (MTYPE_PREFIX, pfxlist);
+
+  }
+
+  return 0;
 }

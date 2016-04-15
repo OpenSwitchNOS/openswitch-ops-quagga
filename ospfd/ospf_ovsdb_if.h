@@ -77,6 +77,9 @@
 
 #define MAX_PATH_STRING_LEN                    128
 
+/* Utils Macros */
+#define STR_EQ(s1, s2)      ((strlen((s1)) == strlen((s2))) && (!strncmp((s1), (s2), strlen((s2)))))
+
 typedef struct
 {
    unsigned char lsa_type;
@@ -184,4 +187,6 @@ ovsdb_ospf_update_ext_routes (const struct ospf *, const struct route_table *);
 extern void
 ovsdb_ospf_update_ext_route (const struct ospf *, const struct prefix *, const struct ospf_route *);
 
+void
+if_set_value_from_ovsdb (struct ovsdb_idl *, const struct ovsrec_port *, struct interface *);
 #endif /* OSPF_OVSDB_IF_H */

@@ -760,7 +760,7 @@ ospf_area_add_if (struct ospf_area *area, struct ospf_interface *oi)
 {
   listnode_add (area->oiflist, oi);
 #ifdef ENABLE_OVSDB
-  ovsdb_area_set_interface(area->ospf->ospf_inst,area->area_id,oi->ifp->name);
+  ovsdb_area_set_interface(area->ospf->ospf_inst,area->area_id,oi);
 #endif
 }
 

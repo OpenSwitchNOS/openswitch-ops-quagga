@@ -77,6 +77,8 @@
 
 #define MAX_PATH_STRING_LEN                    128
 
+extern u_int vlink_count;
+
 typedef struct
 {
    unsigned char lsa_type;
@@ -130,6 +132,11 @@ extern void
 ovsdb_ospf_remove_interface_from_area(int instance, struct in_addr area_id,
                                       char* ifname);
 
+/* Set the reference to the interface row to the area table. */
+extern void
+ovsdb_area_set_interface(int instance,struct in_addr area_id,
+                   struct ospf_interface* oi);
+
 extern void
 ovsdb_ospf_add_lsa (struct ospf_lsa* lsa);
 
@@ -164,6 +171,9 @@ ovsdb_ospf_update_full_nbr_count (struct ospf_neighbor* nbr,
                            uint32_t full_nbr_count);
 
 extern void
+ovsdb_ospf_update_vl_full_nbr_count (struct ospf_area*);
+
+extern void
 ovsdb_ospf_update_ifsm_state (char* ifname, int ism_state);
 
 extern void
@@ -183,5 +193,8 @@ ovsdb_ospf_update_ext_routes (const struct ospf *, const struct route_table *);
 
 extern void
 ovsdb_ospf_update_ext_route (const struct ospf *, const struct prefix *, const struct ospf_route *);
+
+extern void
+ovsdb_ospf_vl_update (const struct ospf_interface*);
 
 #endif /* OSPF_OVSDB_IF_H */

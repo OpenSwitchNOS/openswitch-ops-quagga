@@ -34,8 +34,6 @@
 #include "if.h"
 #include "memory.h"
 #include "shash.h"
-
-/* OVS headers */
 #include "config.h"
 #include "command-line.h"
 #include "daemon.h"
@@ -114,6 +112,22 @@ typedef struct ospf_ovsdb_t_ {
     unsigned int read_cb_count;
     unsigned int write_cb_count;
 } ospf_ovsdb_t;
+
+/* Configuration data for virtual links
+ */
+struct ospf_vl_config_data {
+  struct in_addr area_id;	/* area ID from command line */
+  int format;			/* command line area ID format */
+  struct in_addr vl_peer;	/* command line vl_peer */
+  int auth_type;		/* Authehntication type, if given */
+  char *auth_key;		/* simple password if present */
+  int crypto_key_id;		/* Cryptographic key ID */
+  char *md5_key;		/* MD5 authentication key */
+  int hello_interval;	        /* Obvious what these are... */
+  int retransmit_interval;
+  int transmit_delay;
+  int dead_interval;
+};
 
 static ospf_ovsdb_t glob_ospf_ovs;
 static struct shash all_routes = SHASH_INITIALIZER(&all_routes); //Delete on OSPF exit
@@ -387,6 +401,8 @@ ospf_ovsdb_tables_init()
     ovsdb_idl_add_table(idl, &ovsrec_table_ospf_vlink);
     ovsdb_idl_add_column(idl, &ovsrec_ospf_vlink_col_area_id);
     ovsdb_idl_add_column(idl, &ovsrec_ospf_vlink_col_ospf_auth_type);
+    ovsdb_idl_add_column(idl, &ovsrec_ospf_vlink_col_ospf_auth_text_key);
+    ovsdb_idl_add_column(idl, &ovsrec_ospf_vlink_col_ospf_auth_md5_keys);
     ovsdb_idl_add_column(idl, &ovsrec_ospf_vlink_col_name);
     ovsdb_idl_add_column(idl, &ovsrec_ospf_vlink_col_peer_router_id);
     ovsdb_idl_add_column(idl, &ovsrec_ospf_vlink_col_other_config);
@@ -695,6 +711,20 @@ find_vrf_port_by_name (const struct ovsrec_vrf *vrf_row, const char *ifname)
 }
 
 static struct ovsrec_port*
+find_port_by_ip_addr (const char* ipv4_addr)
+{
+    struct ovsrec_port* port_row = NULL;
+
+    OVSREC_PORT_FOR_EACH(port_row,idl)
+    {
+        if (port_row->ip4_address &&
+            !strcmp (port_row->ip4_address,ipv4_addr))
+            return port_row;
+    }
+    return NULL;
+}
+
+static struct ovsrec_port*
 find_port_by_name (const char* ifname)
 {
     struct ovsrec_port* port_row = NULL;
@@ -703,6 +733,19 @@ find_port_by_name (const char* ifname)
     {
         if (0 == strcmp (port_row->name,ifname))
             return port_row;
+    }
+    return NULL;
+}
+
+static struct ovsrec_ospf_vlink*
+find_ospf_vl_by_name (const char* ifname)
+{
+    struct ovsrec_ospf_vlink* vlink_row = NULL;
+
+    OVSREC_OSPF_VLINK_FOR_EACH(vlink_row,idl)
+    {
+        if (0 == strcmp (vlink_row->name,ifname))
+            return vlink_row;
     }
     return NULL;
 }
@@ -721,6 +764,141 @@ find_ospf_nbr_by_if_addr (const struct ovsrec_ospf_interface* ovs_oi, struct in_
     }
     return NULL;
 }
+
+/* Similar to ospf_vl_new() but takes vlink name from OVSDB
+   instead of VLINK%d */
+static struct ospf_interface *
+ovs_ospf_vl_new (struct ospf *ospf, struct ospf_vl_data *vl_data,
+                    const char* ovs_vl_name)
+{
+  struct ospf_interface * voi;
+  struct interface * vi;
+  char   ifname[INTERFACE_NAMSIZ + 1];
+  struct ospf_area *area;
+  struct in_addr area_id;
+  struct connected *co;
+  struct prefix_ipv4 *p;
+
+  VLOG_DBG ("ovs_ospf_vl_new(): Start");
+  if (vlink_count == OSPF_VL_MAX_COUNT)
+    {
+      VLOG_DBG ("ovs_ospf_vl_new(): Alarm: "
+           "cannot create more than OSPF_MAX_VL_COUNT virtual links");
+      return NULL;
+    }
+
+  VLOG_DBG ("ovs_ospf_vl_new(): creating pseudo zebra interface");
+
+  snprintf (ifname, sizeof(ifname), ovs_vl_name);
+  /* Take VLINK name from OVSDB */
+  vi = if_create (ifname, strnlen(ifname, sizeof(ifname)));
+  co = connected_new ();
+  co->ifp = vi;
+  listnode_add (vi->connected, co);
+
+  p = prefix_ipv4_new ();
+  p->family = AF_INET;
+  p->prefix.s_addr = 0;
+  p->prefixlen = 0;
+
+  co->address = (struct prefix *)p;
+
+  voi = ospf_if_new (ospf, vi, co->address);
+  if (voi == NULL)
+  {
+    VLOG_DBG ("ovs_ospf_vl_new(): Alarm: OSPF int structure is not created");
+    return NULL;
+  }
+  voi->connected = co;
+  voi->vl_data = vl_data;
+  voi->ifp->mtu = OSPF_VL_MTU;
+  voi->type = OSPF_IFTYPE_VIRTUALLINK;
+
+  vlink_count++;
+  VLOG_DBG ("ovs_ospf_vl_new(): Created name: %s", ifname);
+  VLOG_DBG ("ovs_ospf_vl_new(): set if->name to %s", vi->name);
+
+  area_id.s_addr = 0;
+  area = ospf_area_get (ospf, area_id, OSPF_AREA_ID_FORMAT_ADDRESS);
+  voi->area = area;
+
+  VLOG_DBG ("ovs_ospf_vl_new(): set associated area to the backbone");
+
+  ospf_nbr_add_self (voi);
+  ospf_area_add_if (voi->area, voi);
+
+  ovsdb_ospf_add_nbr_self(voi->nbr_self,voi->ifp->name);
+
+  ospf_if_stream_set (voi);
+
+  VLOG_DBG ("ovs_ospf_vl_new(): Stop");
+  return voi;
+}
+
+
+static void
+ospf_vl_config_data_init (struct ospf_vl_config_data *vl_config)
+{
+  memset (vl_config, 0, sizeof (struct ospf_vl_config_data));
+  vl_config->auth_type = OSPF_AUTH_CMD_NOTSEEN;
+}
+
+
+static struct ospf_vl_data *
+ospf_find_vl_data (struct ospf *ospf, struct ospf_vl_config_data *vl_config,
+                const char* ovs_vl_name)
+{
+  struct ospf_area *area;
+  struct ospf_vl_data *vl_data;
+  struct in_addr area_id;
+
+  area_id = vl_config->area_id;
+
+  if (area_id.s_addr == OSPF_AREA_BACKBONE)
+  {
+     VLOG_DBG ("Configuring VLs over the backbone"
+                "is not allowed%s");
+     return NULL;
+  }
+  area = ospf_area_get (ospf, area_id, vl_config->format);
+
+  if (area->external_routing != OSPF_AREA_DEFAULT)
+  {
+      VLOG_DBG ("Area %s is %s%s",inet_ntoa (area_id),
+      area->external_routing == OSPF_AREA_NSSA?"nssa":"stub");
+    return NULL;
+  }
+
+  if ((vl_data = ospf_vl_lookup (ospf, area, vl_config->vl_peer)) == NULL)
+    {
+      vl_data = ospf_vl_data_new (area, vl_config->vl_peer);
+      if (vl_data->vl_oi == NULL)
+      {
+        vl_data->vl_oi = ovs_ospf_vl_new (ospf, vl_data,ovs_vl_name);
+        ospf_vl_add (ospf, vl_data);
+        ospf_spf_calculate_schedule (ospf, SPF_FLAG_CONFIG_CHANGE);
+      }
+    }
+  return vl_data;
+}
+
+
+/* Main function to create/modify VLINKS */
+static int
+ospf_vl_set (struct ospf *ospf, struct ospf_vl_config_data *vl_config,
+           const char* vlink_name)
+{
+  struct ospf_vl_data *vl_data;
+  int ret;
+
+  vl_data = ospf_find_vl_data (ospf, vl_config,vlink_name);
+  if (!vl_data)
+    return 1;
+
+  return 0;
+
+}
+
 
 int
 modify_ospf_router_id_config (struct ospf *ospf_cfg,
@@ -871,6 +1049,71 @@ ovsdb_ospf_get_router_by_instance_num (int instance)
     }
 
     return NULL;
+}
+
+void
+ovsdb_ospf_vl_update (const struct ospf_interface* voi)
+{
+    const struct ovsrec_port* ovs_port = NULL;
+    struct ovsrec_ospf_vlink* ovs_vl = NULL;
+    struct ovsrec_ospf_interface* ovs_if = NULL;
+    struct ovsdb_idl_txn* vl_txn = NULL;
+    enum ovsdb_idl_txn_status status;
+    char vl_addr_ipv4[OSPF_MAX_PREFIX_LEN] = {0};
+
+    if(!voi ||
+       !voi->ifp ||
+       !voi->ifp->name ||
+       !voi->address) {
+       VLOG_DBG ("No associated interface found");
+       return;
+    }
+    ovs_if = find_ospf_interface_by_name(voi->ifp->name);
+    if (!ovs_if) {
+       VLOG_DBG ("No OSPF interface found %s",voi->ifp->name);
+       return;
+    }
+    ovs_vl = ovs_if->ospf_vlink;
+    if (!ovs_vl) {
+       VLOG_DBG ("No OSPF VLINK found for %s",voi->ifp->name);
+       return;
+    }
+    vl_txn = ovsdb_idl_txn_create(idl);
+    if (!vl_txn)
+    {
+        VLOG_DBG ("Transaction create failed");
+        return;
+    }
+    /* VL interface address got after SPF calculation Update*/
+    prefix2str(voi->address,vl_addr_ipv4,sizeof(vl_addr_ipv4));
+
+    if (!ovs_if->port) {
+        ovs_port = find_port_by_ip_addr(vl_addr_ipv4);
+        if (!ovs_port){
+            VLOG_DBG ("No Port found for %s",voi->ifp->name);
+            ovsdb_idl_txn_abort(vl_txn);
+            return;
+        }
+        ovsrec_ospf_interface_set_port(ovs_if, ovs_port);
+    }
+    /* Check if address is changes */
+    else {
+        ovs_port = ovs_if->port;
+        /* Update ip address if not same */
+        if (NULL == ovs_port->ip4_address ||
+        strcmp(vl_addr_ipv4,ovs_port->ip4_address)) {
+            ovs_port = find_port_by_ip_addr(vl_addr_ipv4);
+            if (ovs_port)
+                ovsrec_ospf_interface_set_port(ovs_if, ovs_port);
+        }
+    }
+
+    status = ovsdb_idl_txn_commit_block(vl_txn);
+    if (TXN_SUCCESS != status &&
+        TXN_UNCHANGED != status)
+        VLOG_DBG ("VL Updater commit failed:%d",status);
+
+    ovsdb_idl_txn_destroy(vl_txn);
 }
 
 void
@@ -1236,6 +1479,62 @@ ovsdb_ospf_update_full_nbr_count (struct ospf_neighbor* nbr,
         VLOG_DBG ("Full nbr # transaction commit failed:%d",status);
 
     ovsdb_idl_txn_destroy(nbr_txn);
+    smap_destroy(&area_smap);
+    return;
+}
+
+void
+ovsdb_ospf_update_vl_full_nbr_count (struct ospf_area* vl_area)
+{
+    struct ovsrec_ospf_area* ovs_area = NULL;
+    struct ovsrec_ospf_router* ovs_router = NULL;
+    struct ovsdb_idl_txn* vl_txn = NULL;
+    enum ovsdb_idl_txn_status status;
+    struct smap area_smap;
+    char buf[32] = {0};
+    int instance = 0;
+
+    if (NULL == vl_area)
+    {
+        VLOG_DBG ("No associated area of VL");
+        return;
+    }
+    if (NULL == vl_area->ospf)
+    {
+        VLOG_DBG ("No associated OSPF intance of VL");
+        return;
+    }
+    instance = vl_area->ospf->ospf_inst;
+    ovs_router = ovsdb_ospf_get_router_by_instance_num (instance);
+    if (NULL == ovs_router)
+    {
+        VLOG_DBG ("No ospf instance of VL");
+        return;
+    }
+    ovs_area = ovsrec_ospf_area_get_area_by_id(ovs_router, vl_area->area_id);
+    if (NULL == ovs_area)
+    {
+        VLOG_DBG ("No associated area of neighbor");
+        return;
+    }
+    vl_txn = ovsdb_idl_txn_create(idl);
+    if (!vl_txn)
+    {
+        VLOG_DBG ("Transaction create failed");
+        return;
+    }
+    snprintf(buf,sizeof(buf),"%u",vl_area->full_vls);
+    memset(&area_smap,0,sizeof(area_smap));
+    smap_clone(&area_smap,&(ovs_area->status));
+    smap_replace(&area_smap,"full_virtual_nbrs",buf);
+    ovsrec_ospf_area_set_status(ovs_area,&area_smap);
+
+    status = ovsdb_idl_txn_commit_block(vl_txn);
+    if (TXN_SUCCESS != status &&
+        TXN_UNCHANGED != status)
+        VLOG_DBG ("Full VL nbr # transaction commit failed:%d",status);
+
+    ovsdb_idl_txn_destroy(vl_txn);
     smap_destroy(&area_smap);
     return;
 }
@@ -2364,11 +2663,12 @@ void ospf_interface_tbl_default(
 /* Set the reference to the interface row to the area table. */
 void
 ovsdb_area_set_interface(int instance,struct in_addr area_id,
-                         char *ifname)
+                    struct ospf_interface* oi)
 {
     struct ovsrec_ospf_interface **ospf_interface_list;
     struct ovsrec_ospf_interface* interface_row = NULL;
     struct ovsrec_port* ovs_port = NULL;
+    struct ovsrec_ospf_vlink* ovs_vl = NULL;
     struct ovsrec_ospf_router* ovs_ospf = NULL;
     struct ovsrec_ospf_area* area_row = NULL;
     struct ovsdb_idl_txn* intf_txn = NULL;
@@ -2389,18 +2689,46 @@ ovsdb_area_set_interface(int instance,struct in_addr area_id,
        VLOG_DBG ("No associated OSPF area : %d exist",area_id.s_addr);
        return;
     }
-
+    if (NULL == oi ||
+        NULL == oi->ifp ||
+        NULL == oi->ifp->name)
+    {
+       VLOG_DBG ("No associated Interface exist");
+       return;
+    }
     intf_txn = ovsdb_idl_txn_create(idl);
     if (!intf_txn)
     {
         VLOG_DBG ("Transaction create failed");
         return;
     }
-    ovs_port = find_port_by_name(ifname);
-    if (!ovs_port)
-    {
-       VLOG_DBG ("No associated port exist");
-       return;
+
+   /* OPS_TODO : Handle loopback/NBMA interfaces */
+    if (OSPF_IFTYPE_VIRTUALLINK != oi->type &&
+        OSPF_IFTYPE_NBMA != oi->type &&
+        OSPF_IFTYPE_NONE != oi->type) {
+       /* Normal interface */
+       ovs_port = find_port_by_name(oi->ifp->name);
+       if (!ovs_port)
+       {
+          VLOG_DBG ("No associated port exist for %s",oi->ifp->name);
+          ovsdb_idl_txn_abort(intf_txn);
+          return;
+       }
+    }
+    else if (OSPF_IFTYPE_VIRTUALLINK == oi->type){
+       /* Virtual link interface */
+       ovs_vl= find_ospf_vl_by_name(oi->ifp->name);
+       if (!ovs_vl)
+       {
+          VLOG_DBG ("No associated VLINK exist for %s",oi->ifp->name);
+          ovsdb_idl_txn_abort(intf_txn);
+          return;
+       }
+    }
+    else {
+       VLOG_DBG ("Invalid OSPF interface type");
+       ovsdb_idl_txn_abort(intf_txn);
     }
 
     interface_row = ovsrec_ospf_interface_insert(intf_txn);
@@ -2424,7 +2752,7 @@ ovsdb_area_set_interface(int instance,struct in_addr area_id,
     ovsdb_ospf_set_interface_if_config_tbl_default (ovs_port);
     ovsrec_ospf_interface_set_ifsm_state(interface_row,
                                              OSPF_INTERFACE_IFSM_DEPEND_ON);
-    ovsrec_ospf_interface_set_name(interface_row, ifname);
+    ovsrec_ospf_interface_set_name(interface_row, oi->ifp->name);
 
     ospf_interface_tbl_default(interface_row);
 
@@ -2434,7 +2762,10 @@ ovsdb_area_set_interface(int instance,struct in_addr area_id,
     smap_replace (&area_smap,OSPF_KEY_AREA_ACTIVE_INTERFACE,buf);
     ovsrec_ospf_area_set_status(area_row,&area_smap);
 
-    ovsrec_ospf_interface_set_port(interface_row,ovs_port);
+    if(OSPF_IFTYPE_VIRTUALLINK == oi->type)
+        ovsrec_ospf_interface_set_ospf_vlink(interface_row,ovs_vl);
+    else
+        ovsrec_ospf_interface_set_port(interface_row,ovs_port);
     status = ovsdb_idl_txn_commit_block(intf_txn);
     if (TXN_SUCCESS != status &&
         TXN_UNCHANGED != status)
@@ -2806,7 +3137,7 @@ ovsdb_ospf_add_rib_entry (struct prefix_ipv4 *p, struct ospf_route *or)
     if (TXN_SUCCESS != status &&
         TXN_UNCHANGED != status)
         VLOG_DBG ("Transaction commit error");
-    else if (TXN_SUCCESS == status) {
+    else if (TXN_SUCCESS == status ) {
         ovs_rib = NULL;
         OVSREC_ROUTE_FOR_EACH(ovs_rib,idl)
         {
@@ -3427,6 +3758,20 @@ insert_ospf_area_instance(struct ovsdb_idl *idl OVS_UNUSED,
     return;
 }
 
+static int
+insert_ospf_vlink(struct ovsdb_idl *idl,const struct ospf* ospf,
+          const struct ovsrec_ospf_vlink* ovs_vlink)
+{
+    struct ospf_vl_config_data vl_config;
+
+    ospf_vl_config_data_init(&vl_config);
+    vl_config.area_id.s_addr= ovs_vlink->area_id;
+    vl_config.vl_peer.s_addr= ovs_vlink->peer_router_id;
+    ospf_vl_set(ospf,&vl_config,ovs_vlink->name);
+
+    return 0;
+}
+
 static void
 modify_ospf_area_instance(struct ovsdb_idl *idl,
     const struct ovsrec_ospf_area* ovs_area, int64_t area_id, int64_t ospf_inst)
@@ -3724,6 +4069,125 @@ modify_ospf_interface (struct ovsdb_idl *idl,
     }
 }
 
+void
+modify_ospf_vlink (struct ovsdb_idl *idl,
+    const struct ovsrec_ospf_vlink* ovs_vlink,const struct ospf* ospf)
+{
+    struct ospf_vl_config_data vl_config;
+    struct ospf_if_params *params = NULL;
+    struct interface* ifp = NULL;
+    struct listnode *node;
+    struct crypt_key *ck;
+    char auth_key[OSPF_AUTH_SIMPLE_SIZE+1];
+    char md5_key[OSPF_AUTH_MD5_SIZE+1];
+    int i = 0;
+    u_int32_t seconds = 0;
+    bool key_found = false;
+
+    ifp = if_lookup_by_name(ovs_vlink->name);
+    if(!ifp)
+    {
+        VLOG_DBG ("No VLINK interface %s found",ovs_vlink->name);
+        return;
+    }
+    params = IF_DEF_PARAMS (ifp);
+    if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_ospf_vlink_col_ospf_auth_type,idl_seqno)) {
+        vl_config.auth_type = OSPF_AUTH_CMD_NOTSEEN;
+        if (ovs_vlink->ospf_auth_type &&
+            !strcmp(ovs_vlink->ospf_auth_type,OVSREC_OSPF_VLINK_OSPF_AUTH_TYPE_NULL))
+               vl_config.auth_type = OSPF_AUTH_NULL;
+        else if (ovs_vlink->ospf_auth_type &&
+            !strcmp(ovs_vlink->ospf_auth_type,OVSREC_OSPF_VLINK_OSPF_AUTH_TYPE_TEXT))
+               vl_config.auth_type = OSPF_AUTH_SIMPLE;
+        else if (ovs_vlink->ospf_auth_type &&
+            !strcmp(ovs_vlink->ospf_auth_type,OVSREC_OSPF_VLINK_OSPF_AUTH_TYPE_MD5))
+               vl_config.auth_type = OSPF_AUTH_CRYPTOGRAPHIC;
+        if (OSPF_AUTH_CMD_NOTSEEN != vl_config.auth_type) {
+            SET_IF_PARAM (params, auth_type);
+            params->auth_type = vl_config.auth_type;
+        }
+        else {
+            SET_IF_PARAM (params, auth_type);
+            params->auth_type = OSPF_AUTH_NOTSET;
+        }
+    }
+
+    if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_ospf_vlink_col_ospf_auth_text_key,idl_seqno)) {
+        memset(params->auth_simple, 0, OSPF_AUTH_SIMPLE_SIZE+1);
+        memset (auth_key, 0, OSPF_AUTH_SIMPLE_SIZE + 1);
+        if (ovs_vlink->ospf_auth_text_key) {
+            strncpy (auth_key, ovs_vlink->ospf_auth_text_key, OSPF_AUTH_SIMPLE_SIZE);
+        }
+        strncpy ((char *) params->auth_simple, auth_key,
+                           OSPF_AUTH_SIMPLE_SIZE);
+    }
+
+    if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_ospf_vlink_col_ospf_auth_md5_keys,idl_seqno)) {
+        /*OPS_TODO : Make ospf_vlink->name as "mutable": false and
+        "indexes": [
+            [
+              "name"
+            ]
+        ]*/
+        for (i = 0 ; i < ovs_vlink->n_ospf_auth_md5_keys ; i++) {
+            vl_config.crypto_key_id = ovs_vlink->key_ospf_auth_md5_keys[i];
+            vl_config.md5_key = ovs_vlink->value_ospf_auth_md5_keys[i];
+            if (!ospf_crypt_key_lookup (params->auth_crypt, vl_config.crypto_key_id)){
+               ck = ospf_crypt_key_new ();
+               ck->key_id = vl_config.crypto_key_id;
+               memset(ck->auth_key, 0, OSPF_AUTH_MD5_SIZE+1);
+               strncpy ((char *) ck->auth_key, vl_config.md5_key, OSPF_AUTH_MD5_SIZE);
+               ospf_crypt_key_add (params->auth_crypt, ck);
+            }
+        }
+        for (ALL_LIST_ELEMENTS_RO (params->auth_crypt, node, ck)) {
+          for (i = 0 ; i < ovs_vlink->n_ospf_auth_md5_keys ; i++) {
+              if (ck->key_id == ovs_vlink->key_ospf_auth_md5_keys[i]) {
+                  key_found = true;
+                  break;
+              }
+          }
+          if (!key_found) {
+              ospf_crypt_key_delete (params->auth_crypt, ck->key_id);
+          }
+        }
+    }
+
+    if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_ospf_vlink_col_other_config,idl_seqno)) {
+        seconds = smap_get_int(&(ovs_vlink->other_config),OSPF_KEY_HELLO_INTERVAL,10);
+        if (seconds < 1 || seconds > 65535)
+            VLOG_DBG("Hello Interval is invalid");
+        else {
+            vl_config.hello_interval = seconds;
+            SET_IF_PARAM (params, v_hello);
+            params->v_hello = vl_config.hello_interval;
+        }
+        seconds = smap_get_int(&(ovs_vlink->other_config),OSPF_KEY_DEAD_INTERVAL,40);
+        if (seconds < 1 || seconds > 65535)
+            VLOG_DBG("Dead Interval is invalid");
+        else {
+            vl_config.dead_interval = seconds;
+            SET_IF_PARAM (params, v_wait);
+            params->v_wait = vl_config.dead_interval;
+        }
+        seconds = smap_get_int(&(ovs_vlink->other_config),OSPF_KEY_RETRANSMIT_INTERVAL,5);
+        if (seconds < 1 || seconds > 65535)
+            VLOG_DBG("Retransmit Interval is invalid");
+        else {
+            vl_config.retransmit_interval = seconds;
+            SET_IF_PARAM (params, retransmit_interval);
+            params->retransmit_interval = vl_config.retransmit_interval;
+        }
+        seconds = smap_get_int(&(ovs_vlink->other_config),OSPF_KEY_TRANSMIT_DELAY,1);
+        if (seconds < 1 || seconds > 65535)
+            VLOG_DBG("Transmit delay is invalid");
+        else {
+            vl_config.transmit_delay = seconds;
+            SET_IF_PARAM (params, transmit_delay);
+            params->transmit_delay = vl_config.transmit_delay;
+        }
+    }
+}
 
 void
 delete_ospf_router_instance (struct ovsdb_idl *idl)
@@ -3862,6 +4326,87 @@ ospf_interface_read_ovsdb_apply_changes(struct ovsdb_idl *idl)
         ovs_port = ovs_oi->port;
         if (ovs_port && OVSREC_IDL_IS_ROW_MODIFIED(ovs_port, idl_seqno))
            modify_ospf_interface (idl, ovs_port, ovs_oi->name);
+     }
+}
+
+static int
+ovs_ospf_vl_delete(struct ovsdb_idl *idl)
+{
+    struct listnode *node = NULL,*nnode = NULL;
+    struct ovsrec_ospf_vlink* ovs_vl = NULL;
+    struct ospf_vl_data* vl_data = NULL;
+    struct ospf* ospf = NULL;
+    int i;
+
+    ospf = ospf_lookup_by_instance(OSPF_DEFAULT_INSTANCE);
+    if (!ospf)
+    {
+        VLOG_DBG (" No OSPF instance found for VLINKS");
+        return 1;
+    }
+
+    for (ALL_LIST_ELEMENTS(ospf->vlinks,node,nnode,vl_data)){
+        bool match_found = 0;
+        if(NULL == vl_data->vl_oi||
+           NULL == vl_data->vl_oi->ifp ||
+           NULL == vl_data->vl_oi->ifp->name)
+              continue;
+        OVSREC_OSPF_VLINK_FOR_EACH (ovs_vl, idl) {
+           if (!strcmp(ovs_vl->name,vl_data->vl_oi->ifp->name)){
+               match_found = 1;
+               break;
+           }
+        }
+        if (!match_found) {
+                VLOG_DBG("VLINK %s will be deleted from OSPFD\n", vl_data->vl_oi->ifp->name);
+                ospf_vl_delete (ospf, vl_data);
+                ospf_area_check_free (ospf, vl_data->vl_area_id);
+        }
+    }
+    return 0;
+}
+
+static int
+ovs_ospf_vlink_delete_all (struct ovsdb_idl *idl)
+{
+    struct listnode *node = NULL,*nnode = NULL;
+    struct ovsrec_ospf_vlink* ovs_vl = NULL;
+    struct ospf_vl_data* vl_data = NULL;
+    struct ospf* ospf = NULL;
+
+    ospf = ospf_lookup_by_instance(OSPF_DEFAULT_INSTANCE);
+    if (!ospf)
+    {
+        VLOG_DBG (" No OSPF instance found for VLINKS");
+        return 1;
+    }
+    for (ALL_LIST_ELEMENTS(ospf->vlinks,node,nnode,vl_data))
+        ospf_vl_delete(ospf, vl_data);
+
+    return 0;
+
+}
+
+static void
+ospf_vlink_read_ovsdb_apply_changes (struct ovsdb_idl *idl)
+{
+    const struct ovsrec_ospf_vlink* ovs_vlink = NULL;
+    struct ospf* ospf_inst = NULL;
+    int i = 0;
+
+    ospf_inst = ospf_lookup_by_instance(OSPF_DEFAULT_INSTANCE);
+    if (!ospf_inst)
+    {
+        VLOG_DBG ("No OSPF Instance found");
+        return;
+    }
+
+     OVSREC_OSPF_VLINK_FOR_EACH(ovs_vlink, idl) {
+        if (OVSREC_IDL_IS_ROW_INSERTED(ovs_vlink, idl_seqno))
+           insert_ospf_vlink (idl, ospf_inst, ovs_vlink);
+        if (OVSREC_IDL_IS_ROW_MODIFIED(ovs_vlink, idl_seqno) ||
+            OVSREC_IDL_IS_ROW_INSERTED(ovs_vlink, idl_seqno))
+           modify_ospf_vlink (idl, ovs_vlink,ospf_inst);
      }
 }
 
@@ -4299,6 +4844,39 @@ ospf_apply_ospf_interface_changes (struct ovsdb_idl *idl)
   ospf_interface_read_ovsdb_apply_changes(idl);
 
   return 1;
+}
+
+static int
+ospf_apply_vlink_changes (struct ovsdb_idl *idl)
+{
+   const struct ovsrec_ospf_vlink* ospf_vl_first = NULL;
+   struct ospf *ospf_instance;
+
+   ospf_vl_first = ovsrec_ospf_vlink_first(idl);
+   /*
+    * Check if any table changes present.
+    * If no change just return from here
+    */
+    if (ospf_vl_first && !OVSREC_IDL_ANY_TABLE_ROWS_INSERTED(ospf_vl_first, idl_seqno)
+        && !OVSREC_IDL_ANY_TABLE_ROWS_DELETED(ospf_vl_first, idl_seqno)
+        && !OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED(ospf_vl_first, idl_seqno)) {
+            VLOG_DBG("No OSPF VLINK changes");
+            return 0;
+    }
+    else if (NULL == ospf_vl_first) {
+        (void)ovs_ospf_vlink_delete_all(idl);
+        return 1;
+    }
+
+    /* Check if any row deletion. May or may not by CLI */
+    if (OVSREC_IDL_ANY_TABLE_ROWS_DELETED(ospf_vl_first, idl_seqno)) {
+        (void)ovs_ospf_vl_delete(idl);
+    }
+
+    /* insert and modify cases */
+    ospf_vlink_read_ovsdb_apply_changes(idl);
+
+    return 1;
 }
 
 /*
@@ -4945,7 +5523,8 @@ ospf_reconfigure(struct ovsdb_idl *idl)
         ospf_apply_interface_changes(idl) |
         ospf_apply_ospf_router_changes(idl) |
         ospf_apply_ospf_area_changes(idl) |
-        ospf_apply_route_changes(idl))
+        ospf_apply_route_changes(idl)|
+        ospf_apply_vlink_changes(idl))
     {
          /* Some OSPF configuration changed. */
         VLOG_DBG("OSPF Configuration changed\n");

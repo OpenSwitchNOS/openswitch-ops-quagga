@@ -80,11 +80,31 @@
 /* Utils Macros */
 #define STR_EQ(s1, s2)      ((strlen((s1)) == strlen((s2))) && (!strncmp((s1), (s2), strlen((s2)))))
 
+extern u_int vlink_count;
+
 typedef struct
 {
    unsigned char lsa_type;
    char* lsa_type_str;
 }lsa_type;
+
+/* Configuration data for virtual links
+ */
+struct ospf_vl_config_data {
+  char* vl_name;
+  struct in_addr area_id;       /* area ID from command line */
+  int format;                   /* command line area ID format */
+  struct in_addr vl_peer;       /* command line vl_peer */
+  int auth_type;                /* Authehntication type, if given */
+  char *auth_key;               /* simple password if present */
+  int crypto_key_id;            /* Cryptographic key ID */
+  char *md5_key;                /* MD5 authentication key */
+  int hello_interval;           /* Obvious what these are... */
+  int retransmit_interval;
+  int transmit_delay;
+  int dead_interval;
+};
+
 
 /* Setup zebra to connect with ovsdb and daemonize. This daemonize is used
  * over the daemonize in the main function to keep the behavior consistent
@@ -133,6 +153,11 @@ extern void
 ovsdb_ospf_remove_interface_from_area(int instance, struct in_addr area_id,
                                       char* ifname);
 
+/* Set the reference to the interface row to the area table. */
+extern void
+ovsdb_area_set_interface(int instance,struct in_addr area_id,
+                   struct ospf_interface* oi);
+
 extern void
 ovsdb_ospf_add_lsa (struct ospf_lsa* lsa);
 
@@ -167,6 +192,9 @@ ovsdb_ospf_update_full_nbr_count (struct ospf_neighbor* nbr,
                            uint32_t full_nbr_count);
 
 extern void
+ovsdb_ospf_update_vl_full_nbr_count (struct ospf_area*);
+
+extern void
 ovsdb_ospf_update_ifsm_state (char* ifname, int ism_state);
 
 extern void
@@ -189,4 +217,8 @@ ovsdb_ospf_update_ext_route (const struct ospf *, const struct prefix *, const s
 
 void
 if_set_value_from_ovsdb (struct ovsdb_idl *, const struct ovsrec_port *, struct interface *);
+
+extern void
+ovsdb_ospf_vl_update (const struct ospf_interface*);
+
 #endif /* OSPF_OVSDB_IF_H */

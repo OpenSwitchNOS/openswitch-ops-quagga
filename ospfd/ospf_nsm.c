@@ -725,6 +725,11 @@ nsm_change_state (struct ospf_neighbor *nbr, int state)
             if (++vl_area->full_vls == 1)
 	      ospf_schedule_abr_task (oi->ospf);
 
+#ifdef ENABLE_OVSDB
+      if (oi->type == OSPF_IFTYPE_VIRTUALLINK && vl_area)
+         ovsdb_ospf_update_vl_full_nbr_count (vl_area);
+#endif
+
 	  /* kevinm: refresh any redistributions */
 	  for (x = ZEBRA_ROUTE_SYSTEM; x < ZEBRA_ROUTE_MAX; x++)
 	    {

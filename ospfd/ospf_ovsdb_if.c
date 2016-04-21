@@ -188,7 +188,7 @@ enum OSPF_INTERVALS_KEY_SORTED {
   OVS_OSPF_DEAD_INTERVAL_SORTED = 0,
   OVS_OSPF_HELLO_INTERVAL_SORTED,
   OVS_OSPF_RETRANSMIT_INTERVAL_SORTED,
-  OVS_OSPF_TRANSMIT_INTERVAL_SORTED,
+  OVS_OSPF_TRANSMIT_DELAY_SORTED,
   OVS_OSPF_INTERVAL_SORTED_MAX
 };
 static int ospf_ovspoll_enqueue (ospf_ovsdb_t *ospf_ovs_g);
@@ -292,16 +292,12 @@ ospf_ovsdb_tables_init()
     ovsdb_idl_add_column(idl, &ovsrec_port_col_name);
     ovsdb_idl_add_column(idl, &ovsrec_port_col_ospf_intervals);
     ovsdb_idl_add_column(idl, &ovsrec_port_col_ospf_if_out_cost);
-    ovsdb_idl_omit_alert(idl, &ovsrec_port_col_ospf_if_out_cost);
     ovsdb_idl_add_column(idl, &ovsrec_port_col_ospf_priority);
-    ovsdb_idl_omit_alert(idl, &ovsrec_port_col_ospf_priority);
     ovsdb_idl_add_column(idl, &ovsrec_port_col_ospf_if_type);
-    ovsdb_idl_omit_alert(idl, &ovsrec_port_col_ospf_if_type);
     ovsdb_idl_add_column(idl, &ovsrec_port_col_ospf_auth_type);
     ovsdb_idl_add_column(idl, &ovsrec_port_col_ospf_auth_text_key);
     ovsdb_idl_add_column(idl, &ovsrec_port_col_ospf_auth_md5_keys);
     ovsdb_idl_add_column(idl, &ovsrec_port_col_ospf_mtu_ignore);
-    ovsdb_idl_omit_alert(idl, &ovsrec_port_col_ospf_mtu_ignore);
     ovsdb_idl_add_column(idl, &ovsrec_port_col_other_config);
     ovsdb_idl_add_column(idl, &ovsrec_port_col_statistics);
     ovsdb_idl_add_column(idl, &ovsrec_port_col_status);
@@ -720,6 +716,15 @@ find_ospf_nbr_by_if_addr (const struct ovsrec_ospf_interface* ovs_oi, struct in_
             return nbr_row;
     }
     return NULL;
+}
+
+void *ovsdb_ospf_options_alloc(char** value_nbr_option, u_int32_t nbr_option_cnt)
+{
+    if(!value_nbr_option)
+        return xmalloc(OSPF_STAT_NAME_LEN * (nbr_option_cnt));
+    else
+        return xrealloc(value_nbr_option,
+                              OSPF_STAT_NAME_LEN * (nbr_option_cnt));
 }
 
 int
@@ -1870,6 +1875,240 @@ ovsdb_ospf_set_nbr_self_router_id  (char* ifname, struct in_addr if_addr,
     ovsdb_idl_txn_destroy(nbr_txn);
 }
 
+void
+ovsdb_ospf_set_nbr_self_priority(char* ifname, struct in_addr if_addr,
+                                 int64_t priority)
+{
+    struct ovsrec_ospf_interface* ovs_oi = NULL;
+    struct ovsrec_ospf_neighbor* ovs_nbr = NULL;
+    struct ovsdb_idl_txn* nbr_txn = NULL;
+    enum ovsdb_idl_txn_status status;
+    int64_t nbr_priority = priority;
+
+    if (NULL == ifname)
+    {
+        VLOG_DBG ("No associated interface of neighbor");
+        return;
+    }
+    ovs_oi = find_ospf_interface_by_name(ifname);
+    if (NULL == ovs_oi)
+    {
+        VLOG_DBG ("No associated interface of neighbor");
+        return;
+    }
+    ovs_nbr = find_ospf_nbr_by_if_addr(ovs_oi,if_addr);
+    if (!ovs_nbr)
+    {
+       VLOG_DBG ("Self neighbor not present");
+       return;
+    }
+
+    nbr_txn = ovsdb_idl_txn_create(idl);
+    if (!nbr_txn)
+    {
+        VLOG_DBG ("Transaction create failed");
+        return;
+    }
+
+    ovsrec_ospf_neighbor_set_nbr_priority(ovs_nbr,&nbr_priority,1);
+
+    status = ovsdb_idl_txn_commit_block(nbr_txn);
+    if (TXN_SUCCESS != status &&
+        TXN_UNCHANGED != status)
+        VLOG_DBG ("NBR add transaction commit failed:%d",status);
+
+    ovsdb_idl_txn_destroy(nbr_txn);
+}
+
+void
+ovsdb_ospf_reset_nbr_self  (struct ospf_neighbor* nbr, char* intf)
+{
+    struct ovsrec_ospf_interface* ovs_oi = NULL;
+    struct ovsrec_ospf_neighbor* new_ovs_nbr = NULL;
+    struct ovsdb_idl_txn* nbr_txn = NULL;
+    struct timeval tv;
+    struct smap nbr_status;
+    int64_t ip_src = 0;
+    int64_t nbr_id = 0;
+    enum ovsdb_idl_txn_status status;
+    char** key_nbr_statistics = NULL;
+    char** value_nbr_option = NULL;
+    int nbr_option_cnt = 0;
+    int64_t* value_nbr_statistics = NULL;
+    long nbr_up_time = 0;
+    char buf[32] = {0};
+    int i = 0;
+
+    if (NULL == nbr)
+    {
+        VLOG_DBG ("No neighbor data to add");
+        return;
+    }
+
+    if (NULL == intf)
+    {
+        VLOG_DBG ("No associated interface of neighbor");
+        return;
+    }
+
+    ovs_oi = find_ospf_interface_by_name(intf);
+    if (NULL == ovs_oi)
+    {
+        VLOG_DBG ("No associated interface of neighbor");
+        return;
+    }
+    /* Fix me : Update NBR instead of looping through
+     * all the neighbor (OVSDB lookup). May be a local cache
+     * and if there is change then commit to DB
+     */
+
+    new_ovs_nbr = find_ospf_nbr_by_if_addr(ovs_oi,nbr->src);
+    if (!new_ovs_nbr)
+    {
+       VLOG_DBG ("Neighbor not present");
+       return;
+    }
+
+    nbr_txn = ovsdb_idl_txn_create(idl);
+    if (!nbr_txn)
+    {
+        VLOG_DBG ("Transaction create failed");
+        return;
+    }
+
+    nbr_id = nbr->router_id.s_addr;
+    ovsrec_ospf_neighbor_set_nbr_router_id (new_ovs_nbr,&nbr_id,1);
+
+    ip_src = nbr->src.s_addr;
+    ovsrec_ospf_neighbor_set_nbr_if_addr (new_ovs_nbr,&ip_src,1);
+
+    if (CHECK_FLAG(nbr->options,OSPF_OPTION_E))
+    {
+        nbr_option_cnt++;
+
+        value_nbr_option = ovsdb_ospf_options_alloc(value_nbr_option,
+                                                    nbr_option_cnt);
+        if(value_nbr_option)
+            value_nbr_option[nbr_option_cnt -1 ] =
+                OVSREC_OSPF_NEIGHBOR_NBR_OPTIONS_EXTERNAL_ROUTING;
+        else
+            assert(0);
+    }
+
+    if (CHECK_FLAG(nbr->options,OSPF_OPTION_MC))
+    {
+        nbr_option_cnt++;
+        value_nbr_option = ovsdb_ospf_options_alloc(value_nbr_option,
+                                                    nbr_option_cnt);
+        if(value_nbr_option)
+            value_nbr_option[nbr_option_cnt -1 ] =
+                OVSREC_OSPF_NEIGHBOR_NBR_OPTIONS_MULTICAST;
+        else
+            assert(0);
+    }
+
+    if (CHECK_FLAG(nbr->options,OSPF_OPTION_NP))
+    {
+        nbr_option_cnt++;
+        value_nbr_option = ovsdb_ospf_options_alloc(value_nbr_option,
+                                                    nbr_option_cnt);
+        if(value_nbr_option)
+            value_nbr_option[nbr_option_cnt -1 ] =
+                OVSREC_OSPF_NEIGHBOR_NBR_OPTIONS_TYPE_7_LSA;
+        else
+            assert(0);
+    }
+
+    if (CHECK_FLAG(nbr->options,OSPF_OPTION_EA))
+    {
+        nbr_option_cnt++;
+        value_nbr_option = ovsdb_ospf_options_alloc(value_nbr_option,
+                                                    nbr_option_cnt);
+        if(value_nbr_option)
+            value_nbr_option[nbr_option_cnt -1 ] =
+                OVSREC_OSPF_NEIGHBOR_NBR_OPTIONS_EXTERNAL_ATTRIBUTES_LSA;
+        else
+            assert(0);
+    }
+
+    if (CHECK_FLAG(nbr->options,OSPF_OPTION_DC))
+    {
+        nbr_option_cnt++;
+        value_nbr_option = ovsdb_ospf_options_alloc(value_nbr_option,
+                                                    nbr_option_cnt);
+        if(value_nbr_option)
+            value_nbr_option[nbr_option_cnt -1 ] =
+                OVSREC_OSPF_NEIGHBOR_NBR_OPTIONS_DEMAND_CIRCUITS;
+        else
+            assert(0);
+    }
+
+    if (CHECK_FLAG(nbr->options,OSPF_OPTION_O))
+    {
+        nbr_option_cnt++;
+        value_nbr_option = ovsdb_ospf_options_alloc(value_nbr_option,
+                                                    nbr_option_cnt);
+        if(value_nbr_option)
+            value_nbr_option[nbr_option_cnt -1 ] =
+                OVSREC_OSPF_NEIGHBOR_NBR_OPTIONS_OPAQUE_LSA;
+        else
+            assert(0);
+    }
+
+    ovsrec_ospf_neighbor_set_nbr_options (new_ovs_nbr,value_nbr_option,
+                                                             nbr_option_cnt);
+
+    ovsrec_ospf_neighbor_set_nfsm_state (new_ovs_nbr,ospf_nsm_state[nbr->state].str);
+
+    key_nbr_statistics =  xmalloc(OSPF_STAT_NAME_LEN * (OSPF_NEIGHBOR_STATISTICS_MAX));
+
+    value_nbr_statistics =  xmalloc(sizeof *new_ovs_nbr->value_statistics *
+                                 (OSPF_NEIGHBOR_STATISTICS_MAX));
+
+    if(!key_nbr_statistics || !value_nbr_statistics)
+    {
+        assert(0);
+    }
+
+    key_nbr_statistics [OSPF_NEIGHBOR_DB_SUMMARY_COUNT] =
+                                    OSPF_KEY_NEIGHBOR_DB_SUMMARY_CNT;
+    key_nbr_statistics [OSPF_NEIGHBOR_LS_REQUEST_COUNT] =
+                                    OSPF_KEY_NEIGHBOR_LS_REQUEST_CNT;
+    key_nbr_statistics [OSPF_NEIGHBOR_LS_RETRANSMIT_COUNT] =
+                                    OSPF_KEY_NEIGHBOR_LS_RE_TRANSMIT_CNT;
+    key_nbr_statistics [OSPF_NEIGHBOR_STATE_CHANGE_COUNT] =
+                                    OSPF_KEY_NEIGHBOR_STATE_CHG_CNT;
+
+    value_nbr_statistics [OSPF_NEIGHBOR_DB_SUMMARY_COUNT] = 0;
+    value_nbr_statistics [OSPF_NEIGHBOR_LS_REQUEST_COUNT] = 0;
+    value_nbr_statistics [OSPF_NEIGHBOR_LS_RETRANSMIT_COUNT] = 0;
+    value_nbr_statistics [OSPF_NEIGHBOR_STATE_CHANGE_COUNT] = nbr->state_change;
+
+    ovsrec_ospf_neighbor_set_statistics(new_ovs_nbr,key_nbr_statistics,
+                          value_nbr_statistics,OSPF_NEIGHBOR_STATISTICS_MAX);
+
+
+
+    quagga_gettime(QUAGGA_CLK_MONOTONIC,&tv);
+    nbr_up_time = (1000000 * tv.tv_sec + tv.tv_usec)/1000;
+    snprintf(buf,sizeof (buf),"%u",nbr_up_time);
+    smap_clone (&nbr_status,&(new_ovs_nbr->status));
+    smap_replace(&nbr_status, OSPF_KEY_NEIGHBOR_LAST_UP_TIMESTAMP, buf);
+    ovsrec_ospf_neighbor_set_status(new_ovs_nbr,&nbr_status);
+
+    status = ovsdb_idl_txn_commit_block(nbr_txn);
+    if (TXN_SUCCESS != status &&
+        TXN_UNCHANGED != status)
+        VLOG_DBG ("self NBR reset transaction commit failed:%d",status);
+
+    ovsdb_idl_txn_destroy(nbr_txn);
+    smap_destroy (&nbr_status);
+    free (key_nbr_statistics);
+    free (value_nbr_statistics);
+    free (value_nbr_option);
+    return;
+}
+
 
 void
 ovsdb_ospf_delete_nbr  (struct ospf_neighbor* nbr)
@@ -1888,30 +2127,24 @@ ovsdb_ospf_delete_nbr  (struct ospf_neighbor* nbr)
         VLOG_DBG ("No neighbor data to delete");
         return;
     }
+
     if (NULL == nbr->oi)
     {
         VLOG_DBG ("No associated interface of neighbor");
         return;
     }
 
-    nbr_txn = ovsdb_idl_txn_create(idl);
-    if (!nbr_txn)
-    {
-        VLOG_DBG ("Transaction create failed");
-        return;
-    }
     intf = nbr->oi->ifp;
     if (NULL == intf)
     {
         VLOG_DBG ("No associated interface of neighbor");
-        ovsdb_idl_txn_abort(nbr_txn);
         return;
     }
+
     ovs_oi = find_ospf_interface_by_name(intf->name);
     if (NULL == ovs_oi)
     {
         VLOG_DBG ("No associated interface of neighbor");
-        ovsdb_idl_txn_abort(nbr_txn);
         return;
     }
     /* Fix me : Update NBR instead of looping through
@@ -1922,9 +2155,16 @@ ovsdb_ospf_delete_nbr  (struct ospf_neighbor* nbr)
     if (!old_ovs_nbr)
     {
        VLOG_DBG ("Neighbor not found");
-       ovsdb_idl_txn_abort(nbr_txn);
        return;
     }
+
+    nbr_txn = ovsdb_idl_txn_create(idl);
+    if (!nbr_txn)
+    {
+        VLOG_DBG ("Transaction create failed");
+        return;
+    }
+
     ovs_nbr = xmalloc(sizeof * ovs_oi->neighbors *
                                     (ovs_oi->n_neighbors - 1));
 
@@ -2110,6 +2350,7 @@ ovsdb_ospf_set_spf_statistics (int instance, struct in_addr area_id,
     if (!ovs_ospf)
     {
        VLOG_DBG ("No OSPF instance");
+       ovsdb_idl_txn_abort (spf_txn);
        return;
     }
     for (i = 0 ; i < ovs_ospf->n_areas ; i++)
@@ -2390,12 +2631,6 @@ ovsdb_area_set_interface(int instance,struct in_addr area_id,
        return;
     }
 
-    intf_txn = ovsdb_idl_txn_create(idl);
-    if (!intf_txn)
-    {
-        VLOG_DBG ("Transaction create failed");
-        return;
-    }
     ovs_port = find_port_by_name(ifname);
     if (!ovs_port)
     {
@@ -2407,9 +2642,16 @@ ovsdb_area_set_interface(int instance,struct in_addr area_id,
     if (!interface_row)
     {
        VLOG_DBG ("OSPF interface insert failed");
-       ovsdb_idl_txn_abort(intf_txn);
        return;
     }
+
+    intf_txn = ovsdb_idl_txn_create(idl);
+    if (!intf_txn)
+    {
+        VLOG_DBG ("Transaction create failed");
+        return;
+    }
+
     /* Insert OSPF_Interface table reference in OSPF_Area table. */
     ospf_interface_list = xmalloc(sizeof * area_row->ospf_interfaces *
                               (area_row->n_ospf_interfaces + 1));
@@ -3618,6 +3860,7 @@ modify_ospf_interface (struct ovsdb_idl *idl,
     struct listnode *node;
     unsigned char key_id;
     u_int32_t seconds = 0;
+    u_int32_t val = 0;
     int ret_status = -1;
     int i =0;
     bool is_key_found = false;
@@ -3641,7 +3884,7 @@ modify_ospf_interface (struct ovsdb_idl *idl,
             VLOG_DBG("Requisite number of intervals are not set");
         else {
             seconds = ovs_port->value_ospf_intervals [OVS_OSPF_HELLO_INTERVAL_SORTED];
-            if (seconds < 1 || seconds > 65535)
+            if (seconds < OSPF_MIN_INTERVAL || seconds > OSPF_MAX_INTERVAL)
                 VLOG_DBG("Hello Interval is invalid");
             else {
                 SET_IF_PARAM (params, v_hello);
@@ -3649,7 +3892,7 @@ modify_ospf_interface (struct ovsdb_idl *idl,
             }
 
             seconds = ovs_port->value_ospf_intervals [OVS_OSPF_DEAD_INTERVAL_SORTED];
-            if (seconds < 1 || seconds > 65535)
+            if (seconds < OSPF_MIN_INTERVAL || seconds > OSPF_MAX_INTERVAL)
                 VLOG_DBG("Dead Interval is invalid");
             else {
                 SET_IF_PARAM (params, v_wait);
@@ -3658,8 +3901,120 @@ modify_ospf_interface (struct ovsdb_idl *idl,
                     if ((oi = rn->info))
                         ospf_nbr_timer_update (oi);
             }
+
+            /* Retransmit Interval */
+            seconds = ovs_port->value_ospf_intervals [OVS_OSPF_RETRANSMIT_INTERVAL_SORTED];
+            if (seconds < OSPF_MIN__RETRANSMIT_INTERVAL || seconds > OSPF_MAX_INTERVAL)
+                VLOG_DBG("Retransmit Interval is invalid");
+            else {
+                SET_IF_PARAM (params, retransmit_interval);
+                params->retransmit_interval = seconds;
+            }
+
+            /* Transmit Delay */
+            seconds = ovs_port->value_ospf_intervals [OVS_OSPF_TRANSMIT_DELAY_SORTED];
+            if (seconds < OSPF_MIN_INTERVAL || seconds > OSPF_MAX_INTERVAL)
+                VLOG_DBG("Transmit delay is invalid");
+            else {
+                SET_IF_PARAM (params, retransmit_interval);
+                params->retransmit_interval = seconds;
+            }
         }
     }
+
+    /* Priority */
+    if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_port_col_ospf_priority, idl_seqno)) {
+        if (ovs_port->n_ospf_priority){
+            val = *ovs_port->ospf_priority;
+            if (val < OSPF_MIN_PRIORITY || val > OSPF_MAX_PRIORITY)
+                    VLOG_DBG("Priority value is invalid");
+            else {
+                SET_IF_PARAM (params, priority);
+                params->priority = val;
+
+                for (rn = route_top (IF_OIFS (ifp)); rn; rn = route_next (rn)){
+                    struct ospf_interface *oi = rn->info;
+
+                    if (!oi)
+                        continue;
+
+                    if (PRIORITY (oi) != OSPF_IF_PARAM (oi, priority)) {
+                        PRIORITY (oi) = OSPF_IF_PARAM (oi, priority);
+                        OSPF_ISM_EVENT_SCHEDULE (oi, ISM_NeighborChange);
+                        ovsdb_ospf_set_nbr_self_priority(oi->ifp->name, oi->nbr_self->src,
+                                                      oi->nbr_self->priority);
+                    }
+                }
+            }
+        }
+    }
+
+    /* MTU ignore */
+    if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_port_col_ospf_mtu_ignore, idl_seqno)) {
+        if (ovs_port->n_ospf_mtu_ignore){
+            val = *ovs_port->ospf_mtu_ignore;
+            params->mtu_ignore = val;
+            if (val)
+                SET_IF_PARAM (params, mtu_ignore);
+            else
+                UNSET_IF_PARAM (params, mtu_ignore);
+        }
+        else
+        {
+            VLOG_DBG("MTU ignore flag is not present");
+            UNSET_IF_PARAM (params, mtu_ignore);
+        }
+    }
+
+    /* Cost */
+    if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_port_col_ospf_if_out_cost, idl_seqno)) {
+        if (ovs_port->n_ospf_if_out_cost){
+            val = *ovs_port->ospf_if_out_cost;
+            if (val < OSPF_MIN_INTERVAL || val > OSPF_MAX_INTERVAL)
+                    VLOG_DBG("Cost value is invalid");
+            else {
+                SET_IF_PARAM (params, output_cost_cmd);
+                params->output_cost_cmd = val;
+
+                ospf_if_recalculate_output_cost (ifp);
+            }
+        }
+        else
+            VLOG_DBG("Interface cost is not present");
+    }
+
+    /* Network Type */
+    if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_port_col_ospf_if_type, idl_seqno)) {
+        val = IF_DEF_PARAMS (ifp)->type;
+        if (!strncmp(ovs_port->ospf_if_type,
+                     OVSREC_PORT_OSPF_IF_TYPE_OSPF_IFTYPE_BROADCAST,
+                     strlen(OVSREC_PORT_OSPF_IF_TYPE_OSPF_IFTYPE_BROADCAST))){
+            IF_DEF_PARAMS (ifp)->type = OSPF_IFTYPE_BROADCAST;
+        }
+        else if (!strncmp(ovs_port->ospf_if_type,
+                          OVSREC_PORT_OSPF_IF_TYPE_OSPF_IFTYPE_POINTOPOINT,
+                          strlen(OVSREC_PORT_OSPF_IF_TYPE_OSPF_IFTYPE_POINTOPOINT))){
+            IF_DEF_PARAMS (ifp)->type = OSPF_IFTYPE_POINTOPOINT;
+        }
+
+        if (val != IF_DEF_PARAMS (ifp)->type) {
+            SET_IF_PARAM (IF_DEF_PARAMS (ifp), type);
+            for (rn = route_top (IF_OIFS (ifp)); rn; rn = route_next (rn)){
+                struct ospf_interface *oi = rn->info;
+
+                if (!oi)
+                    continue;
+
+                oi->type = IF_DEF_PARAMS (ifp)->type;
+
+                if (oi->state > ISM_Down){
+                    OSPF_ISM_EVENT_EXECUTE (oi, ISM_InterfaceDown);
+                    OSPF_ISM_EVENT_EXECUTE (oi, ISM_InterfaceUp);
+                }
+            }
+        }
+    }
+
     if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_port_col_ospf_auth_type, idl_seqno))  {
         if (ovs_port->ospf_auth_type) {
             if (!strcmp(ovs_port->ospf_auth_type,OVSREC_PORT_OSPF_AUTH_TYPE_TEXT)) {

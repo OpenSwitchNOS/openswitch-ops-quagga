@@ -42,6 +42,12 @@
 #define OSPF_KEY_AREA_STATS_ABR_COUNT            "abr_count"
 #define OSPF_KEY_AREA_STATS_ASBR_COUNT            "asbr_count"
 
+#define OSPF_MIN_INTERVAL                   1
+#define OSPF_MIN__RETRANSMIT_INTERVAL       1
+#define OSPF_MAX_INTERVAL                   65535
+
+#define OSPF_MIN_PRIORITY                   1
+#define OSPF_MAX_PRIORITY                   255
 
 /* TODO Many of the below Macro definitions will move to a common file later point in time   */
 #define OSPF_KEY_STUB_ROUTER_STATE_ACTIVE      "stub_router_state_active"
@@ -76,6 +82,7 @@
 #define BOOLEAN_STRING_TRUE                    "true"
 
 #define MAX_PATH_STRING_LEN                    128
+#define OVSDB_OSPF_DEFAULT_REF_BANDWIDTH       (40000 * 1000)   /* kbps */
 
 /* Utils Macros */
 #define STR_EQ(s1, s2)      ((strlen((s1)) == strlen((s2))) && (!strncmp((s1), (s2), strlen((s2)))))

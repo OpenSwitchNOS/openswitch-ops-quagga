@@ -265,20 +265,20 @@ bgp_ovsdb_tables_init (struct ovsdb_idl *idl)
 
     /* BGP router table */
     ovsdb_idl_add_table(idl, &ovsrec_table_bgp_router);
-    ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_router_id);
-    ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_networks);
-    ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_maximum_paths);
-    ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_timers);
-    ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_redistribute);
-    ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_always_compare_med);
-    ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_deterministic_med);
-    ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_gr_stale_timer);
-    ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_bgp_neighbors);
-    ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_other_config);
-    ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_status);
-    ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_external_ids);
-    ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_fast_external_failover);
-    ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_log_neighbor_changes);
+    ovsdb_idl_track_add_column(idl, &ovsrec_bgp_router_col_router_id);
+    ovsdb_idl_track_add_column(idl, &ovsrec_bgp_router_col_networks);
+    ovsdb_idl_track_add_column(idl, &ovsrec_bgp_router_col_maximum_paths);
+    ovsdb_idl_track_add_column(idl, &ovsrec_bgp_router_col_timers);
+    ovsdb_idl_track_add_column(idl, &ovsrec_bgp_router_col_redistribute);
+    ovsdb_idl_track_add_column(idl, &ovsrec_bgp_router_col_always_compare_med);
+    ovsdb_idl_track_add_column(idl, &ovsrec_bgp_router_col_deterministic_med);
+    ovsdb_idl_track_add_column(idl, &ovsrec_bgp_router_col_gr_stale_timer);
+    ovsdb_idl_track_add_column(idl, &ovsrec_bgp_router_col_bgp_neighbors);
+    ovsdb_idl_track_add_column(idl, &ovsrec_bgp_router_col_other_config);
+    ovsdb_idl_track_add_column(idl, &ovsrec_bgp_router_col_status);
+    ovsdb_idl_track_add_column(idl, &ovsrec_bgp_router_col_external_ids);
+    ovsdb_idl_track_add_column(idl, &ovsrec_bgp_router_col_fast_external_failover);
+    ovsdb_idl_track_add_column(idl, &ovsrec_bgp_router_col_log_neighbor_changes);
 
     /* BGP neighbor table */
     ovsdb_idl_add_table(idl, &ovsrec_table_bgp_neighbor);

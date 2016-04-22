@@ -67,6 +67,7 @@ typedef struct zebra_ovsdb_t_ {
 } zebra_ovsdb_t;
 
 static zebra_ovsdb_t glob_zebra_ovs;
+extern struct zebra_t zebrad;
 
 COVERAGE_DEFINE(zebra_ovsdb_cnt);
 VLOG_DEFINE_THIS_MODULE(zebra_ovsdb_if);
@@ -78,6 +79,18 @@ static struct unixctl_server *appctl;
 static int system_configured = false;
 static struct ovsdb_idl_txn *zebra_txn = NULL;
 bool zebra_txn_updates = false;
+
+/*
+ * Keep track if we are executing the reconfigure loop for
+ * the first time.
+ */
+bool zebra_first_run_after_restart = true;
+
+/*
+ * This flag is set in case zebra needs to cleanup kernel
+ * from the worker thread.
+ */
+bool zebra_cleanup_kernel_after_restart = false;
 
 boolean exiting = false;
 /* Hash for ovsdb route.*/
@@ -101,11 +114,6 @@ rib_add_ipv6_multipath (struct prefix_ipv6 *p, struct rib *rib, safi_t safi);
 #define OVSDB_ROUTE_ADD     1
 #define OVSDB_ROUTE_DELETE  2
 
-/*
- ********************************************************************
- * Start of the set of debugging functions for OVSDB zebra interface.
- ********************************************************************
- */
 #ifdef VRF_ENABLE
 char *zebra_vrf = NULL;
 
@@ -232,6 +240,209 @@ zebra_is_route_in_my_vrf (const struct ovsrec_route *ovs_route)
   return(!strncmp(ovs_rt_vrf, zebra_vrf, OVSDB_VRF_NAME_MAXLEN));
 }
 #endif
+
+/*
+ ********************************************************************
+ * Start of the set of debugging functions for dumping zebra's route
+ * table.
+ ********************************************************************
+ */
+
+/*
+ * This function returns the string  for the various route types
+ * supported by zebra.
+ */
+static char*
+zebra_route_type_to_str (int route_type)
+{
+  switch (route_type)
+    {
+      case ZEBRA_ROUTE_SYSTEM:
+        return("system");
+      case ZEBRA_ROUTE_KERNEL:
+        return("kernel");
+      case ZEBRA_ROUTE_CONNECT:
+        return("connected");
+      case ZEBRA_ROUTE_STATIC:
+        return("static");
+      case ZEBRA_ROUTE_RIP:
+        return("rip");
+      case ZEBRA_ROUTE_RIPNG:
+        return("ripng");
+      case ZEBRA_ROUTE_OSPF:
+        return("ospf");
+      case ZEBRA_ROUTE_OSPF6:
+        return("ospf6");
+      case ZEBRA_ROUTE_ISIS:
+        return("isis");
+      case ZEBRA_ROUTE_BGP:
+        return("bgp");
+      case ZEBRA_ROUTE_PIM:
+        return("pim");
+      case ZEBRA_ROUTE_HSLS:
+        return("hsls");
+      case ZEBRA_ROUTE_OLSR:
+        return("olsr");
+      case ZEBRA_ROUTE_BABEL:
+        return("babel");
+      default:
+        return("unsupported");
+    }
+}
+
+/*
+ * This function prints the content of a nexthop in zebra's rib entry.
+ */
+void
+zebra_dump_internal_nexthop (struct prefix *p, struct nexthop* nexthop)
+{
+  char nexthop_str[256];
+
+  if (!p)
+    {
+      VLOG_DBG("       prefix is NULL");
+      return;
+    }
+
+  if (!nexthop)
+    {
+      VLOG_DBG("       Nexthop is NULL");
+      return;
+    }
+
+  memset(nexthop_str, 0, sizeof(nexthop_str));
+
+  if (p->family == AF_INET)
+    if (nexthop->type == NEXTHOP_TYPE_IPV4)
+      {
+        inet_ntop(AF_INET, &nexthop->gate.ipv4,
+                  nexthop_str, sizeof(nexthop_str));
+         VLOG_DBG("      Nexthop->%s Active: %s", nexthop_str,
+                  CHECK_FLAG(nexthop->flags,
+                          NEXTHOP_FLAG_ACTIVE)? "true":"false");
+      }
+
+   if (p->family == AF_INET6)
+     if (nexthop->type == NEXTHOP_TYPE_IPV6)
+       {
+         inet_ntop(AF_INET6, &nexthop->gate.ipv6,
+                   nexthop_str, sizeof(nexthop_str));
+         VLOG_DBG("      Nexthop->%s Active: %s", nexthop_str,
+                  CHECK_FLAG(nexthop->flags,
+                            NEXTHOP_FLAG_ACTIVE)? "true":"false");
+       }
+
+   if ((nexthop->type == NEXTHOP_TYPE_IFNAME) ||
+       (nexthop->type == NEXTHOP_TYPE_IPV4_IFNAME) ||
+       (nexthop->type == NEXTHOP_TYPE_IPV6_IFNAME))
+       VLOG_DBG("      Nexthop->%s Active: %s", nexthop->ifname,
+                CHECK_FLAG(nexthop->flags,
+                           NEXTHOP_FLAG_ACTIVE)? "true":"false");
+}
+
+/*
+ * This function prints the contents of a rib entry in the zebra
+ * route node.
+ */
+void
+zebra_dump_internal_rib_entry (struct prefix *p, struct rib* rib)
+{
+  struct nexthop *nexthop;
+  char nexthop_str[256];
+
+  if (!p)
+    {
+      VLOG_DBG("   prefix is NULL");
+      return;
+    }
+
+  if (!rib)
+    {
+      VLOG_DBG("   Rib entry is NULL");
+      return;
+    }
+
+  if (!(rib->nexthop))
+    {
+      VLOG_DBG("   Empty RIB entry");
+      return;
+    }
+
+  VLOG_DBG("\tRoute type: %s Metric: %u Distance: %u Number: %u",
+           zebra_route_type_to_str(rib->type), rib->metric,
+           rib->distance, rib->nexthop_num);
+
+  for (nexthop = rib->nexthop; nexthop; nexthop = nexthop->next)
+   {
+     zebra_dump_internal_nexthop(p, nexthop);
+   }
+}
+
+/*
+ * This function dumps the contents of a route node in zebra's
+ * route table.
+ */
+void
+zebra_dump_internal_route_node (struct route_node *rn)
+{
+  struct rib *rib;
+  struct nexthop *nexthop;
+  char prefix_str[256];
+  char nexthop_str[256];
+  struct prefix *p = NULL;
+
+  if (!rn)
+    {
+      VLOG_DBG("Route node is null");
+      return;
+    }
+
+  p = &rn->p;
+  memset(prefix_str, 0, sizeof(prefix_str));
+  prefix2str(p, prefix_str, sizeof(prefix_str));
+
+  VLOG_DBG("Prefix %s Family %d\n",prefix_str,
+           PREFIX_FAMILY(p));
+
+  RNODE_FOREACH_RIB (rn, rib)
+    {
+      zebra_dump_internal_rib_entry(p, rib);
+    }
+}
+
+/*
+ * This function walks the zebra route table and prints the contents
+ * of all route nodes.
+ */
+void
+zebra_dump_internal_route_table (struct route_table *table)
+{
+  struct route_node *rn;
+
+  if (!table)
+    {
+      VLOG_DBG("The table is null");
+      return;
+    }
+
+  for (rn = route_top (table); rn; rn = route_next (rn))
+    {
+      zebra_dump_internal_route_node(rn);
+    }
+}
+
+/*
+ ********************************************************************
+ * End of the set of debugging functions for dumping zebra's route
+ * table.
+ ********************************************************************
+ */
+
+/*
+ ********************************************************************
+ * Start of the set of debugging functions for OVSDB zebra interface.
+ ********************************************************************
+ */
 /*
  * This function dumps the details of the next-hops for a given route row in
  * OVSDB route table.
@@ -1992,8 +2203,8 @@ zebra_nh_addr_active_in_cached_l3_ports_hash (char* nexthop_str,
       return(false);
     }
 
-  VLOG_DBG("Found a valid L3 port structure for next-hop %s",
-           nexthop_str);
+  VLOG_DBG("Found a valid L3 port structure for next-hop %s state %s",
+           nexthop_str, l3_port->if_active ? "active":"inactive");
 
   return(l3_port->if_active);
 }
@@ -3315,6 +3526,9 @@ zebra_handle_static_route_change (const struct ovsrec_route *route)
   for (next_hop_index = 0; next_hop_index < route->n_nexthops;
        ++next_hop_index)
     {
+      ifname = NULL;
+      memset(&gate, 0, sizeof(struct in_addr));
+      memset(&ipv6_gate, 0, sizeof(struct in6_addr));
 
       VLOG_DBG("Walking next-hop number %d\n", next_hop_index);
 
@@ -3580,6 +3794,33 @@ zebra_apply_route_changes (void)
               zebra_handle_route_change(route_row);
             }
         }
+
+      /*
+       * If this is the first OVSDB reconfigure run after restart, then
+       * check if there is work queued for the zebra backend thread. If there
+       * is work to be done by worker thread, then delay the cleanup of the
+       * zebra routes from the kernel until the worker thread has processed
+       * all OVSDB route upadtes. If there are no OVSDB route updates for the
+       * backend zebra threads, then cleanup the kernel inline.
+       */
+      if (zebra_first_run_after_restart)
+        {
+          VLOG_DBG("The size of the internal rib queue is %u",
+                   zebrad.mq->size);
+
+          if (zebrad.mq->size)
+            {
+              VLOG_DBG("Since there are entries in the queue to process. "
+                        "Set the kernel cleanup flag");
+              zebra_cleanup_kernel_after_restart = true;
+            }
+          else
+            {
+              VLOG_DBG("No routes within OVSDB route table for zebra to "
+                        "reprogram in kernel. Cleanup the kernel");
+              cleanup_kernel_routes_after_restart();
+            }
+        }
     }
 
   if ( (OVSREC_IDL_ANY_TABLE_ROWS_DELETED(route_first, idl_seqno) ) ||
@@ -3759,9 +4000,35 @@ zebra_reconfigure (struct ovsdb_idl *idl)
   zebra_create_txn();
 
   /* Apply all ovsdb notifications */
-  zebra_apply_route_changes();
-  zebra_handle_interface_admin_state_changes();
-  zebra_handle_port_add_delete_changes();
+  if (zebra_first_run_after_restart)
+    {
+      VLOG_DBG("Zebra restarted. Cleanup the stale routes from kernel");
+
+      /*
+       * Dump the zebra internal shadow table containing the routes
+       * learned from the kernel.
+       */
+      if (VLOG_IS_DBG_ENABLED())
+        {
+          zebra_dump_internal_route_table(
+                     vrf_shadow_table(AFI_IP, SAFI_UNICAST, 0));
+          zebra_dump_internal_route_table(
+                     vrf_shadow_table(AFI_IP6, SAFI_UNICAST, 0));
+        }
+
+      zebra_handle_port_add_delete_changes();
+      zebra_handle_interface_admin_state_changes();
+      zebra_apply_route_changes();
+      zebra_first_run_after_restart = false;
+    }
+  else
+    {
+      VLOG_DBG("Second run for the zebra config changes");
+
+      zebra_apply_route_changes();
+      zebra_handle_port_add_delete_changes();
+      zebra_handle_interface_admin_state_changes();
+    }
 
   /* Submit any modifications in IDl to DB */
   zebra_finish_txn();
@@ -4457,7 +4724,7 @@ void zebra_update_selected_nh (struct route_node *rn, struct rib *route,
            * increment the counter number_of_selected_nh.
            */
           if (((!cand_nh_row) || (cand_nh_row != nh_row)) &&
-              (!(nh_row->selected) || (nh_row->selected[0] == true)))
+              ((nh_row->selected) && (nh_row->selected[0] == true)))
             {
               ++number_of_selected_nh;
             }

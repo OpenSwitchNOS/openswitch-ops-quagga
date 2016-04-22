@@ -35,6 +35,8 @@
 #define OVSREC_IDL_GET_TABLE_ROW_UUID(ovsrec_row_struct) \
                              (ovsrec_row_struct->header_.uuid)
 
+extern bool zebra_cleanup_kernel_after_restart;
+
 struct ipv4v6_addr
 {
   union {
@@ -89,6 +91,11 @@ void zebra_update_selected_route_nexthops_to_db (
                                             struct route_node *rn,
                                             struct rib *route,
                                             int action);
+void zebra_dump_internal_nexthop (struct prefix *p, struct nexthop* nexthop);
+void zebra_dump_internal_rib_entry (struct prefix *p, struct rib* rib);
+void zebra_dump_internal_route_node (struct route_node *rn);
+void zebra_dump_internal_route_table (struct route_table *table);
+void cleanup_kernel_routes_after_restart();
 extern int zebra_create_txn (void);
 extern int zebra_finish_txn (void);
 

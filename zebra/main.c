@@ -16,7 +16,7 @@
  * You should have received a copy of the GNU General Public License
  * along with GNU Zebra; see the file COPYING.  If not, write to the Free
  * Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
- * 02111-1307, USA.  
+ * 02111-1307, USA.
  */
 
 #include <zebra.h>
@@ -73,7 +73,7 @@ u_int32_t nl_rcvbufsize = 0;
 #endif /* HAVE_NETLINK */
 
 /* Command line options. */
-struct option longopts[] = 
+struct option longopts[] =
 {
   { "batch",       no_argument,       NULL, 'b'},
   { "daemon",      no_argument,       NULL, 'd'},
@@ -95,7 +95,7 @@ struct option longopts[] =
   { 0 }
 };
 
-zebra_capabilities_t _caps_p [] = 
+zebra_capabilities_t _caps_p [] =
 {
   ZCAP_NET_ADMIN,
   ZCAP_SYS_ADMIN,
@@ -130,7 +130,7 @@ usage (char *progname, int status)
   if (status != 0)
     fprintf (stderr, "Try `%s --help' for more information.\n", progname);
   else
-    {    
+    {
       printf ("Usage : %s [OPTION...]\n\n"\
 	      "Daemon which manages kernel routing table management and "\
 	      "redistribution between different routing protocols.\n\n"\
@@ -161,7 +161,7 @@ usage (char *progname, int status)
 }
 
 /* SIGHUP handler. */
-static void 
+static void
 sighup (void)
 {
   zlog_info ("SIGHUP received");
@@ -194,8 +194,8 @@ sigusr1 (void)
 
 struct quagga_signal_t zebra_signals[] =
 {
-  { 
-    .signal = SIGHUP, 
+  {
+    .signal = SIGHUP,
     .handler = &sighup,
   },
   {
@@ -243,11 +243,11 @@ main (int argc, char **argv)
   zlog_default = openzlog (progname, ZLOG_ZEBRA,
 			   LOG_CONS|LOG_NDELAY|LOG_PID, LOG_DAEMON);
 
-  while (1) 
+  while (1)
     {
       int opt;
-  
-#ifdef HAVE_NETLINK  
+
+#ifdef HAVE_NETLINK
       opt = getopt_long (argc, argv, "bdkf:i:z:hA:P:ru:g:vs:C", longopts, 0);
 #else
       opt = getopt_long (argc, argv, "bdkf:i:z:hA:P:ru:g:vC", longopts, 0);
@@ -256,7 +256,7 @@ main (int argc, char **argv)
       if (opt == EOF)
 	break;
 
-      switch (opt) 
+      switch (opt)
 	{
 	case 0:
 	  break;
@@ -286,11 +286,11 @@ main (int argc, char **argv)
 	case 'P':
 	  /* Deal with atoi() returning 0 on failure, and zebra not
 	     listening on zebra port... */
-	  if (strcmp(optarg, "0") == 0) 
+	  if (strcmp(optarg, "0") == 0)
 	    {
 	      vty_port = 0;
 	      break;
-	    } 
+	    }
 	  vty_port = atoi (optarg);
 	  if (vty_port <= 0 || vty_port > 0xffff)
 	    vty_port = ZEBRA_VTY_PORT;
@@ -369,6 +369,13 @@ main (int argc, char **argv)
 #endif
 
 #ifdef ENABLE_OVSDB
+
+  /*
+   * For ops-zebra set the retain mode flag so that ops-zebra
+   * does not clear the kernel of its learned routes when it
+   * receives a process shutdown signal.
+   */
+  retain_mode = 1;
   zebra_ovsdb_init_poll_loop(&zebrad);
 #endif
 
@@ -386,7 +393,7 @@ main (int argc, char **argv)
   /* Don't start execution if we are in dry-run mode */
   if (dryrun)
     return(0);
-  
+
   /* Clean up rib. */
   rib_weed_tables ();
 

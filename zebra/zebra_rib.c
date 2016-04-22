@@ -143,6 +143,27 @@ vrf_table_create (struct vrf *vrf, afi_t afi, safi_t safi)
   table->info = info;
 }
 
+/*
+ * vrf_shadow_table_create
+ */
+static void
+vrf_shadow_table_create (struct vrf *vrf, afi_t afi, safi_t safi)
+{
+  rib_table_info_t *info;
+  struct route_table *table;
+
+  assert (!vrf->shadow_table[afi][safi]);
+
+  table = route_table_init ();
+  vrf->shadow_table[afi][safi] = table;
+
+  info = XCALLOC (MTYPE_RIB_TABLE_INFO, sizeof (*info));
+  info->vrf = vrf;
+  info->afi = afi;
+  info->safi = safi;
+  table->info = info;
+}
+
 /* Allocate new VRF.  */
 static struct vrf *
 vrf_alloc (const char *name)
@@ -160,11 +181,14 @@ vrf_alloc (const char *name)
   vrf_table_create (vrf, AFI_IP6, SAFI_UNICAST);
   vrf->stable[AFI_IP][SAFI_UNICAST] = route_table_init ();
   vrf->stable[AFI_IP6][SAFI_UNICAST] = route_table_init ();
+  vrf_shadow_table_create (vrf, AFI_IP, SAFI_UNICAST);
+  vrf_shadow_table_create (vrf, AFI_IP6, SAFI_UNICAST);
   vrf_table_create (vrf, AFI_IP, SAFI_MULTICAST);
   vrf_table_create (vrf, AFI_IP6, SAFI_MULTICAST);
   vrf->stable[AFI_IP][SAFI_MULTICAST] = route_table_init ();
   vrf->stable[AFI_IP6][SAFI_MULTICAST] = route_table_init ();
-
+  vrf_shadow_table_create (vrf, AFI_IP, SAFI_MULTICAST);
+  vrf_shadow_table_create (vrf, AFI_IP6, SAFI_MULTICAST);
 
   return vrf;
 }
@@ -222,6 +246,22 @@ vrf_static_table (afi_t afi, safi_t safi, u_int32_t id)
     return NULL;
 
   return vrf->stable[afi][safi];
+}
+
+/* Lookup static route table.  */
+struct route_table *
+vrf_shadow_table (afi_t afi, safi_t safi, u_int32_t id)
+{
+  struct vrf *vrf;
+
+  vrf = vrf_lookup (id);
+  if (! vrf)
+    return NULL;
+
+  if( afi >= AFI_MAX  || safi >= SAFI_MAX )
+    return NULL;
+
+  return vrf->shadow_table[afi][safi];
 }
 
 /*
@@ -1376,6 +1416,401 @@ rib_gc_dest (struct route_node *rn)
   return 1;
 }
 
+/*
+ * This function walks all routes in shadow route table and cleans the zebra
+ * routes from kernel.
+ */
+static void walk_shadow_table_and_cleanup_stale_kernel_routes (
+                                    afi_t afi, safi_t safi, u_int32_t vrf_id)
+{
+  struct route_table *shadow_table;
+  struct rib* rib;
+  struct route_node *rn;
+  char prefix_str[256];
+  struct prefix *p = NULL;
+  rib_dest_t* rib_list_head;
+
+  VLOG_DBG("Walk all routes in shadow table and uninstall zebra routes from"
+           " kernel");
+
+  /* Lookup the shadow table */
+  shadow_table = vrf_shadow_table(afi, safi, vrf_id);
+
+  if (shadow_table)
+    {
+      for (rn = route_top (shadow_table); rn; rn = route_next (rn))
+        {
+          if (!rn)
+            {
+              VLOG_DBG("  Route node is null");
+              continue;
+            }
+
+          p = &rn->p;
+          memset(prefix_str, 0, sizeof(prefix_str));
+          prefix2str(p, prefix_str, sizeof(prefix_str));
+
+          VLOG_DBG("   Cleanup next-hops for Prefix %s Family %d\n",
+                    prefix_str,  PREFIX_FAMILY(p));
+
+          /*
+           * If the zebra route did not change after restart, then do not
+           * withdraw the route from kernel.
+           */
+          if (rn->retain_mode_flags ==
+                           RETAIN_MODE_ROUTE_NO_CHANGE_AFTER_RESTART)
+            {
+              VLOG_DBG("  Route node did not change. No need to uninstall");
+              continue;
+            }
+
+          /*
+           * The zebra route already got updated in kernel because the
+           * route changed before zebra restart.
+           */
+          if (rn->retain_mode_flags ==
+                           RETAIN_MODE_ROUTE_CHANGE_AFTER_RESTART)
+            {
+              VLOG_DBG("  Route node changed. No need to uninstall");
+              continue;
+            }
+
+          rib_list_head = rib_dest_from_rnode(rn);
+
+          rib = (rib_list_head) ? (rib_list_head)->routes : NULL;
+
+          if (!rib)
+            {
+              VLOG_DBG("  Rib entry is NULL");
+              continue;
+            }
+
+          /*
+           * Clean up the kernel
+           */
+          VLOG_DBG("  Uninstall all the next-hops for the route from kernel");
+          rib_uninstall_kernel(rn, rib);
+        }
+
+        /*
+         * Free the shadow route table as we are done with the cleaning
+         * of the kernel.
+         */
+        VLOG_DBG("Walk and free all route nodes of the shadow table");
+        route_table_finish(shadow_table);
+
+        shadow_table = NULL;
+    }
+}
+
+/*
+ * Clean the IPv4 and IPv6 zebra routes from kernel programmed by zebra
+ * before it got restarted.
+ */
+void cleanup_kernel_routes_after_restart ()
+{
+  walk_shadow_table_and_cleanup_stale_kernel_routes(AFI_IP, SAFI_UNICAST, 0);
+  walk_shadow_table_and_cleanup_stale_kernel_routes(AFI_IP6, SAFI_UNICAST, 0);
+}
+
+/*
+ * Check if route learned from configuration and routing protocols is
+ * same as the route programmed in the kernel by zebra before zebra
+ * got restarted. This function returns true in case both kernel learned
+ * rib entry and is same as the OVSDB learned rib entry.  In all other cases
+ * this function returns false.
+ */
+static bool if_rib_entry_and_kernel_entry_are_same_for_nexthops
+                                           (struct prefix* prefix_kernel,
+                                            struct prefix* prefix_current,
+                                            struct rib* kernel,
+                                            struct rib* current)
+{
+  struct nexthop* kernel_nexthop_ptr;
+  struct nexthop* current_nexthop_ptr;
+  bool found;
+  bool all_found;
+
+  assert(prefix_kernel);
+  assert(prefix_current);
+
+  /*
+   * Dump the route next-hop learned from kernel after zerba restart
+   */
+  zebra_dump_internal_rib_entry(prefix_kernel, kernel);
+
+  /*
+   * Dump the route next-hop learned from zebra after zerba restart
+   */
+  zebra_dump_internal_rib_entry(prefix_current, current);
+
+  if (!kernel && !current)
+    {
+      return(true);
+    }
+
+  if (!kernel && current)
+    {
+      return(false);
+    }
+
+  if (kernel && !current)
+    {
+      return(false);
+    }
+
+  /*
+   * If the number of active next-hops for the kernel learned rib entry
+   * and OVSDB learned rib entry is not same, then return false.
+   */
+  if (kernel->nexthop_num != current->nexthop_active_num)
+    {
+      return(false);
+    }
+
+  kernel_nexthop_ptr = kernel->nexthop;
+  current_nexthop_ptr = current->nexthop;
+
+  if (!kernel_nexthop_ptr && !current_nexthop_ptr)
+    {
+      return(true);
+    }
+
+  if (!kernel_nexthop_ptr && current_nexthop_ptr)
+    {
+      return(false);
+    }
+
+  if (kernel_nexthop_ptr && !current_nexthop_ptr)
+    {
+      return(false);
+    }
+
+  /*
+   * Iterate through all kernel learned next-hops and see if they
+   * are active next-hops in the OVSDB leanred next-hops for the route.
+   */
+  all_found = true;
+  while (kernel_nexthop_ptr)
+    {
+      current_nexthop_ptr = current->nexthop;
+
+      found = false;
+      while (current_nexthop_ptr)
+        {
+          if (!CHECK_FLAG(current_nexthop_ptr->flags, NEXTHOP_FLAG_ACTIVE))
+            {
+              current_nexthop_ptr = current_nexthop_ptr->next;
+              VLOG_DBG("   Not an active current next-hop");
+              continue;
+            }
+
+          if (kernel_nexthop_ptr->type ==  current_nexthop_ptr->type)
+            {
+              if (current_nexthop_ptr->type == NEXTHOP_TYPE_IFINDEX)
+                {
+                  if (current_nexthop_ptr->ifindex ==
+                      kernel_nexthop_ptr->ifindex)
+                    {
+                      found = true;
+                      VLOG_DBG("   Found a match for the "
+                               "kernel next-hop ifindex = %u and"
+                               " current ifindex = %u",
+                               kernel_nexthop_ptr->ifindex,
+                               current_nexthop_ptr->ifindex);
+                      break;
+                    }
+                }
+
+              if (current_nexthop_ptr->type == NEXTHOP_TYPE_IFNAME)
+                {
+                  if (strcmp(current_nexthop_ptr->ifname,
+                             kernel_nexthop_ptr->ifname) == 0)
+                    {
+                      found = true;
+                      VLOG_DBG("   Found a match for the "
+                               "kernel next-hop ifname = %s and"
+                               " current ifname = %s",
+                               kernel_nexthop_ptr->ifname,
+                               current_nexthop_ptr->ifname);
+                      break;
+                    }
+                }
+
+              if (current_nexthop_ptr->type == NEXTHOP_TYPE_IPV4)
+                {
+                  if (ntohl(current_nexthop_ptr->gate.ipv4.s_addr) ==
+                      ntohl(kernel_nexthop_ptr->gate.ipv4.s_addr))
+                    {
+                      found = true;
+                      VLOG_DBG("Found a matching kernel next-hop "
+                               "IPv4 address and current next-hop "
+                               "IPv4 address");
+                      break;
+                    }
+                }
+
+              /*
+               * TODO: Do the same check when the next-hop is
+               *       of type NEXTHOP_TYPE_IPV6.
+               */
+
+            }
+          current_nexthop_ptr = current_nexthop_ptr->next;
+        }
+
+      all_found = all_found & found;
+
+      if (!all_found)
+        break;
+
+      kernel_nexthop_ptr = kernel_nexthop_ptr->next;
+    }
+
+  return(all_found);
+}
+
+/*
+ * This function finds if there exists a route in kernel for the
+ * the route learned from OVSDB and cleans up the kernel route if
+ * the rib entry learnt from the kernel is not same as the rib entry
+ * learnt from OVSDB.
+ */
+static void compare_route_node_with_shadow_route_node (struct route_node* rn,
+                                                       struct rib* rib)
+{
+  struct route_table *shadow_table;
+  struct prefix_ipv4 p4;
+  struct prefix_ipv6 p6;
+  struct prefix p;
+  struct prefix* kernel_prefix = NULL;
+  struct prefix* current_prefix = NULL;
+  struct route_node* kernel_rn = NULL;
+  bool if_kernel_and_current_same = false;
+  rib_dest_t* kernel_rib_list_head;
+  struct rib* kernel_rib;
+  struct rib* current_rib;
+  char prefix_str[256];
+
+  if (!rn)
+    {
+      VLOG_DBG("   Route-node is NULL");
+      return;
+    }
+
+  if (!rib)
+    {
+      VLOG_DBG("   Rib entry is NULL");
+      return;
+    }
+
+  if (!zebra_cleanup_kernel_after_restart)
+    {
+      VLOG_DBG("zebra already completed restart");
+      return;
+    }
+
+  p = rn->p;
+
+  if (p.family == AF_INET)
+    {
+      /* Lookup the shadow table.for the IPV4 route */
+      shadow_table = vrf_shadow_table(AFI_IP, SAFI_UNICAST, 0);
+
+      if (shadow_table)
+        {
+          p4.family = AF_INET;
+          p4.prefixlen = p.prefixlen;
+          memcpy(&p4.prefix, &(p.u.prefix4), 4);
+
+          VLOG_DBG("Look up if the current IPV4 prefix %s/%u is "
+                    "present in kernel",
+                    inet_ntoa(p4.prefix), p4.prefixlen);
+
+          /* Make it sure prefixlen is applied to the prefix. */
+          apply_mask_ipv4(&p4);
+
+          /* Lookup route node in the shadow table.*/
+          kernel_rn = route_node_lookup(shadow_table, &p4);
+        }
+    }
+
+  if (p.family == AF_INET6)
+    {
+      /* Lookup the shadow table.for the IPV4 route */
+      shadow_table = vrf_shadow_table(AFI_IP6, SAFI_UNICAST, 0);
+
+      if (shadow_table)
+        {
+          p6.family = AF_INET6;
+          p6.prefixlen = p.prefixlen;
+          memcpy(&p6.prefix, &(p.u.prefix6), 16);
+
+          memset(prefix_str, 0, sizeof(prefix_str));
+          inet_ntop(AF_INET6, &p6.prefix, prefix_str,
+                    sizeof(prefix_str));
+
+          VLOG_DBG("Look up if the current IPV4 prefix %s/%u is "
+                    "present in kernel",
+                    prefix_str, p6.prefixlen);
+
+          /* Make it sure prefixlen is applied to the prefix. */
+          apply_mask_ipv6(&p6);
+
+          /* Lookup route node in the shadow table.*/
+          kernel_rn = route_node_lookup(shadow_table, &p6);
+        }
+    }
+
+  if (kernel_rn)
+    {
+      kernel_prefix = &(kernel_rn->p);
+
+      /*
+       * Printing the kernel prefix
+       */
+      memset(prefix_str, 0, sizeof(prefix_str));
+      prefix2str(kernel_prefix, prefix_str, sizeof(prefix_str));
+
+      VLOG_DBG("Found a kernel prefix for the route %s",
+               prefix_str);
+
+      current_prefix = &p;
+
+      kernel_rib_list_head = rib_dest_from_rnode(kernel_rn);
+
+      (kernel_rib) = (kernel_rib_list_head) ?
+                       (kernel_rib_list_head)->routes : NULL;
+
+      current_rib = rib;
+
+      if_kernel_and_current_same =
+          if_rib_entry_and_kernel_entry_are_same_for_nexthops(
+               kernel_prefix, current_prefix, kernel_rib,
+               current_rib);
+
+      if (if_kernel_and_current_same)
+        {
+           VLOG_DBG("Kernel and current rib entries are same");
+           rib_uninstall_kernel(kernel_rn, kernel_rib);
+           kernel_rn->retain_mode_flags =
+                            RETAIN_MODE_ROUTE_NO_CHANGE_AFTER_RESTART;
+        }
+      else
+        {
+           VLOG_DBG("Kernel and current rib entries are different. "
+                    "Unistall kernel FIB entry");
+           rib_uninstall_kernel(kernel_rn, kernel_rib);
+           kernel_rn->retain_mode_flags =
+                            RETAIN_MODE_ROUTE_CHANGE_AFTER_RESTART;
+        }
+    }
+  else
+    {
+      VLOG_DBG("Could not find a kernel prefix for the given route");
+    }
+}
+
 /* Core function for processing routing information base. */
 static void
 rib_process (struct route_node *rn)
@@ -1512,6 +1947,12 @@ rib_process (struct route_node *rn)
           /* Set real nexthop. */
           nexthop_active_update (rn, select, 1);
 
+          /*
+           * Check if for this route and its rib entry, kernel leanred
+           * rib entry needs to be cleaned up.
+           */
+          compare_route_node_with_shadow_route_node(rn, select);
+
           VLOG_DBG("In process_rib install in kernel");
           if (! RIB_SYSTEM_ROUTE (select))
             {
@@ -1596,6 +2037,12 @@ rib_process (struct route_node *rn)
       /* Set real nexthop. */
       nexthop_active_update (rn, select, 1);
 
+      /*
+       * Check if for this route and its rib entry, kernel leanred
+       * rib entry needs to be cleaned up.
+       */
+      compare_route_node_with_shadow_route_node(rn, select);
+
       VLOG_DBG("In process_rib Adding to kernel");
       if (! RIB_SYSTEM_ROUTE (select))
         {
@@ -1618,6 +2065,24 @@ rib_process (struct route_node *rn)
         rnode_debug (rn, "Deleting fib %p, rn %p", del, rn);
 
       rib_unlink (rn, del);
+    }
+
+  /*
+   * In case this route and its next-hop are not active, cleanup
+   * the kernel learned rib entry and unset the selected bit on
+   * the route and its next-hops in OVSDB.
+   */
+  if (!fib && !select && !del)
+    {
+      VLOG_DBG("No active nethops found. Unset the selected bit");
+
+      RNODE_FOREACH_RIB_SAFE (rn, rib, next)
+        {
+          nexthop_active_update (rn, rib, 0);
+          compare_route_node_with_shadow_route_node(rn, rib);
+          zebra_update_selected_route_nexthops_to_db(rn, rib,
+                                                     ZEBRA_NH_UNINSTALL);
+        }
     }
 
 end:
@@ -1683,6 +2148,22 @@ meta_queue_process (struct work_queue *dummy, void *data)
 	mq->size--;
 	break;
       }
+
+  /*
+   * Since the worker thread has finished processing all OVSDB
+   * route updates, we can cleanup the kernel of all the stale
+   * kernel next-hops.
+   */
+  if (!(mq->size))
+    {
+      if (zebra_cleanup_kernel_after_restart)
+        {
+          VLOG_DBG("Cleaning up all the stale kernel routes");
+          cleanup_kernel_routes_after_restart();
+          zebra_cleanup_kernel_after_restart = false;
+        }
+    }
+
   return mq->size ? WQ_REQUEUE : WQ_SUCCESS;
 }
 

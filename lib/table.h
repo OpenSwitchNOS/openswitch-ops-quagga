@@ -17,7 +17,7 @@
  * You should have received a copy of the GNU General Public License
  * along with GNU Zebra; see the file COPYING.  If not, write to the Free
  * Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
- * 02111-1307, USA.  
+ * 02111-1307, USA.
  */
 
 #ifndef _ZEBRA_TABLE_H
@@ -37,13 +37,13 @@ struct route_table;
  */
 typedef struct route_table_delegate_t_ route_table_delegate_t;
 
-typedef struct route_node * (*route_table_create_node_func_t) 
+typedef struct route_node * (*route_table_create_node_func_t)
   (route_table_delegate_t *, struct route_table *);
 
-typedef void (*route_table_destroy_node_func_t) 
+typedef void (*route_table_destroy_node_func_t)
   (route_table_delegate_t *, struct route_table *, struct route_node *);
 
-struct route_table_delegate_t_ 
+struct route_table_delegate_t_
 {
   route_table_create_node_func_t create_node;
   route_table_destroy_node_func_t destroy_node;
@@ -58,9 +58,9 @@ struct route_table
    * Delegate that performs certain functions for this table.
    */
   route_table_delegate_t *delegate;
-  
+
   unsigned long count;
-  
+
   /*
    * User data.
    */
@@ -86,7 +86,29 @@ struct route_table
   void *info;					\
 						\
   /* Aggregation. */				\
-  void *aggregate;
+  void *aggregate;     \
+                        \
+  /* Flag to keep track if the zebra route
+     needs to cleaned or reporgrammed in
+     kernel after zebra restarts */\
+  u_char retain_mode_flags;
+
+/*
+ * Mark the route seen in kernel with this flag
+ */
+#define RETAIN_MODE_ROUTE_IN_KERNEL_AFTER_RESTART 1 << 0
+
+/*
+ * Mark the route seen in kernel with this flag which does
+ * not change after restart
+ */
+#define RETAIN_MODE_ROUTE_NO_CHANGE_AFTER_RESTART 1 << 1
+
+/*
+ * Mark the route seen in kernel with this flag which
+ * changes after restart
+ */
+#define RETAIN_MODE_ROUTE_CHANGE_AFTER_RESTART 1 << 2
 
 
 /* Each routing entry. */
@@ -100,7 +122,7 @@ struct route_node
 
 typedef struct route_table_iter_t_ route_table_iter_t;
 
-typedef enum 
+typedef enum
 {
   RT_ITER_STATE_INIT,
   RT_ITER_STATE_ITERATING,
@@ -110,10 +132,10 @@ typedef enum
 
 /*
  * route_table_iter_t
- * 
+ *
  * Structure that holds state for iterating over a route table.
  */
-struct route_table_iter_t_ 
+struct route_table_iter_t_
 {
 
   route_table_iter_state_t state;
@@ -131,7 +153,7 @@ struct route_table_iter_t_
 
   /*
    * The last prefix that the iterator processed before it was paused.
-   */  
+   */
   struct prefix pause_prefix;
 };
 

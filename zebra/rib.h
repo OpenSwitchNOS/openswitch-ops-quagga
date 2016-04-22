@@ -18,7 +18,7 @@
  * You should have received a copy of the GNU General Public License
  * along with GNU Zebra; see the file COPYING.  If not, write to the Free
  * Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
- * 02111-1307, USA.  
+ * 02111-1307, USA.
  */
 
 #ifndef _ZEBRA_RIB_H
@@ -44,13 +44,13 @@ struct rib
   /* Link list. */
   struct rib *next;
   struct rib *prev;
-  
+
   /* Nexthop structure */
   struct nexthop *nexthop;
-  
+
   /* Refrence count. */
   unsigned long refcnt;
-  
+
   /* Uptime. */
   time_t uptime;
 
@@ -58,7 +58,7 @@ struct rib
   int type;
 
   /* Which routing table */
-  int table;			
+  int table;
 
   /* Metric */
   u_int32_t metric;
@@ -188,7 +188,7 @@ struct static_ipv4
 #define STATIC_IPV4_BLACKHOLE   3
 
   /* Nexthop value. */
-  union 
+  union
   {
     struct in_addr ipv4;
     char *ifname;
@@ -254,7 +254,7 @@ struct nexthop
   /* Interface index. */
   char *ifname;
   unsigned int ifindex;
-  
+
   enum nexthop_types_t type;
 
   u_char flags;
@@ -342,6 +342,10 @@ struct vrf
 
   /* Static route configuration.  */
   struct route_table *stable[AFI_MAX][SAFI_MAX];
+
+  /* Shadow route table for storing the zebra kernel routes learnt after
+     retart. */
+  struct route_table *shadow_table[AFI_MAX][SAFI_MAX];
 };
 
 /*
@@ -426,11 +430,12 @@ extern struct nexthop *nexthop_ipv6_add (struct rib *, struct in6_addr *);
 extern struct vrf *vrf_lookup (u_int32_t);
 extern struct route_table *vrf_table (afi_t afi, safi_t safi, u_int32_t id);
 extern struct route_table *vrf_static_table (afi_t afi, safi_t safi, u_int32_t id);
+extern struct route_table *vrf_shadow_table (afi_t afi, safi_t safi, u_int32_t id);
 
 /* NOTE:
  * All rib_add_ipv[46]* functions will not just add prefix into RIB, but
  * also implicitly withdraw equal prefix of same type. */
-extern int rib_add_ipv4 (int type, int flags, struct prefix_ipv4 *p, 
+extern int rib_add_ipv4 (int type, int flags, struct prefix_ipv4 *p,
 			 struct in_addr *gate, struct in_addr *src,
 			 unsigned int ifindex, u_int32_t vrf_id,
 			 u_int32_t, u_char, safi_t);
@@ -438,7 +443,7 @@ extern int rib_add_ipv4 (int type, int flags, struct prefix_ipv4 *p,
 extern int rib_add_ipv4_multipath (struct prefix_ipv4 *, struct rib *, safi_t);
 
 extern int rib_delete_ipv4 (int type, int flags, struct prefix_ipv4 *p,
-		            struct in_addr *gate, unsigned int ifindex, 
+		            struct in_addr *gate, unsigned int ifindex,
 		            u_int32_t, safi_t safi);
 
 extern struct rib *rib_match_ipv4_safi (struct in_addr addr, safi_t safi,

@@ -68,15 +68,16 @@ endif
 
 if ENABLE_OVSDB
 ops_zebra_LDADD = $(otherobj) libzebra_ovsdb_if.a ../lib/libzebra.la \
-		  $(LIBCAP) -lovscommon -lovsdb -lpthread
+		  $(LIBCAP) -lovscommon -lovsdb -lpthread -lsupportability
 ops_zebra_DEPENDENCIES = $(otherobj)
-ops_zebra_DEPENDENCIES += libzebra_ovsdb_if.a
 else
 zebra_LDADD = $(otherobj) libzebra_ovsdb_if.a ../lib/libzebra.la $(LIBCAP)
 zebra_DEPENDENCIES = $(otherobj)
 endif
 
-testzebra_LDADD = libzebra_ovsdb_if.a ../lib/libzebra.la $(LIBCAP)
+if ENABLE_OVSDB
+testzebra_LDADD = libzebra_ovsdb_if.a ../lib/libzebra.la $(LIBCAP) -lsupportability
+endif
 
 EXTRA_DIST = if_ioctl.c if_ioctl_solaris.c if_netlink.c \
         if_sysctl.c ipforward_proc.c \

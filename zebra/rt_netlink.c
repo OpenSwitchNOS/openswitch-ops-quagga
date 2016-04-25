@@ -45,6 +45,9 @@
 #include "zebra/debug.h"
 
 #include "rt_netlink.h"
+#ifdef ENABLE_OVSDB
+#include "eventlog.h"
+#endif
 
 /* Socket interface to kernel */
 struct nlsock
@@ -264,6 +267,11 @@ netlink_request (int family, int type, struct nlsock *nl)
     {
       zlog (NULL, LOG_ERR, "%s sendto failed: %s", nl->name,
             safe_strerror (save_errno));
+#ifdef ENABLE_OVSDB
+      log_event("ZEBRA_NETLINK_ERR", EV_KV("err_desc", "%s", "sendto failed"),
+                EV_KV("nlsock", "%s", nl->name),
+                EV_KV("errno", "%s",safe_strerror (save_errno)));
+#endif
       return -1;
     }
 
@@ -311,6 +319,11 @@ netlink_parse_info (int (*filter) (struct sockaddr_nl *, struct nlmsghdr *),
       if (status == 0)
         {
           zlog (NULL, LOG_ERR, "%s EOF", nl->name);
+#ifdef ENABLE_OVSDB
+      log_event("ZEBRA_NETLINK_ERR", EV_KV("err_desc", "%s", "EOF"),
+                EV_KV("nlsock", "%s", nl->name),
+                EV_KV("errno", "%s",""));
+#endif
           return -1;
         }
 
@@ -318,6 +331,11 @@ netlink_parse_info (int (*filter) (struct sockaddr_nl *, struct nlmsghdr *),
         {
           zlog (NULL, LOG_ERR, "%s sender address length error: length %d",
                 nl->name, msg.msg_namelen);
+#ifdef ENABLE_OVSDB
+      log_event("ZEBRA_NETLINK_ERR", EV_KV("err_desc", "%s", "sender address"
+                "length error"), EV_KV("nlsock", "%s", nl->name),
+                EV_KV("errno", "%d",msg.msg_namelen));
+#endif
           return -1;
         }
       
@@ -359,6 +377,12 @@ netlink_parse_info (int (*filter) (struct sockaddr_nl *, struct nlmsghdr *),
                 {
                   zlog (NULL, LOG_ERR, "%s error: message truncated",
                         nl->name);
+#ifdef ENABLE_OVSDB
+                  log_event("ZEBRA_NETLINK_ERR", EV_KV("err_desc", "%s",
+                            "error message truncated"),
+                            EV_KV("nlsock", "%s", nl->name),
+                            EV_KV("errno", "%s",""));
+#endif
                   return -1;
                 }
 
@@ -1983,7 +2007,6 @@ kernel_init (void)
 #endif /* HAVE_IPV6 */
   netlink_socket (&netlink, groups);
   netlink_socket (&netlink_cmd, 0);
-
   /* Register kernel socket. */
   if (netlink.sock > 0)
     {

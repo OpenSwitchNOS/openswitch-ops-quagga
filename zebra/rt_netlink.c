@@ -45,6 +45,9 @@
 #include "zebra/debug.h"
 
 #include "rt_netlink.h"
+#ifdef ENABLE_OVSDB
+#include "eventlog.h"
+#endif
 
 /* Socket interface to kernel */
 struct nlsock
@@ -125,10 +128,12 @@ netlink_recvbuf (struct nlsock *nl, uint32_t newsize)
   /* Try force option (linux >= 2.6.14) and fall back to normal set */
   if ( zserv_privs.change (ZPRIVS_RAISE) )
     zlog_err ("routing_socket: Can't raise privileges");
+
   ret = setsockopt(nl->sock, SOL_SOCKET, SO_RCVBUFFORCE, &nl_rcvbufsize,
 		   sizeof(nl_rcvbufsize));
   if ( zserv_privs.change (ZPRIVS_LOWER) )
     zlog_err ("routing_socket: Can't lower privileges");
+
   if (ret < 0)
      ret = setsockopt(nl->sock, SOL_SOCKET, SO_RCVBUF, &nl_rcvbufsize,
 		      sizeof(nl_rcvbufsize));
@@ -264,6 +269,11 @@ netlink_request (int family, int type, struct nlsock *nl)
     {
       zlog (NULL, LOG_ERR, "%s sendto failed: %s", nl->name,
             safe_strerror (save_errno));
+#ifdef ENABLE_OVSDB
+      log_event("ZEBRA_NETLINK_ERR", EV_KV("err_desc", "%s", "sendto failed"),
+                EV_KV("nlsock", "%s", nl->name),
+                EV_KV("errno", "%s",safe_strerror (save_errno)));
+#endif
       return -1;
     }
 
@@ -311,6 +321,11 @@ netlink_parse_info (int (*filter) (struct sockaddr_nl *, struct nlmsghdr *),
       if (status == 0)
         {
           zlog (NULL, LOG_ERR, "%s EOF", nl->name);
+#ifdef ENABLE_OVSDB
+      log_event("ZEBRA_NETLINK_ERR", EV_KV("err_desc", "%s", "EOF"),
+                EV_KV("nlsock", "%s", nl->name),
+                EV_KV("errno", "%s",""));
+#endif
           return -1;
         }
 
@@ -318,6 +333,11 @@ netlink_parse_info (int (*filter) (struct sockaddr_nl *, struct nlmsghdr *),
         {
           zlog (NULL, LOG_ERR, "%s sender address length error: length %d",
                 nl->name, msg.msg_namelen);
+#ifdef ENABLE_OVSDB
+      log_event("ZEBRA_NETLINK_ERR", EV_KV("err_desc", "%s", "sender address
+                length error"), EV_KV("nlsock", "%s", nl->name),
+                EV_KV("errno", "%d",msg.msg_namelen));
+#endif
           return -1;
         }
       
@@ -359,6 +379,12 @@ netlink_parse_info (int (*filter) (struct sockaddr_nl *, struct nlmsghdr *),
                 {
                   zlog (NULL, LOG_ERR, "%s error: message truncated",
                         nl->name);
+#ifdef ENABLE_OVSDB
+                  log_event("ZEBRA_NETLINK_ERR", EV_KV("err_desc", "%s",
+                            "error message truncated"),
+                            EV_KV("nlsock", "%s", nl->name),
+                            EV_KV("errno", "%s",""));
+#endif
                   return -1;
                 }
 
@@ -583,7 +609,7 @@ netlink_interface_addr (struct sockaddr_nl *snl, struct nlmsghdr *h)
 			       buf, BUFSIZ), ifa->ifa_prefixlen);
       if (tb[IFA_LABEL] && strcmp (ifp->name, RTA_DATA (tb[IFA_LABEL])))
         zlog_debug ("  IFA_LABEL     %s", (char *)RTA_DATA (tb[IFA_LABEL]));
-      
+
       if (tb[IFA_CACHEINFO])
         {
           struct ifa_cacheinfo *ci = RTA_DATA (tb[IFA_CACHEINFO]);
@@ -1355,6 +1381,7 @@ netlink_talk (struct nlmsghdr *n, struct nlsock *nl)
   /* Send message to netlink interface. */
   if (zserv_privs.change (ZPRIVS_RAISE))
     zlog (NULL, LOG_ERR, "Can't raise privileges");
+
   status = sendmsg (nl->sock, &msg, 0);
   save_errno = errno;
   if (zserv_privs.change (ZPRIVS_LOWER))
@@ -1983,7 +2010,6 @@ kernel_init (void)
 #endif /* HAVE_IPV6 */
   netlink_socket (&netlink, groups);
   netlink_socket (&netlink_cmd, 0);
-
   /* Register kernel socket. */
   if (netlink.sock > 0)
     {

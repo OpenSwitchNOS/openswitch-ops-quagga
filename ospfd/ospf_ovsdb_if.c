@@ -318,6 +318,7 @@ ospf_ovsdb_tables_init()
     ovsdb_idl_add_column(idl, &ovsrec_ospf_router_col_spf_calculation);
     ovsdb_idl_add_column(idl, &ovsrec_ospf_router_col_stub_router_adv);
     ovsdb_idl_add_column(idl, &ovsrec_ospf_router_col_networks);
+    ovsdb_idl_add_column(idl, &ovsrec_ospf_router_col_other_config);
 
     /* Add Route columns */
     ovsdb_idl_add_table(idl, &ovsrec_table_route);
@@ -373,7 +374,6 @@ ospf_ovsdb_tables_init()
     ovsdb_idl_add_column(idl, &ovsrec_ospf_area_col_area_type);
     ovsdb_idl_add_column(idl, &ovsrec_ospf_area_col_nssa_translator_role);
     ovsdb_idl_add_column(idl, &ovsrec_ospf_area_col_other_config);
-    ovsdb_idl_omit_alert(idl, &ovsrec_ospf_area_col_other_config);
     ovsdb_idl_add_column(idl, &ovsrec_ospf_area_col_ospf_area_summary_addresses);
     ovsdb_idl_add_column(idl, &ovsrec_ospf_area_col_statistics);
     ovsdb_idl_omit_alert(idl, &ovsrec_ospf_area_col_statistics);
@@ -1000,6 +1000,7 @@ int
 modify_ospf_router_config (struct ospf *ospf_cfg,
     const struct ovsrec_ospf_router *ospf_mod_row)
 {
+
    if (smap_get_bool(&(ospf_mod_row->other_config), "ospf_rfc1583_compatible",false))
         SET_FLAG(ospf_cfg->config,OSPF_RFC1583_COMPATIBLE);
    else
@@ -1020,7 +1021,29 @@ modify_ospf_router_config (struct ospf *ospf_cfg,
    else
         UNSET_FLAG(ospf_cfg->config,OSPF_LOG_ADJACENCY_DETAIL);
 
+   ospf_cfg->default_metric = smap_get_int(&(ospf_mod_row->other_config),
+                                                 OSPF_KEY_ROUTER_DEFAULT_METRIC,
+                                                  OSPF_DEFAULT_METRIC_DEFAULT);
+
    return 0;
+}
+
+int
+modify_ospf_lsa_timers_router_config(struct ospf *ospf_cfg,
+             const struct ovsrec_ospf_router *ospf_mod_row)
+{
+    int i, timer;
+
+    for (i = 0; i < ospf_mod_row->n_lsa_timers; i++) {
+        if (strcmp(ospf_mod_row->key_lsa_timers[i],
+                                             OSPF_KEY_LSA_GROUP_PACING) == 0) {
+            timer = ospf_mod_row->value_lsa_timers[i];
+        }
+    }
+
+    ospf_timers_refresh_set(ospf_cfg, timer);
+
+    return 0;
 }
 
 int
@@ -3618,6 +3641,14 @@ modify_ospf_router_instance(struct ovsdb_idl *idl,
         }
     }
 
+    /* Check if router_config is modified */
+    if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_ospf_router_col_lsa_timers, idl_seqno)) {
+        ret_status = modify_ospf_lsa_timers_router_config(ospf_instance, ovs_ospf);
+        if (ret_status){
+            VLOG_DBG("OSPF router lsa timers not set");
+        }
+    }
+
     /* Check if stub_router_config is modified */
     if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_ospf_router_col_stub_router_adv, idl_seqno)) {
         ret_status = modify_ospf_stub_router_config(idl,ospf_instance, ovs_ospf);
@@ -4050,6 +4081,39 @@ insert_ospf_vlink(struct ovsdb_idl *idl,const struct ospf* ospf,
     return 0;
 }
 
+int
+modify_ospf_area_col_other_config(const struct ovsrec_ospf_area* ovs_area,
+                                                   struct ospf_area* area)
+{
+    struct prefix_ipv4 p;
+    int cost;
+
+    cost = smap_get_int(&ovs_area->other_config,
+                            OSPF_KEY_AREA_STUB_DEFAULT_COST,
+                            OSPF_AREA_STUB_DEFAULT_COST_DEFAULT);
+
+    if (area->external_routing == OSPF_AREA_DEFAULT)
+    {
+        VLOG_DBG ("The area is neither stub, nor NSSA");
+        return -1;
+    }
+
+    area->default_cost = cost;
+
+    p.family = AF_INET;
+    p.prefix.s_addr = OSPF_DEFAULT_DESTINATION;
+    p.prefixlen = 0;
+
+    if (IS_DEBUG_OSPF_EVENT)
+        zlog_debug ("ospf_abr_announce_stub_defaults(): "
+                    "announcing 0.0.0.0/0 to area %s",
+                     inet_ntoa (area->area_id));
+
+    ospf_abr_announce_network_to_area (&p, area->default_cost, area);
+
+    return 0;
+}
+
 static void
 modify_ospf_area_instance(struct ovsdb_idl *idl,
     const struct ovsrec_ospf_area* ovs_area, int64_t area_id, int64_t ospf_inst)
@@ -4182,6 +4246,14 @@ modify_ospf_area_instance(struct ovsdb_idl *idl,
                 VLOG_INFO ("Cannot configure Backbone area as NSSA");
         }
     }
+
+    if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_ospf_area_col_other_config, idl_seqno)) {
+        ret = modify_ospf_area_col_other_config(ovs_area, area);
+        if (ret){
+            VLOG_DBG("OSPF Area default cost not set");
+        }
+    }
+
     if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_ospf_area_col_nssa_translator_role, idl_seqno)) {
         if (area->external_routing == OSPF_AREA_NSSA) {
             if (ovs_area->nssa_translator_role &&

@@ -45,6 +45,7 @@
 #include "zebra/debug.h"
 
 #include "rt_netlink.h"
+#include "eventlog.h"
 
 /* Socket interface to kernel */
 struct nlsock
@@ -84,18 +85,26 @@ set_ifindex(struct interface *ifp, unsigned int ifi_index)
 
   if (((oifp = if_lookup_by_index(ifi_index)) != NULL) && (oifp != ifp))
     {
-      if (ifi_index == IFINDEX_INTERNAL)
+      if (ifi_index == IFINDEX_INTERNAL){
         zlog_err("Netlink is setting interface %s ifindex to reserved "
 		 "internal value %u", ifp->name, ifi_index);
-      else
+        log_event("INTERFACE_RESERVED", EV_KV("interface_name","%s",ifp->name),
+                  EV_KV("interface_index","%u",ifi_index));
+      }else
         {
 	  if (IS_ZEBRA_DEBUG_KERNEL)
 	    zlog_debug("interface index %d was renamed from %s to %s",
 	    	       ifi_index, oifp->name, ifp->name);
+            log_event("INTERFACE_RENAME", EV_KV("intf_index","%d",ifi_index),
+                      EV_KV("old_intf_name","%s",oifp->name),
+                      EV_KV("new_intf_name","%s",ifp->name));
 	  if (if_is_up(oifp))
 	    zlog_err("interface rename detected on up interface: index %d "
 		     "was renamed from %s to %s, results are uncertain!", 
 	    	     ifi_index, oifp->name, ifp->name);
+            log_event("INTERFACE_RENAME", EV_KV("intf_index","%d",ifi_index),
+                      EV_KV("old_intf_name","%s",oifp->name),
+                      EV_KV("new_intf_name","%s",ifp->name));
 	  if_delete_update(oifp);
         }
     }
@@ -123,12 +132,14 @@ netlink_recvbuf (struct nlsock *nl, uint32_t newsize)
     }
 
   /* Try force option (linux >= 2.6.14) and fall back to normal set */
-  if ( zserv_privs.change (ZPRIVS_RAISE) )
+  if ( zserv_privs.change (ZPRIVS_RAISE) ) {
     zlog_err ("routing_socket: Can't raise privileges");
+  }
   ret = setsockopt(nl->sock, SOL_SOCKET, SO_RCVBUFFORCE, &nl_rcvbufsize,
 		   sizeof(nl_rcvbufsize));
-  if ( zserv_privs.change (ZPRIVS_LOWER) )
+  if ( zserv_privs.change (ZPRIVS_LOWER) ) {
     zlog_err ("routing_socket: Can't lower privileges");
+  }
   if (ret < 0)
      ret = setsockopt(nl->sock, SOL_SOCKET, SO_RCVBUF, &nl_rcvbufsize,
 		      sizeof(nl_rcvbufsize));
@@ -184,8 +195,9 @@ netlink_socket (struct nlsock *nl, unsigned long groups)
   /* Bind the socket to the netlink structure for anything. */
   ret = bind (sock, (struct sockaddr *) &snl, sizeof snl);
   save_errno = errno;
-  if (zserv_privs.change (ZPRIVS_LOWER))
+  if (zserv_privs.change (ZPRIVS_LOWER)) {
     zlog (NULL, LOG_ERR, "Can't lower privileges");
+  }
 
   if (ret < 0)
     {
@@ -257,8 +269,9 @@ netlink_request (int family, int type, struct nlsock *nl)
                 (struct sockaddr *) &snl, sizeof snl);
   save_errno = errno;
 
-  if (zserv_privs.change (ZPRIVS_LOWER))
+  if (zserv_privs.change (ZPRIVS_LOWER)) {
     zlog (NULL, LOG_ERR, "Can't lower privileges");
+  }
 
   if (ret < 0)
     {
@@ -569,20 +582,39 @@ netlink_interface_addr (struct sockaddr_nl *snl, struct nlmsghdr *h)
       char buf[BUFSIZ];
       zlog_debug ("netlink_interface_addr %s %s:",
                  lookup (nlmsg_str, h->nlmsg_type), ifp->name);
-      if (tb[IFA_LOCAL])
+      if (tb[IFA_LOCAL]) {
         zlog_debug ("  IFA_LOCAL     %s/%d",
 		    inet_ntop (ifa->ifa_family, RTA_DATA (tb[IFA_LOCAL]),
 			       buf, BUFSIZ), ifa->ifa_prefixlen);
-      if (tb[IFA_ADDRESS])
+        log_event("ZEBRA_NETLINK_INTERFACE_ADDRESS", EV_KV("interface_address_type","%s",
+                  "IFA_LOCAL"), EV_KV("interface_address","%s",
+                   inet_ntop (ifa->ifa_family, RTA_DATA (tb[IFA_LOCAL]),buf, BUFSIZ)),
+                   EV_KV("prefixlen","%u", ifa->ifa_prefixlen));
+      }
+      if (tb[IFA_ADDRESS]) {
         zlog_debug ("  IFA_ADDRESS   %s/%d",
 		    inet_ntop (ifa->ifa_family, RTA_DATA (tb[IFA_ADDRESS]),
                                buf, BUFSIZ), ifa->ifa_prefixlen);
-      if (tb[IFA_BROADCAST])
+        log_event("ZEBRA_NETLINK_INTERFACE_ADDRESS", EV_KV("interface_address_type","%s",
+                  "IFA_ADDRESS"), EV_KV("interface_address","%s",
+                   inet_ntop (ifa->ifa_family, RTA_DATA (tb[IFA_LOCAL]),buf, BUFSIZ)),
+                   EV_KV("prefixlen","%u", ifa->ifa_prefixlen));
+      }
+      if (tb[IFA_BROADCAST]) {
         zlog_debug ("  IFA_BROADCAST %s/%d",
 		    inet_ntop (ifa->ifa_family, RTA_DATA (tb[IFA_BROADCAST]),
 			       buf, BUFSIZ), ifa->ifa_prefixlen);
-      if (tb[IFA_LABEL] && strcmp (ifp->name, RTA_DATA (tb[IFA_LABEL])))
+        log_event("ZEBRA_NETLINK_INTERFACE_ADDRESS", EV_KV("interface_address_type","%s",
+                  "IFA_BROADCAST"), EV_KV("interface_address","%s",
+                   inet_ntop (ifa->ifa_family, RTA_DATA (tb[IFA_LOCAL]),buf, BUFSIZ)),
+                   EV_KV("prefixlen","%u", ifa->ifa_prefixlen));
+      }
+      if (tb[IFA_LABEL] && strcmp (ifp->name, RTA_DATA (tb[IFA_LABEL]))) {
         zlog_debug ("  IFA_LABEL     %s", (char *)RTA_DATA (tb[IFA_LABEL]));
+        log_event("ZEBRA_NETLINK_INTERFACE_ADDRESS", EV_KV("interface_address_type","%s",
+                  "IFA_LABEL"), EV_KV("interface_address","%s",""),
+                   EV_KV("prefixlen","%u", 0));
+      }
       
       if (tb[IFA_CACHEINFO])
         {
@@ -937,12 +969,21 @@ netlink_route_change (struct sockaddr_nl *snl, struct nlmsghdr *h)
 
       if (IS_ZEBRA_DEBUG_KERNEL)
         {
-          if (h->nlmsg_type == RTM_NEWROUTE)
+          if (h->nlmsg_type == RTM_NEWROUTE) {
             zlog_debug ("RTM_NEWROUTE %s/%d",
                        inet_ntoa (p.prefix), p.prefixlen);
-          else
+            log_event("ZEBRA_RTM", EV_KV("rtm_type","%s",
+                      "RTM_NEWROUTE"), EV_KV("route_address","%s",
+                       inet_ntoa (p.prefix)),
+                       EV_KV("prefixlen","%d", p.prefixlen));
+          } else {
             zlog_debug ("RTM_DELROUTE %s/%d",
                        inet_ntoa (p.prefix), p.prefixlen);
+            log_event("ZEBRA_RTM", EV_KV("rtm_type","%s",
+                      "RTM_DELROUTE"), EV_KV("route_address","%s",
+                       inet_ntoa (p.prefix)),
+                       EV_KV("prefixlen","%d", p.prefixlen));
+          }
         }
 
       if (h->nlmsg_type == RTM_NEWROUTE)
@@ -1025,14 +1066,23 @@ netlink_route_change (struct sockaddr_nl *snl, struct nlmsghdr *h)
 
       if (IS_ZEBRA_DEBUG_KERNEL)
         {
-          if (h->nlmsg_type == RTM_NEWROUTE)
+          if (h->nlmsg_type == RTM_NEWROUTE) {
             zlog_debug ("RTM_NEWROUTE %s/%d",
                        inet_ntop (AF_INET6, &p.prefix, buf, BUFSIZ),
                        p.prefixlen);
-          else
+            log_event("ZEBRA_RTM", EV_KV("rtm_type","%s",
+                      "RTM_NEWROUTE"), EV_KV("route_address","%s",
+                       inet_ntop (AF_INET6, &p.prefix, buf, BUFSIZ)),
+                       EV_KV("prefixlen","%d", p.prefixlen));
+          } else {
             zlog_debug ("RTM_DELROUTE %s/%d",
                        inet_ntop (AF_INET6, &p.prefix, buf, BUFSIZ),
                        p.prefixlen);
+            log_event("ZEBRA_RTM", EV_KV("rtm_type","%s",
+                      "RTM_DELROUTE"), EV_KV("route_address","%s",
+                       inet_ntop (AF_INET6, &p.prefix, buf, BUFSIZ)),
+                       EV_KV("prefixlen","%d", p.prefixlen));
+          }
         }
 
       if (h->nlmsg_type == RTM_NEWROUTE)
@@ -1353,12 +1403,15 @@ netlink_talk (struct nlmsghdr *n, struct nlsock *nl)
                n->nlmsg_seq);
 
   /* Send message to netlink interface. */
-  if (zserv_privs.change (ZPRIVS_RAISE))
+  if (zserv_privs.change (ZPRIVS_RAISE)) {
     zlog (NULL, LOG_ERR, "Can't raise privileges");
+  }
+
   status = sendmsg (nl->sock, &msg, 0);
   save_errno = errno;
-  if (zserv_privs.change (ZPRIVS_LOWER))
+  if (zserv_privs.change (ZPRIVS_LOWER)) {
     zlog (NULL, LOG_ERR, "Can't lower privileges");
+  }
 
   if (status < 0)
     {
@@ -1480,12 +1533,16 @@ _netlink_route_build_singlepath(
         addattr_l (nlmsg, req_size, RTA_PREFSRC,
                    &nexthop->src.ipv4, bytelen);
 
-      if (IS_ZEBRA_DEBUG_KERNEL)
+      if (IS_ZEBRA_DEBUG_KERNEL) {
         zlog_debug("netlink_route_multipath() (%s): "
                    "nexthop via %s if %u",
                    routedesc,
                    inet_ntoa (nexthop->gate.ipv4),
                    nexthop->ifindex);
+      }
+      log_event("ZEBRA_NETLINK_ROUTE_MULTIPATH", EV_KV("routedesc", "%s", routedesc),
+                EV_KV("nexthop", "%s", inet_ntoa (nexthop->gate.ipv4)),
+                EV_KV("ifindex", "%u", nexthop->ifindex));
     }
 #ifdef HAVE_IPV6
   if (nexthop->type == NEXTHOP_TYPE_IPV6
@@ -1495,12 +1552,16 @@ _netlink_route_build_singlepath(
       addattr_l (nlmsg, req_size, RTA_GATEWAY,
                  &nexthop->gate.ipv6, bytelen);
 
-      if (IS_ZEBRA_DEBUG_KERNEL)
+      if (IS_ZEBRA_DEBUG_KERNEL) {
         zlog_debug("netlink_route_multipath() (%s): "
                    "nexthop via %s if %u",
                    routedesc,
                    inet6_ntoa (nexthop->gate.ipv6),
                    nexthop->ifindex);
+      }
+      log_event("ZEBRA_NETLINK_ROUTE_MULTIPATH", EV_KV("routedesc", "%s", routedesc),
+                EV_KV("nexthop", "%s", inet6_ntoa (nexthop->gate.ipv6)),
+                EV_KV("ifindex", "%u", nexthop->ifindex));
     }
 #endif /* HAVE_IPV6 */
   if (nexthop->type == NEXTHOP_TYPE_IFINDEX
@@ -1513,9 +1574,13 @@ _netlink_route_build_singlepath(
         addattr_l (nlmsg, req_size, RTA_PREFSRC,
                    &nexthop->src.ipv4, bytelen);
 
-      if (IS_ZEBRA_DEBUG_KERNEL)
+      if (IS_ZEBRA_DEBUG_KERNEL) {
         zlog_debug("netlink_route_multipath() (%s): "
                    "nexthop via if %u", routedesc, nexthop->ifindex);
+      }
+      log_event("ZEBRA_NETLINK_ROUTE_MULTIPATH", EV_KV("routedesc", "%s", routedesc),
+                EV_KV("nexthop", "%s", ""),
+                EV_KV("ifindex", "%u", nexthop->ifindex));
     }
 
   if (nexthop->type == NEXTHOP_TYPE_IPV6_IFINDEX
@@ -1523,9 +1588,13 @@ _netlink_route_build_singlepath(
     {
       addattr32 (nlmsg, req_size, RTA_OIF, nexthop->ifindex);
 
-      if (IS_ZEBRA_DEBUG_KERNEL)
+      if (IS_ZEBRA_DEBUG_KERNEL) {
         zlog_debug("netlink_route_multipath() (%s): "
                    "nexthop via if %u", routedesc, nexthop->ifindex);
+      }
+      log_event("ZEBRA_NETLINK_ROUTE_MULTIPATH", EV_KV("routedesc","%s",routedesc),
+                EV_KV("nexthop", "%s", ""),
+                EV_KV("ifindex", "%u", nexthop->ifindex));
     }
 }
 
@@ -1573,12 +1642,16 @@ _netlink_route_build_multipath(
       if (nexthop->src.ipv4.s_addr)
         *src = &nexthop->src;
 
-      if (IS_ZEBRA_DEBUG_KERNEL)
+      if (IS_ZEBRA_DEBUG_KERNEL) {
         zlog_debug("netlink_route_multipath() (%s): "
                    "nexthop via %s if %u",
                    routedesc,
                    inet_ntoa (nexthop->gate.ipv4),
                    nexthop->ifindex);
+      }
+      log_event("ZEBRA_NETLINK_ROUTE_MULTIPATH", EV_KV("routedesc", "%s", routedesc),
+                EV_KV("nexthop", "%s", inet_ntoa (nexthop->gate.ipv4)),
+                EV_KV("ifindex", "%u", nexthop->ifindex));
     }
 #ifdef HAVE_IPV6
   if (nexthop->type == NEXTHOP_TYPE_IPV6
@@ -1589,12 +1662,16 @@ _netlink_route_build_multipath(
                      &nexthop->gate.ipv6, bytelen);
       rtnh->rtnh_len += sizeof (struct rtattr) + bytelen;
 
-      if (IS_ZEBRA_DEBUG_KERNEL)
+      if (IS_ZEBRA_DEBUG_KERNEL) {
         zlog_debug("netlink_route_multipath() (%s): "
                    "nexthop via %s if %u",
                    routedesc,
                    inet6_ntoa (nexthop->gate.ipv6),
                    nexthop->ifindex);
+      }
+      log_event("ZEBRA_NETLINK_ROUTE_MULTIPATH", EV_KV("routedesc", "%s", routedesc),
+                EV_KV("nexthop", "%s", inet_ntoa (nexthop->gate.ipv4)),
+                EV_KV("ifindex", "%u", nexthop->ifindex));
     }
 #endif /* HAVE_IPV6 */
   /* ifindex */
@@ -1605,18 +1682,26 @@ _netlink_route_build_multipath(
       rtnh->rtnh_ifindex = nexthop->ifindex;
       if (nexthop->src.ipv4.s_addr)
         *src = &nexthop->src;
-      if (IS_ZEBRA_DEBUG_KERNEL)
+      if (IS_ZEBRA_DEBUG_KERNEL) {
         zlog_debug("netlink_route_multipath() (%s): "
                    "nexthop via if %u", routedesc, nexthop->ifindex);
+      }
+      log_event("ZEBRA_NETLINK_ROUTE_MULTIPATH", EV_KV("routedesc","%s",routedesc),
+                EV_KV("nexthop","%s",""),
+                EV_KV("ifindex","%u", nexthop->ifindex));
     }
   else if (nexthop->type == NEXTHOP_TYPE_IPV6_IFNAME
       || nexthop->type == NEXTHOP_TYPE_IPV6_IFINDEX)
     {
       rtnh->rtnh_ifindex = nexthop->ifindex;
 
-      if (IS_ZEBRA_DEBUG_KERNEL)
+      if (IS_ZEBRA_DEBUG_KERNEL) {
         zlog_debug("netlink_route_multipath() (%s): "
                    "nexthop via if %u", routedesc, nexthop->ifindex);
+      }
+      log_event("ZEBRA_NETLINK_ROUTE_MULTIPATH", EV_KV("routedesc", "%s", routedesc),
+                EV_KV("nexthop", "%s", ""),
+                EV_KV("ifindex", "%u", nexthop->ifindex));
     }
   else
     {
@@ -1823,8 +1908,12 @@ netlink_route_multipath (int cmd, struct prefix *p, struct rib *rib,
   /* If there is no useful nexthop then return. */
   if (nexthop_num == 0)
     {
-      if (IS_ZEBRA_DEBUG_KERNEL)
+      if (IS_ZEBRA_DEBUG_KERNEL) {
         zlog_debug ("netlink_route_multipath(): No useful nexthop.");
+      }
+      log_event("ZEBRA_NETLINK_ROUTE_MULTIPATH", EV_KV("routedesc","%s",""),
+                EV_KV("nexthop","%s","No useful nexthop"),
+                EV_KV("ifindex","%u", 0));
       return 0;
     }
 
@@ -1983,10 +2072,10 @@ kernel_init (void)
 #endif /* HAVE_IPV6 */
   netlink_socket (&netlink, groups);
   netlink_socket (&netlink_cmd, 0);
-
   /* Register kernel socket. */
   if (netlink.sock > 0)
     {
+      //event_log_init("ZEBRA");
       /* Only want non-blocking on the netlink event socket */
       if (fcntl (netlink.sock, F_SETFL, O_NONBLOCK) < 0)
 	zlog (NULL, LOG_ERR, "Can't set %s socket flags: %s", netlink.name,

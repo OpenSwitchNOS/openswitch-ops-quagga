@@ -50,6 +50,7 @@
 #include "eventlog.h"
 
 #include "openswitch-idl.h"
+#include "vrf-utils.h"
 
 #include "zebra/zebra_ovsdb_if.h"
 

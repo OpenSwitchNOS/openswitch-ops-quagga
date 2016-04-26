@@ -201,7 +201,7 @@ vrf_alloc (const char *name)
 
 /* Lookup VRF by identifier.  */
 struct vrf *
-vrf_lookup (u_int32_t id)
+zebra_vrf_lookup (u_int32_t id)
 {
   return vector_lookup (vrf_vector, id);
 }
@@ -228,7 +228,7 @@ vrf_table (afi_t afi, safi_t safi, u_int32_t id)
 {
   struct vrf *vrf;
 
-  vrf = vrf_lookup (id);
+  vrf = zebra_vrf_lookup (id);
   if (! vrf)
     return NULL;
 
@@ -244,7 +244,7 @@ vrf_static_table (afi_t afi, safi_t safi, u_int32_t id)
 {
   struct vrf *vrf;
 
-  vrf = vrf_lookup (id);
+  vrf = zebra_vrf_lookup (id);
   if (! vrf)
     return NULL;
 
@@ -4055,7 +4055,7 @@ vrf_id_get_next (uint32_t id, uint32_t *next_id_p)
 {
   while (++id < vector_active (vrf_vector))
     {
-      if (vrf_lookup (id))
+      if (zebra_vrf_lookup (id))
 	{
 	  *next_id_p = id;
 	  return 1;

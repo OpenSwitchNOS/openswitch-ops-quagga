@@ -68,7 +68,7 @@ endif
 
 if ENABLE_OVSDB
 ops_zebra_LDADD = $(otherobj) libzebra_ovsdb_if.a ../lib/libzebra.la \
-		  $(LIBCAP) -lovscommon -lovsdb -lpthread
+		  $(LIBCAP) -lovscommon -lovsdb -lpthread -lopsutils
 ops_zebra_DEPENDENCIES = $(otherobj)
 else
 zebra_LDADD = $(otherobj) libzebra_ovsdb_if.a ../lib/libzebra.la $(LIBCAP)

@@ -90,6 +90,6 @@ void zebra_update_selected_route_nexthops_to_db (
                                             struct rib *route,
                                             int action);
 extern int zebra_create_txn (void);
-extern int zebra_finish_txn (void);
+extern int zebra_finish_txn (bool);
 
 #endif /* ZEBRA_OVSDB_IF_H */

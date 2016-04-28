@@ -2446,10 +2446,11 @@ zebra_find_routes_with_deleted_ports (
           #endif
 
           if ((rib->type != ZEBRA_ROUTE_STATIC &&
-              rib->type != ZEBRA_ROUTE_BGP) ||
+              rib->type != ZEBRA_ROUTE_BGP &&
+              rib->type != ZEBRA_ROUTE_OSPF) ||
               !rib->nexthop)
             {
-              VLOG_DBG("Not a static/BGP route or null next-hop");
+              VLOG_DBG("Not a static/BGP/OSPF route or null next-hop");
               continue;
             }
 
@@ -5196,17 +5197,7 @@ zebra_add_route (bool is_ipv6, struct prefix *p, int type, safi_t safi,
              (idl_nexthop->selected[0] != true) ) )
         continue;
 
-      /* If next hop is port */
-      if(idl_nexthop->ports != NULL)
-        {
-          VLOG_DBG("Processing %d-next-hop %s", count,
-                     idl_nexthop->ports[0]->name);
-          log_event("ZEBRA_ROUTE_ADD_NEXTHOP_EVENTS", EV_KV("prefix", "%s",
-                   route->prefix),EV_KV("nexthop", "%s",
-                   idl_nexthop->ports[0]->name));
-          nexthop_ifname_add(rib, idl_nexthop->ports[0]->name);
-        }
-      else
+      if (idl_nexthop->ip_address)
         {
           memset(&ipv4_dest_addr, 0, sizeof(struct in_addr));
           memset(&ipv6_dest_addr, 0, sizeof(struct in6_addr));
@@ -5240,6 +5231,18 @@ zebra_add_route (bool is_ipv6, struct prefix *p, int type, safi_t safi,
               nexthop_ipv4_add(rib, &ipv4_dest_addr, NULL);
             }
         }
+        /* If next hop is port */
+      else if (idl_nexthop->ports != NULL)
+        {
+          VLOG_DBG("Processing %d-next-hop %s", count,
+                     idl_nexthop->ports[0]->name);
+          log_event("ZEBRA_ROUTE_ADD_NEXTHOP_EVENTS", EV_KV("prefix", "%s",
+                   route->prefix),EV_KV("nexthop", "%s",
+                   idl_nexthop->ports[0]->name));
+          nexthop_ifname_add(rib, idl_nexthop->ports[0]->name);
+        }
+      else
+        VLOG_ERR("Invalid nexthop");
     }
 
   /* Distance. */

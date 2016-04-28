@@ -303,6 +303,12 @@ ospf_if_cleanup (struct ospf_interface *oi)
   ospf_nbr_delete (oi->nbr_self);
   oi->nbr_self = ospf_nbr_new (oi);
   ospf_nbr_add_self (oi);
+
+#ifdef ENABLE_OVSDB
+  /* Reset the values of the self neighbor entry to default values.  */
+  ovsdb_ospf_reset_nbr_self (oi->nbr_self, oi->ifp->name);
+#endif
+
 }
 
 void

@@ -29,10 +29,66 @@
 #include "openswitch-idl.h"
 #include "ovsdb-idl.h"
 #include "smap.h"
+#include "dynamic-string.h"
+#include "json.h"
+#include "hash.h"
+#include "hmap.h"
 
 struct bgp_info;
 struct prefix;
 struct bgp;
+
+struct ovsdb_idl_txn {
+    struct hmap_node hmap_node;
+    struct json *request_id;
+    struct ovsdb_idl *idl;
+    struct hmap txn_rows;
+    enum ovsdb_idl_txn_status status;
+    char *error;
+    bool dry_run;
+    struct ds comment;
+
+    /* Increments. */
+    const char *inc_table;
+    const char *inc_column;
+    struct uuid inc_row;
+    unsigned int inc_index;
+    int64_t inc_new_value;
+
+    /* Inserted rows. */
+    struct hmap inserted_rows;  /* Contains "struct ovsdb_idl_txn_insert"s. */
+};
+
+enum transaction_state {
+    IN_FLIGHT,                      //transaction is being processed, not yet successful
+    DB_SYNC                         //transaction is successfully inserted to db
+};
+
+/* Store type of operation*/
+enum txn_op_type {
+    INSERT,
+    UPDATE,
+    DELETE
+};
+
+typedef enum bgp_table_type_t_ {
+    BGP_ROUTE = 0,
+    ROUTE
+} bgp_table_type_t;
+
+#define BGP_ROUTE_TABLE "Bgp_Route"
+#define ROUTE_TABLE "Route"
+
+
+struct lookup_hmap_element {
+    struct uuid uuid;
+    int needs_review;
+    enum transaction_state state;
+    enum txn_op_type op_type;
+    char prefix[50];
+    struct hmap_node node;
+    bgp_table_type_t table_type;
+};
 
 enum
 {

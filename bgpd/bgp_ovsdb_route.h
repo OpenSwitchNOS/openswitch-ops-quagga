@@ -29,10 +29,67 @@
 #include "openswitch-idl.h"
 #include "ovsdb-idl.h"
 #include "smap.h"
+#include "dynamic-string.h"
+#include "json.h"
+#include "hash.h"
+#include "hmap.h"
+
+#define BGP_ROUTE_TABLE "Bgp_Route"
+#define ROUTE_TABLE         "Route"
+#define PREFIX_MAXLEN            50
+#define MAX_KEY_LEN              60
 
 struct bgp_info;
 struct prefix;
 struct bgp;
+
+struct ovsdb_idl_txn {
+    struct hmap_node hmap_node;
+    struct json *request_id;
+    struct ovsdb_idl *idl;
+    struct hmap txn_rows;
+    enum ovsdb_idl_txn_status status;
+    char *error;
+    bool dry_run;
+    struct ds comment;
+
+    /* Increments. */
+    const char *inc_table;
+    const char *inc_column;
+    struct uuid inc_row;
+    unsigned int inc_index;
+    int64_t inc_new_value;
+
+    /* Inserted rows. */
+    struct hmap inserted_rows;  /* Contains "struct ovsdb_idl_txn_insert"s. */
+};
+
+enum transaction_state {
+    IN_FLIGHT,         /* transaction is being processed, not yet successful */
+    DB_SYNC            /* transaction is successfully inserted to db */
+};
+
+/* Store type of operation*/
+enum txn_op_type {
+    INSERT,
+    UPDATE,
+    DELETE
+};
+
+typedef enum bgp_table_type_t_ {
+    BGP_ROUTE = 0,
+    ROUTE
+} bgp_table_type_t;
+
+struct lookup_hmap_element {
+    struct uuid uuid;
+    int needs_review;
+    enum transaction_state state;
+    enum txn_op_type op_type;
+    char prefix[PREFIX_MAXLEN];
+    struct hmap_node node;
+    bgp_table_type_t table_type;
+};
 
 enum
 {
@@ -104,8 +161,7 @@ extern const struct ovsrec_vrf*
 bgp_ovsdb_get_vrf(struct bgp *bgp);
 
 extern const struct ovsrec_route*
-bgp_ovsdb_lookup_rib_entry(struct prefix *p, struct bgp_info *info,
-                           struct bgp *bgp, safi_t safi);
+bgp_ovsdb_lookup_rib_entry(struct prefix *p);
 
 extern int
 bgp_ovsdb_add_local_rib_entry(struct prefix *p, struct bgp_info *info,
@@ -123,10 +179,8 @@ extern int
 bgp_ovsdb_update_local_rib_entry_attributes(struct prefix *p, struct bgp_info *info,
                                             struct bgp *bgp, safi_t safi);
 extern const struct ovsrec_bgp_route*
-bgp_ovsdb_lookup_local_rib_entry(struct prefix *p,
-                                 struct bgp_info *info,
-                                 struct bgp *bgp,
-                                 safi_t safi);
+bgp_ovsdb_lookup_local_rib_entry(struct prefix *p);
+
 extern int
 bgp_ovsdb_republish_route(const struct ovsrec_bgp_router *bgp_first, int asn);
 

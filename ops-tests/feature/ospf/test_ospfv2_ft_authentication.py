@@ -15,9 +15,9 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from .ospf_configs import configure_interface, configure_ospf_router
-from .ospf_configs import wait_for_adjacency
-from .ospf_configs import unconfigure_interface, unconfigure_ospf_router
+from ospf_configs import configure_interface, configure_ospf_router
+from ospf_configs import wait_for_adjacency
+from ospf_configs import unconfigure_interface, unconfigure_ospf_router
 from pytest import fixture
 
 

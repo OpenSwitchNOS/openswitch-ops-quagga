@@ -16,11 +16,11 @@
 # under the License.
 
 import time
-from .ospf_configs import configure_interface, configure_ospf_router
-from .ospf_configs import wait_for_adjacency, verify_route
-from .ospf_configs import configure_bgp_network
-from .ospf_configs import unconfigure_ospf_network
-from .ospf_configs import unconfigure_interface, unconfigure_ospf_router
+from ospf_configs import configure_interface, configure_ospf_router
+from ospf_configs import wait_for_adjacency, verify_route
+from ospf_configs import configure_bgp_network
+from ospf_configs import unconfigure_ospf_network
+from ospf_configs import unconfigure_interface, unconfigure_ospf_router
 from pytest import fixture
 
 

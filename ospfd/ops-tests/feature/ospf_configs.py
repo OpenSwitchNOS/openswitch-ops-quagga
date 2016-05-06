@@ -142,7 +142,7 @@ def verify_ospf_adjacency(switch_id, neighbor_id):
 
 # Function to verify adjacency between two switches
 def wait_for_adjacency(switch_id, neighbor_id, condition=True):
-    wait_time = get_hello_timer(switch_id) + 35
+    wait_time = get_hello_timer(switch_id) + 40
     for i in range(0, wait_time):
         found = verify_ospf_adjacency(switch_id, neighbor_id)
         if found == condition:
@@ -166,6 +166,8 @@ def wait_for_2way_state(switch_id, neighbor_id):
                 state = str1[0]
                 if (state == "ExStart" or state == "Exchange" or state ==
                         "Loading" or state == "Full"):
+                    # waiting here for DR/DBR/DROther election
+                    time.sleep(10)
                     return True
                 else:
                     time.sleep(1)
@@ -187,10 +189,23 @@ def verify_router_type(switch_id):
         return 0
 
 
+# Wait_for_routes_to_be_updated
+def wait_for_routes(switch_id, ip_addr, prefix_addr, condition=True):
+    wait_time = 40
+    for i in range(0, wait_time):
+        found = verify_route(switch_id, ip_addr, prefix_addr)
+        if found == condition:
+            return found
+        else:
+            time.sleep(1)
+
+    return found
+
+
 # Verify the connected routes using
 # show rib command
 def verify_route(switch_id, ip_addr, prefix_addr):
-    flag = 0
+    result = 0
     output = switch_id.libs.vtysh.show_rib()
     if output:
         list_entries = output['ipv4_entries']
@@ -198,8 +213,42 @@ def verify_route(switch_id, ip_addr, prefix_addr):
         for i in range(0, n):
             partial = output['ipv4_entries'][i]
             if partial['id'] == ip_addr and partial['prefix'] == prefix_addr:
-                flag = 1
-        if(flag == 1):
+                result = 1
+        if(result == 1):
+            return True
+        else:
+            return False
+
+
+# Wait_for_routes and distance to_be_updated
+def wait_for_route_distance(switch_id, ip_addr, prefix_addr,
+                            cost, condition=True):
+    wait_time = 40
+    for i in range(0, wait_time):
+        found = verify_route_distance(switch_id, ip_addr, prefix_addr, cost)
+        if found == condition:
+            return found
+        else:
+            time.sleep(1)
+
+    return found
+
+
+# Verify the routes with distance metrics using
+# show rib command
+def verify_route_distance(switch_id, ip_addr, prefix_addr, cost):
+    result = 0
+    output = switch_id.libs.vtysh.show_rib()
+    if output:
+        list_entries = output['ipv4_entries']
+        n = len(list_entries)
+        for i in range(0, n):
+            partial = output['ipv4_entries'][i]
+            metric = output['ipv4_entries'][i]['next_hops'][0]
+            if partial['id'] == ip_addr and partial['prefix'] == prefix_addr:
+                if metric['distance'] == cost:
+                    result = 1
+        if(result == 1):
             return True
         else:
             return False

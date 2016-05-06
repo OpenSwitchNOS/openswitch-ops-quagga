@@ -16,10 +16,10 @@
 # under the License.
 
 import time
-from .ospf_configs import configure_interface, configure_ospf_router
-from .ospf_configs import unconfigure_interface, unconfigure_ospf_router
-from .ospf_configs import wait_for_adjacency, verify_route
-from .ospf_configs import verify_router_type
+from ospf_configs import configure_interface, configure_ospf_router
+from ospf_configs import unconfigure_interface, unconfigure_ospf_router
+from ospf_configs import wait_for_adjacency, verify_route
+from ospf_configs import verify_router_type
 from pytest import fixture
 
 TOPOLOGY = """

@@ -3825,6 +3825,12 @@ zebra_apply_route_changes (void)
 
       OVSREC_ROUTE_FOR_EACH (route_row, idl)
         {
+          if(!(route_row->nexthops))
+            {
+              VLOG_DBG("Null next hop array");
+              continue;
+            }
+
           nh_row = route_row->nexthops[0];
           if (nh_row == NULL)
             {

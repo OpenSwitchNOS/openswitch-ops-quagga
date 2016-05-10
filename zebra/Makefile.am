@@ -3,6 +3,9 @@
 AM_CPPFLAGS = -I.. -I$(top_srcdir) -I$(top_srcdir)/lib -I$(top_builddir)/lib
 DEFS = @DEFS@ -DSYSCONFDIR=\"$(sysconfdir)/\" -DMULTIPATH_NUM=@MULTIPATH_NUM@
 INSTALL_SDATA=@INSTALL@ -m 600
+if ENABLE_OVSDB
+SUBDIRS = cli
+endif
 
 LIBCAP = @LIBCAP@
 
@@ -38,6 +41,8 @@ endif
 
 if ENABLE_OVSDB
 sbin_PROGRAMS = ops-zebra
+cli_lib_LDADD = cli/libl3routes_cli.la
+SUBDIRS = cli
 else
 sbin_PROGRAMS = zebra
 endif
@@ -52,6 +57,7 @@ zebra_SOURCES = \
 
 if ENABLE_OVSDB
 ops_zebra_SOURCES = $(zebra_SOURCES)
+SUBDIRS = cli
 endif
 
 testzebra_SOURCES = test_main.c zebra_rib.c interface.c connected.c debug.c \

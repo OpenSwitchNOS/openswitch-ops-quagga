@@ -188,6 +188,7 @@ AC_GNU_SOURCE
 dnl -------
 dnl libtool
 dnl -------
+LT_INIT([disable-static])
 AC_PROG_LIBTOOL
 
 dnl ----------------------
@@ -343,6 +344,11 @@ if test "${enable_ovsdb}" = "yes"; then
        AC_MSG_ERROR([unable to find libovsdb])
     ])
 fi
+
+#Check OPSCLI package and include ops-cli library
+PKG_CHECK_MODULES([OPSCLI], [ops-cli])
+AC_SUBST(Cflags)
+AC_SUBST(Libs)
 
 if test "${enable_isisd}" != "no" && test "${enable_isis_topology}" = yes; then
   AC_DEFINE(TOPOLOGY_GENERATE,,Enable IS-IS topology generator code)
@@ -1583,7 +1589,7 @@ AC_CONFIG_FILES([Makefile lib/Makefile zebra/Makefile ripd/Makefile
 	  doc/defines.texi
 	  isisd/topology/Makefile
 	  pkgsrc/bgpd.sh pkgsrc/ospf6d.sh pkgsrc/ospfd.sh
-	  pkgsrc/ripd.sh pkgsrc/ripngd.sh pkgsrc/zebra.sh])
+	  pkgsrc/ripd.sh pkgsrc/ripngd.sh pkgsrc/zebra.sh zebra/cli/Makefile])
 AC_CONFIG_FILES([solaris/Makefile])
 
 AC_CONFIG_FILES([vtysh/extract.pl],[chmod +x vtysh/extract.pl])

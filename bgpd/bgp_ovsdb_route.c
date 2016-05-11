@@ -121,6 +121,12 @@ void bgp_txn_init(void);
 void bgp_txn_destroy(void);
 void bgp_txn_insert(struct hmap_node *txn_node);
 void bgp_txn_remove(struct hmap_node *txn_node);
+int route_map_action_str_to_enum(const char *action_str, int *action);
+int
+policy_rt_map_apply_changes (struct route_map *map,
+                             const char **argv1, char **argvmatch, char **argvset,
+                             int argc1, int argcmatch, int argcset,
+                             unsigned long pref, int action);
 
 static int
 txn_command_result(enum ovsdb_idl_txn_status status, char *msg, char *pr)
@@ -1559,7 +1565,7 @@ policy_rt_map_do_change(struct ovsdb_idl *idl,
             /*
              * programming back end
              */
-            policy_rt_map_apply_changes(map, argv1, argvmatch, argvset, argc1,
+            policy_rt_map_apply_changes(map, (const char **) argv1, argvmatch, argvset, argc1,
                                         argcmatch, argcset, pref, rmap_action);
         }
     }

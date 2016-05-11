@@ -38,7 +38,7 @@
 #include "dummy.h"
 #include "fatal-signal.h"
 #include "poll-loop.h"
-#include "stream.h"
+#include "ovs/stream.h"
 #include "timeval.h"
 #include "unixctl.h"
 #include "openvswitch/vlog.h"
@@ -1773,13 +1773,13 @@ zebra_search_port_name_in_l3_ports_hash (struct shash* port_hash,
   if (!port_hash)
     {
       VLOG_ERR("The port hash is NULL");
-      return;
+      return(NULL);
     }
 
   if (!port_name)
     {
       VLOG_ERR("The port name is NULL");
-      return;
+      return(NULL);
     }
 
   l3_port = (struct zebra_l3_port *)shash_find_data(port_hash,
@@ -1811,7 +1811,7 @@ zebra_search_nh_addr_in_l3_ports_hash (struct shash* port_hash,
   if (!port_hash)
     {
       VLOG_ERR("The port hash is NULL");
-      return;
+      return(NULL);
     }
 
   if (!nexthop_str || !nexthop_str[0])
@@ -4580,7 +4580,7 @@ zebra_update_selected_route_to_db (struct route_node *rn, struct rib *route,
 
       if (!ovs_route) {
         VLOG_DBG("Route not found using UUID");
-        return;
+        return 0;
       }
 
       #ifdef VRF_ENABLE

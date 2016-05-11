@@ -1016,12 +1016,12 @@ ops_zebra_netlink_routing_table (struct sockaddr_nl *snl,
                }
              else
                {
-                 char* ifname = ifindex2ifname(index);
+                 const char* ifname = ifindex2ifname(index);
                  zlog(NULL, LOG_DEBUG, "Added an IPv4 ifindex and ifname %s",
                       ifname);
 
                  if (strcmp(ifname, "unknown") != 0)
-                   nexthop_ifname_add(rib, ifname);
+                   nexthop_ifname_add(rib, (char *)ifname);
                  else
                    zlog(NULL, LOG_DEBUG, "Error adding if name %s to the next-hop",
                         ifname);
@@ -1044,12 +1044,12 @@ ops_zebra_netlink_routing_table (struct sockaddr_nl *snl,
             }
           else
             {
-                char* ifname = ifindex2ifname(index);
+                const char* ifname = ifindex2ifname(index);
                 zlog(NULL, LOG_DEBUG, "Added an IPv4 ifname %s",
                      ifname);
 
                 if (strcmp(ifname, "unknown") != 0)
-                  nexthop_ifname_add(rib, ifname);
+                  nexthop_ifname_add(rib, (char *)ifname);
                 else
                   zlog(NULL, LOG_DEBUG, "Not adding if name %s to the next-hop",
                        ifname);
@@ -1073,7 +1073,7 @@ ops_zebra_netlink_routing_table (struct sockaddr_nl *snl,
               apply_mask_ipv4(&p);
 
               /* Lookup route node.*/
-              rn = route_node_get(shadow_table, &p);
+              rn = route_node_get(shadow_table, (struct prefix *) &p);
               assert(rn);
 
               /*
@@ -1131,7 +1131,7 @@ ops_zebra_netlink_routing_table (struct sockaddr_nl *snl,
           apply_mask_ipv6(&p);
 
           /* Lookup route node.*/
-          rn = route_node_get(shadow_table, &p);
+          rn = route_node_get(shadow_table, (struct prefix *) &p);
           assert(rn);
 
           rib_list_head = rib_dest_from_rnode(rn);
@@ -1155,12 +1155,12 @@ ops_zebra_netlink_routing_table (struct sockaddr_nl *snl,
             nexthop_ipv6_add(rib, gate);
           else
             {
-              char* ifname = ifindex2ifname(index);
+              const char* ifname = ifindex2ifname(index);
               zlog(NULL, LOG_DEBUG, "Added an IPv6 ifindex and "
                    "ifname %s", ifname);
 
               if (strcmp(ifname, "unknown") != 0)
-                nexthop_ifname_add(rib, ifname);
+                nexthop_ifname_add(rib, (char *) ifname);
               else
                 zlog(NULL, LOG_DEBUG, "Not adding if name %s to "
                      "the next-hop", ifname);

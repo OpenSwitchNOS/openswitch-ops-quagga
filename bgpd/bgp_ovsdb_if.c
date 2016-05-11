@@ -43,7 +43,7 @@
 #include "dummy.h"
 #include "fatal-signal.h"
 #include "poll-loop.h"
-#include "stream.h"
+#include "ovs/stream.h"
 #include "timeval.h"
 #include "unixctl.h"
 #include "openvswitch/vlog.h"
@@ -56,6 +56,10 @@
 #include "bgpd/bgp_table.h"
 #include "bgpd/bgp_route.h"
 #include "linklist.h"
+#include "bgp_backend_functions.h"
+#include "bgp_ovsdb_route.h"
+#include "bgp_zebra.h"
+#include "bgp_mpath.h"
 
 /*
  * Local structure to hold the master thread
@@ -67,16 +71,6 @@ typedef struct bgp_ovsdb_t_ {
     unsigned int read_cb_count;
     unsigned int write_cb_count;
 } bgp_ovsdb_t;
-
-/* BGP clear sort. */
-enum clear_sort
-{
-  clear_all,
-  clear_peer,
-  clear_group,
-  clear_external,
-  clear_as
-};
 
 static bgp_ovsdb_t glob_bgp_ovs;
 #define MAX_BUF_LEN 10
@@ -97,6 +91,27 @@ static boolean sys_ecmp_status = true;
 boolean exiting = false;
 static int bgp_ovspoll_enqueue (bgp_ovsdb_t *bovs_g);
 static int bovs_cb (struct thread *thread);
+
+/* Prototypes */
+int
+modify_bgp_router_id_config (struct bgp *bgp_cfg,
+    const struct ovsrec_bgp_router *bgp_mod_row);
+int
+modify_bgp_network_config (struct bgp *bgp_cfg,
+    const struct ovsrec_bgp_router *bgp_mod_row);
+int
+modify_bgp_maxpaths_config (struct bgp *bgp_cfg,
+    const struct ovsrec_bgp_router *bgp_mod_row);
+int
+modify_bgp_timers_config (struct bgp *bgp_cfg,
+    const struct ovsrec_bgp_router *bgp_mod_row);
+int
+bgp_static_route_addition (struct bgp *bgp_cfg,
+    const struct ovsrec_bgp_router *bgp_mod_row);
+int
+bgp_static_route_deletion (struct bgp *bgp_cfg,
+                           const struct ovsrec_bgp_router *bgp_mod_row);
+
 
 /*
  * ovs appctl dump function for this daemon
@@ -1594,7 +1609,7 @@ bgp_nbr_remote_as_ovsdb_apply_changes (const struct ovsrec_bgp_neighbor *ovs_nbr
     if (COL_CHANGED(ovs_nbr, ovsrec_bgp_neighbor_col_remote_as, idl_seqno)) {
         VLOG_DBG("Setting remote-as %lld", *ovs_nbr->remote_as);
         daemon_neighbor_remote_as_cmd_execute(bgp_instance,
-            name, ovs_nbr->remote_as, AFI_IP, SAFI_UNICAST);
+            name, (as_t *)ovs_nbr->remote_as, AFI_IP, SAFI_UNICAST);
     }
 }
 
@@ -2139,7 +2154,7 @@ bgp_nbr_read_ovsdb_apply_changes (struct ovsdb_idl *idl)
                         VLOG_DBG("Creating a peer with remote-as %d",
                                  *ovs_nbr->remote_as);
                         daemon_neighbor_remote_as_cmd_execute(bgp_instance,
-                            ovs_bgp->key_bgp_neighbors[j], ovs_nbr->remote_as,
+                            ovs_bgp->key_bgp_neighbors[j], (as_t *) ovs_nbr->remote_as,
                             AFI_IP, SAFI_UNICAST);
                     } else {
                         VLOG_ERR("Invalid remote-as for peer creation.");

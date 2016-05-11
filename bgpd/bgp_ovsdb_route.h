@@ -186,4 +186,10 @@ bgp_ovsdb_republish_route(const struct ovsrec_bgp_router *bgp_first, int asn);
 
 extern void
 bgp_txn_complete_processing(void);
+
+extern int policy_prefix_list_read_ovsdb_apply_changes(struct ovsdb_idl *idl);
+extern int policy_community_filter_read_ovsdb_apply_changes(struct ovsdb_idl *idl);
+extern int policy_rt_map_read_ovsdb_apply_changes (struct ovsdb_idl *idl);
+extern int policy_aspath_filter_read_ovsdb_apply_changes(struct ovsdb_idl *idl);
+
 #endif /* BGP_OVSDB_RIB_H */

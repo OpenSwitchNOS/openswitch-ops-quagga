@@ -56,7 +56,10 @@
 #include "bgpd/bgp_table.h"
 #include "bgpd/bgp_route.h"
 #include "linklist.h"
-
+#include "sockunion.h"
+#include  <diag_dump.h>
+#include "bgpd/bgp_fsm.h"
+#include "bgp_vty.h"
 /*
  * Local structure to hold the master thread
  * and counters for read/write callbacks
@@ -80,6 +83,10 @@ enum clear_sort
 
 static bgp_ovsdb_t glob_bgp_ovs;
 #define MAX_BUF_LEN 10
+#define BUF_LEN 16000
+#define MAX_ERR_STR_LEN 256
+
+
 COVERAGE_DEFINE(bgp_ovsdb_cnt);
 VLOG_DEFINE_THIS_MODULE(bgp_ovsdb_if);
 
@@ -88,6 +95,8 @@ unsigned int idl_seqno;
 static char *appctl_path = NULL;
 static struct unixctl_server *appctl;
 static int system_configured = false;
+static int diag_buffer_len = BUF_LEN;
+#define MAX_LEN (diag_buffer_len - 1 - len)
 /*
  * Global System ECMP status affects maxpath config
  * Keep a local ECMP status to update when needed
@@ -97,7 +106,8 @@ static boolean sys_ecmp_status = true;
 boolean exiting = false;
 static int bgp_ovspoll_enqueue (bgp_ovsdb_t *bovs_g);
 static int bovs_cb (struct thread *thread);
-
+static void bgpd_dump(char *buf, int len);
+static void bgpd_diag_dump_basic_cb(const char *feature , char **buf);
 /*
  * ovs appctl dump function for this daemon
  * This is useful for debugging
@@ -106,6 +116,29 @@ static void
 bgp_unixctl_dump (struct unixctl_conn *conn, int argc OVS_UNUSED,
     const char *argv[] OVS_UNUSED, void *aux OVS_UNUSED)
 {
+    char err_str[MAX_ERR_STR_LEN];
+    char *buf = xcalloc(1, BUF_LEN);
+    if(!buf) {
+        snprintf(err_str,sizeof(err_str),
+                 "bpg daemon failed to allocate %d bytes", BUF_LEN);
+        unixctl_command_reply(conn, err_str);
+    } else {
+        bgpd_dump(buf,BUF_LEN);
+        unixctl_command_reply(conn, buf);
+        free(buf);
+    }
+}
+static void
+bgp_diag_buff_set(struct unixctl_conn *conn, int argc OVS_UNUSED,
+    const char *argv[] OVS_UNUSED, void *aux OVS_UNUSED)
+{
+    char buf[256];
+    int tmp = diag_buffer_len;
+    diag_buffer_len = atoi(argv[1]);
+    snprintf(buf, sizeof(buf), "Set diag buffer size:\n"
+             "  Old: %d bytes\n  New: %d bytes\n", tmp, diag_buffer_len);
+    unixctl_command_reply(conn, buf);
+
 }
 boolean get_global_ecmp_status()
 {
@@ -374,8 +407,292 @@ ovsdb_init (const char *db_path)
     /* BGP tables */
     bgp_ovsdb_tables_init(idl);
 
+    INIT_DIAG_DUMP_BASIC(bgpd_diag_dump_basic_cb);
     /* Register ovs-appctl commands for this daemon. */
     unixctl_command_register("bgpd/dump", "", 0, 0, bgp_unixctl_dump, NULL);
+    unixctl_command_register("bgpd/diag", "buffer size", 1, 1, bgp_diag_buff_set, NULL);
+}
+
+/* Show BGP peer's summary information. */
+static int
+bgp_dump_summary (char *buf, int offset, struct bgp *bgp, int afi, int safi)
+{
+    struct peer *peer;
+    struct listnode *node, *nnode;
+    char timebuf[BGP_UPTIME_LEN];
+    unsigned int count = 0;
+    int n, len = offset;
+    if(!bgp || !buf) {
+        VLOG_ERR("Invalid Entry\n");
+        return 0;
+    }
+    /* Header string for each address family. */
+    static char header[] = "Neighbor           AS MsgRcvd MsgSent"
+                           "   TblVer  InQ OutQ Up/Down  State";
+
+    for (ALL_LIST_ELEMENTS (bgp->peer, node, nnode, peer)) {
+       if (peer->afc[afi][safi]) {
+           if (!count) {
+               unsigned long ents;
+
+               len += snprintf(&buf[len], MAX_LEN,
+                               "BGP router identifier %s, local AS number %u\n"
+                               "RIB table counts %ld\n"
+                               "Peers %ld\n",
+                               inet_ntoa (bgp->router_id), bgp->as,
+                               bgp_table_count (bgp->rib[afi][safi]),
+                               listcount (bgp->peer));
+
+               if((ents = listcount (bgp->rsclient))) {
+                   len += snprintf(&buf[len], MAX_LEN,
+                                  "RS-Client peers %ld\n", ents);
+               }
+               if((ents = listcount (bgp->group))) {
+                   len += snprintf(&buf[len], MAX_LEN,
+                                  "Peer groups %ld\n", ents);
+               }
+               len += snprintf(&buf[len], MAX_LEN,  "\n%s\n", header);
+           }
+           count++;
+
+           len += snprintf(&buf[len], MAX_LEN, "%s", peer->host);
+           n = 16 - strlen(peer->host);
+           if (n < 1) {
+               len += snprintf(&buf[len], MAX_LEN, "\n%*s", 16, " ");
+           } else {
+               len += snprintf(&buf[len], MAX_LEN, "%*s", n, " ");
+           }
+           len += snprintf(&buf[len], MAX_LEN, "%5u %7d %7d %8d %4d %4lu ",
+                           peer->as, peer->open_in +
+                           peer->update_in + peer->keepalive_in +
+                           peer->notify_in + peer->refresh_in +
+                           peer->dynamic_cap_in, peer->open_out +
+                           peer->update_out + peer->keepalive_out +
+                           peer->notify_out + peer->refresh_out +
+                           peer->dynamic_cap_out,
+                           0, 0, (unsigned long) peer->obuf->count);
+
+           len += snprintf(&buf[len], MAX_LEN, "%8s",
+                 peer_uptime (peer->uptime, timebuf, BGP_UPTIME_LEN));
+
+           len += snprintf(&buf[len], MAX_LEN,  " %-11s\n",
+                           LOOKUP(bgp_status_msg, peer->status));
+        }
+    } /* bgp peer loop */
+
+    if (count) {
+        len += snprintf(&buf[len], MAX_LEN, "\nTotal number of neighbors "
+                        "%d\n", count);
+    } else {
+        len += snprintf(&buf[len], MAX_LEN,  "No %s neighbor is configured"
+                        "\n\n", afi == AFI_IP ? "IPv4" : "IPv6");
+    }
+    return (len - offset);
+}
+
+static int
+bgp_dump_peer(char *buf, int offset, struct peer *p)
+{
+    struct bgp *bgp;
+    char buf1[INET6_ADDRSTRLEN];
+    char timebuf[BGP_UPTIME_LEN];
+    afi_t afi;
+    safi_t safi;
+    int len = offset;
+    if(!p || !buf) {
+        VLOG_ERR("Invalid Entry\n");
+        return 0;
+    }
+    bgp = p->bgp;
+
+    /* Configured IP address. */
+
+    len += snprintf(&buf[len], MAX_LEN,
+                   "BGP neighbor is %s, remote AS %u, local AS %u%s%s, "
+                    "%s link\n", p->host, p->as,
+                    p->change_local_as ? p->change_local_as : p->local_as,
+                    CHECK_FLAG (p->flags, PEER_FLAG_LOCAL_AS_NO_PREPEND) ?
+                    " no-prepend" : "",
+                    CHECK_FLAG (p->flags, PEER_FLAG_LOCAL_AS_REPLACE_AS) ?
+                    " replace-as" : "", p->as == p->local_as ?
+                    "internal" : "external");
+
+    len += snprintf(&buf[len], MAX_LEN, "  Remote router ID %s\n",
+                    inet_ntop (AF_INET, &p->remote_id, buf1, BUFSIZ));
+
+    /* Peer-group */
+    if (p->group) {
+        len += snprintf(&buf[len], MAX_LEN, " Member of peer-group %s "
+                        "for session parameters\n", p->group->name);
+    }
+
+    /* Status. */
+    len += snprintf(&buf[len], MAX_LEN, "  BGP state = %s",
+                    LOOKUP (bgp_status_msg, p->status));
+    if (p->status == Established) {
+        len += snprintf(&buf[len], MAX_LEN, ", up for %8s\n",
+                        peer_uptime (p->uptime, timebuf, BGP_UPTIME_LEN));
+    }
+    else if (p->status == Active) {
+        if(CHECK_FLAG (p->flags, PEER_FLAG_PASSIVE)) {
+           len += snprintf(&buf[len], MAX_LEN, " (passive)\n");
+        } else if(CHECK_FLAG (p->sflags, PEER_STATUS_NSF_WAIT)) {
+           len += snprintf(&buf[len], MAX_LEN, " (NSF passive)\n");
+        }
+    } else {
+        len += snprintf(&buf[len], MAX_LEN, "\n");
+    }
+
+    /* read timer */
+    len += snprintf(&buf[len], MAX_LEN, "  Last read %s",
+                    peer_uptime (p->readtime, timebuf, BGP_UPTIME_LEN));
+
+    /* Configured timer values. */
+    len += snprintf(&buf[len], MAX_LEN, ", hold time is %d,"
+                    " keepalive interval is %d seconds\n",
+                    p->v_holdtime, p->v_keepalive);
+
+    if (CHECK_FLAG (p->config, PEER_CONFIG_TIMER)) {
+        len += snprintf(&buf[len], MAX_LEN, "  Configured hold time is %d"
+                        ", keepalive interval is %d seconds\n", p->holdtime,
+                        p->keepalive);
+    }
+
+    /* Packet counts. */
+    len += snprintf(&buf[len], MAX_LEN,
+                    "  Message statistics:\n"
+                    "    Inq depth is 0\n"
+                    "    Outq depth is %lu\n"
+                    "    Reset time: %d\n"
+                    "    Dropped: %d\n"
+                    "                         Sent       Rcvd\n"
+                    "    Dynamic:       %10d %10d\n"
+                    "    Opens:         %10d %10d\n"
+                    "    Notifications: %10d %10d\n"
+                    "    Updates:       %10d %10d\n"
+                    "    Keepalives:    %10d %10d\n"
+                    "    Route Refresh: %10d %10d\n"
+                    "    Capability:    %10d %10d\n"
+                    "    Total:         %10d %10d\n\n",
+                    (unsigned long) p->obuf->count, p->resettime, p->dropped,
+                    p->dynamic_cap_out, p->dynamic_cap_in,
+                    p->open_out, p->open_in,
+                    p->notify_out, p->notify_in,
+                    p->update_out, p->update_in,
+                    p->keepalive_out, p->keepalive_in,
+                    p->refresh_out, p->refresh_in,
+                    p->dynamic_cap_out, p->dynamic_cap_in,
+                    p->open_out + p->notify_out +
+                    p->update_out + p->keepalive_out + p->refresh_out +
+                    p->dynamic_cap_out, p->open_in + p->notify_in +
+                    p->update_in + p->keepalive_in + p->refresh_in +
+                    p->dynamic_cap_in);
+
+    /* Default weight */
+    if (CHECK_FLAG (p->config, PEER_CONFIG_WEIGHT)) {
+        len += snprintf(&buf[len], MAX_LEN, "  Default weight %d\n",
+                        p->weight);
+    }
+    len += snprintf(&buf[len], MAX_LEN, "  Connections established: %d\n",
+                    p->established);
+
+    if (!p->dropped) {
+        len += snprintf(&buf[len], MAX_LEN, "  Last reset never\n");
+    } else {
+        len += snprintf(&buf[len], MAX_LEN, "  Last reset %s, due to %s\n",
+              peer_uptime (p->resettime, timebuf, BGP_UPTIME_LEN),
+              peer_down_str[(int) p->last_reset]);
+    }
+
+    if(CHECK_FLAG (p->sflags, PEER_STATUS_PREFIX_OVERFLOW)) {
+        len += snprintf(&buf[len], MAX_LEN, "  Peer had exceeded the "
+                        "max. no. of prefixes configured.\n");
+
+        if (p->t_pmax_restart) {
+            len += snprintf(&buf[len], MAX_LEN, "  Reduce the no. of prefix "
+                           "from %s, will restart in %ld seconds\n", p->host,
+                           thread_timer_remain_second (p->t_pmax_restart));
+        } else {
+            len += snprintf(&buf[len], MAX_LEN, "  Reduce the no. of prefix "
+                           ", clear ip bgp %s to restore peering\n", p->host);
+        }
+    }
+
+    /* Local address. */
+    if (p->su_local) {
+        len += snprintf(&buf[len], MAX_LEN, "  Local host: %s, Local port: %d\n",
+                        sockunion2str (p->su_local, buf1, SU_ADDRSTRLEN),
+                        ntohs (p->su_local->sin.sin_port));
+    }
+
+    /* Remote address. */
+    if (p->su_remote) {
+        len += snprintf(&buf[len], MAX_LEN, "  Foreign host: %s, Foreign port:"
+                     " %d\n", sockunion2str(p->su_remote, buf1, SU_ADDRSTRLEN),
+                     ntohs (p->su_remote->sin.sin_port));
+    }
+
+    return (len - offset);
+}
+
+static void
+bgpd_dump(char *buf, int buf_size)
+{
+    struct bgp *bgp;
+    struct listnode *node, *nnode;
+    struct peer *peer;
+    int afi, safi, len = 0;
+    bgp = bgp_get_default ();
+    char *err = "Truncated due to data exceeds";
+    char *promt = "Increase buffer size using "
+                  "'ovs-appctl -t ops-bgpd bgpd/diag newsize'\n";
+    if (bgp) {
+        len += bgp_dump_summary(buf, len, bgp, AFI_IP, SAFI_UNICAST);
+        for (ALL_LIST_ELEMENTS (bgp->peer, node, nnode, peer))
+        {
+            if(len > diag_buffer_len) {
+                break;
+            }
+            len += bgp_dump_peer(buf, len, peer);
+        }
+        if(len > diag_buffer_len) {
+            VLOG_ERR("diag-dump: No more space on buffer to dump."
+                     "  Data size: %d, buffer size: %d, exceeds: %d\n",
+                     len, diag_buffer_len, len - diag_buffer_len);
+            snprintf(&buf[diag_buffer_len - strlen(err) - strlen(promt) - 25],
+                     MAX_LEN, "...\n%s %d bytes.\n%s", err, diag_buffer_len,
+                     promt);
+        }
+        VLOG_DBG("\nWould dump %d bytes out of %d\n", len, diag_buffer_len);
+    }
+}
+
+/*
+ * Function       : bgpd_diag_dump_basic_cb
+ * Responsibility : callback handler function for diagnostic dump basic
+ *                  it allocates memory as per requirment and populates data.
+ *                  INIT_DIAG_DUMP_BASIC will free allocated memory.
+ * Parameters     : feature name string, buffer ptr
+ * Returns        : void
+ */
+
+static void
+bgpd_diag_dump_basic_cb(const char *feature , char **buf)
+{
+     if (!buf)
+         return;
+     *buf =  xcalloc(1, diag_buffer_len);
+
+     if (*buf) {
+         bgpd_dump(*buf, diag_buffer_len);
+         /* populate basic diagnostic data to buffer  */
+         VLOG_DBG("basic diag-dump data populated for feature %s",
+                  feature);
+     }else{
+         VLOG_ERR("Memory allocation failed for feature %s , %d bytes",
+                  feature , diag_buffer_len);
+     }
+     return;
 }
 
 static void

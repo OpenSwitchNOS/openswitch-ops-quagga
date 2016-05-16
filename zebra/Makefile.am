@@ -70,6 +70,7 @@ if ENABLE_OVSDB
 ops_zebra_LDADD = $(otherobj) libzebra_ovsdb_if.a ../lib/libzebra.la \
 		  $(LIBCAP) -lovscommon -lovsdb -lpthread -lsupportability
 ops_zebra_DEPENDENCIES = $(otherobj)
+ops_zebra_DEPENDENCIES += libzebra_ovsdb_if.a
 else
 zebra_LDADD = $(otherobj) libzebra_ovsdb_if.a ../lib/libzebra.la $(LIBCAP)
 zebra_DEPENDENCIES = $(otherobj)

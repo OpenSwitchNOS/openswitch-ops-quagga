@@ -91,11 +91,15 @@ void zebra_update_selected_route_nexthops_to_db (
                                             struct route_node *rn,
                                             struct rib *route,
                                             int action);
+<<<<<<< HEAD
 void zebra_dump_internal_nexthop (struct prefix *p, struct nexthop* nexthop);
 void zebra_dump_internal_rib_entry (struct prefix *p, struct rib* rib);
 void zebra_dump_internal_route_node (struct route_node *rn);
 void zebra_dump_internal_route_table (struct route_table *table);
 void cleanup_kernel_routes_after_restart();
+=======
+void zebra_update_system_table_router_id(const struct ovsrec_interface *interface_row);
+>>>>>>> Remove communication between BGP and Zebra deamon for the router_id update.
 extern int zebra_create_txn (void);
 extern int zebra_finish_txn (void);
 

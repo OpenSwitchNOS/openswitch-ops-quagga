@@ -2416,6 +2416,638 @@ def interface_up_before_zebra_restart(**kwargs):
               "down some next-hop interfaces on switch1.#########")
 
 
+# This test restarts zebra process and checks if the routes and next-hops show
+# correctly in the output of "show ip route/show rib" after zebra has restarted.
+# Before zebra has come back up from restart, we change interface addresses on
+# some interfaces.
+def interface_addr_change_before_zebra_restart(**kwargs):
+
+    switch1 = kwargs.get('switch1', None)
+    switch2 = kwargs.get('switch2', None)
+
+    switch1.commandErrorCheck = 0
+    switch2.commandErrorCheck = 0
+
+    zebra_stop_command_string = "systemctl stop ops-zebra"
+    zebra_start_command_string = "systemctl start ops-zebra"
+
+    LogOutput('info', "\n\n\n######### Restarting zebra and changing "
+              " some interface addresses on switch1.#########")
+
+    LogOutput('info', "\n\n\n######### Restarting zebra. Stopping ops-zebra service on"
+              "switch 1#########")
+
+    # Execute the command to stop zebra on the Linux bash interface
+    devIntRetStruct = switch1.DeviceInteract(command=zebra_stop_command_string)
+    retCode = devIntRetStruct.get('returnCode')
+
+    if retCode != 0:
+        assert "Failed to stop zebra"
+
+    LogOutput('info', "\n\n\n######### Changing some interface IP addresses"
+              " after zebra has gone down on switch 1#########")
+
+    # Re-configure IPv4 address on interface 1 on switch1
+    retStruct = InterfaceIpConfig(deviceObj=switch1,
+                                  interface=switch1.linkPortMapping['lnk01'],
+                                  addr="9.9.9.9", mask=24, config=True)
+    retCode = retStruct.returnCode()
+    if retCode != 0:
+        assert "Failed to re-configure an ipv4 address"
+
+    # Re-configure IPv6 address on interface 1 on switch1
+    retStruct = InterfaceIpConfig(deviceObj=switch1,
+                                  interface=switch1.linkPortMapping['lnk01'],
+                                  addr="999:999::9", mask=64, ipv6flag=True,
+                                  config=True)
+    retCode = retStruct.returnCode()
+    if retCode != 0:
+        assert "Failed to re-configure an ipv6 address"
+
+    LogOutput('info', "\n\n\n######### Restarting zebra. Starting ops-zebra service on"
+              "switch 1#########")
+
+    # Execute the command to start zebra on the Linux bash interface
+    devIntRetStruct = switch1.DeviceInteract(command=zebra_start_command_string)
+    retCode = devIntRetStruct.get('returnCode')
+
+    if retCode != 0:
+        assert "Failed to start zebra"
+
+    # Populate the expected RIB ("show rib") route dictionary for the route
+    # 123.0.0.1/32 and its next-hops.
+    ExpRibDictIpv4StaticRoute1 = dict()
+    ExpRibDictIpv4StaticRoute1['Route'] = '123.0.0.1' + '/' + '32'
+    ExpRibDictIpv4StaticRoute1['NumberNexthops'] = '4'
+    ExpRibDictIpv4StaticRoute1['1.1.1.2'] = dict()
+    ExpRibDictIpv4StaticRoute1['1.1.1.2']['Distance'] = '1'
+    ExpRibDictIpv4StaticRoute1['1.1.1.2']['Metric'] = '0'
+    ExpRibDictIpv4StaticRoute1['1.1.1.2']['RouteType'] = 'static'
+    ExpRibDictIpv4StaticRoute1['2'] = dict()
+    ExpRibDictIpv4StaticRoute1['2']['Distance'] = '1'
+    ExpRibDictIpv4StaticRoute1['2']['Metric'] = '0'
+    ExpRibDictIpv4StaticRoute1['2']['RouteType'] = 'static'
+    ExpRibDictIpv4StaticRoute1['3'] = dict()
+    ExpRibDictIpv4StaticRoute1['3']['Distance'] = '1'
+    ExpRibDictIpv4StaticRoute1['3']['Metric'] = '0'
+    ExpRibDictIpv4StaticRoute1['3']['RouteType'] = 'static'
+    ExpRibDictIpv4StaticRoute1['4.4.4.1'] = dict()
+    ExpRibDictIpv4StaticRoute1['4.4.4.1']['Distance'] = '1'
+    ExpRibDictIpv4StaticRoute1['4.4.4.1']['Metric'] = '0'
+    ExpRibDictIpv4StaticRoute1['4.4.4.1']['RouteType'] = 'static'
+
+    # Populate the expected FIB ("show ip route") route dictionary for the
+    # route 123.0.0.1/32 and its next-hops.
+    ExpRouteDictIpv4StaticRoute1 = dict()
+    ExpRouteDictIpv4StaticRoute1['Route'] = '123.0.0.1' + '/' + '32'
+    ExpRouteDictIpv4StaticRoute1['NumberNexthops'] = '3'
+    ExpRouteDictIpv4StaticRoute1['2'] = dict()
+    ExpRouteDictIpv4StaticRoute1['2']['Distance'] = '1'
+    ExpRouteDictIpv4StaticRoute1['2']['Metric'] = '0'
+    ExpRouteDictIpv4StaticRoute1['2']['RouteType'] = 'static'
+    ExpRouteDictIpv4StaticRoute1['3'] = dict()
+    ExpRouteDictIpv4StaticRoute1['3']['Distance'] = '1'
+    ExpRouteDictIpv4StaticRoute1['3']['Metric'] = '0'
+    ExpRouteDictIpv4StaticRoute1['3']['RouteType'] = 'static'
+    ExpRouteDictIpv4StaticRoute1['4.4.4.1'] = dict()
+    ExpRouteDictIpv4StaticRoute1['4.4.4.1']['Distance'] = '1'
+    ExpRouteDictIpv4StaticRoute1['4.4.4.1']['Metric'] = '0'
+    ExpRouteDictIpv4StaticRoute1['4.4.4.1']['RouteType'] = 'static'
+
+    # Populate the version of the route in kernel in the route dictionary
+    # for the route 123.0.0.1/32 and its next-hops.
+    ExpDictIpv4KernelRoute1 = dict()
+    ExpDictIpv4KernelRoute1['Route'] = '123.0.0.1' + '/' + '32'
+    ExpDictIpv4KernelRoute1['NumberNexthops'] = '3'
+    ExpDictIpv4KernelRoute1['2'] = dict()
+    ExpDictIpv4KernelRoute1['2']['Distance'] = ''
+    ExpDictIpv4KernelRoute1['2']['Metric'] = ''
+    ExpDictIpv4KernelRoute1['2']['RouteType'] = 'zebra'
+    ExpDictIpv4KernelRoute1['3'] = dict()
+    ExpDictIpv4KernelRoute1['3']['Distance'] = ''
+    ExpDictIpv4KernelRoute1['3']['Metric'] = ''
+    ExpDictIpv4KernelRoute1['3']['RouteType'] = 'zebra'
+    ExpDictIpv4KernelRoute1['4.4.4.1'] = dict()
+    ExpDictIpv4KernelRoute1['4.4.4.1']['Distance'] = ''
+    ExpDictIpv4KernelRoute1['4.4.4.1']['Metric'] = ''
+    ExpDictIpv4KernelRoute1['4.4.4.1']['RouteType'] = 'zebra'
+
+    # Populate the expected RIB ("show rib") route dictionary for the
+    # route 143.0.0.1/32 and its next-hops.
+    ExpRibDictIpv4StaticRoute2 = dict()
+    ExpRibDictIpv4StaticRoute2['Route'] = '143.0.0.1' + '/' + '32'
+    ExpRibDictIpv4StaticRoute2['NumberNexthops'] = '1'
+    ExpRibDictIpv4StaticRoute2['4.4.4.1'] = dict()
+    ExpRibDictIpv4StaticRoute2['4.4.4.1']['Distance'] = '1'
+    ExpRibDictIpv4StaticRoute2['4.4.4.1']['Metric'] = '0'
+    ExpRibDictIpv4StaticRoute2['4.4.4.1']['RouteType'] = 'static'
+
+    # Populate the expected FIB ("show ip route") route dictionary for the
+    # route 143.0.0.1/32 and its next-hops.
+    ExpRouteDictIpv4StaticRoute2 = ExpRibDictIpv4StaticRoute2
+
+    # Populate the version of the route in kernel in the route dictionary
+    # for the route 143.0.0.1/32 and its next-hops.
+    ExpDictIpv4KernelRoute2 = dict()
+    ExpDictIpv4KernelRoute2['Route'] = '143.0.0.1' + '/' + '32'
+    ExpDictIpv4KernelRoute2['NumberNexthops'] = '1'
+    ExpDictIpv4KernelRoute2['4.4.4.1'] = dict()
+    ExpDictIpv4KernelRoute2['4.4.4.1']['Distance'] = ''
+    ExpDictIpv4KernelRoute2['4.4.4.1']['Metric'] = ''
+    ExpDictIpv4KernelRoute2['4.4.4.1']['RouteType'] = 'zebra'
+
+    # Populate the expected RIB ("show rib") route dictionary for the
+    # route 163.0.0.1/32 and its next-hops.
+    ExpRibDictIpv4StaticRoute3 = dict()
+    ExpRibDictIpv4StaticRoute3['Route'] = '163.0.0.1' + '/' + '32'
+    ExpRibDictIpv4StaticRoute3['NumberNexthops'] = '1'
+    ExpRibDictIpv4StaticRoute3['2'] = dict()
+    ExpRibDictIpv4StaticRoute3['2']['Distance'] = '1'
+    ExpRibDictIpv4StaticRoute3['2']['Metric'] = '0'
+    ExpRibDictIpv4StaticRoute3['2']['RouteType'] = 'static'
+
+    # Populate the expected FIB ("show ip route") route dictionary for the
+    # route 163.0.0.1/32 and its next-hops.
+    ExpRouteDictIpv4StaticRoute3 = ExpRibDictIpv4StaticRoute3
+
+    # Populate the version of the route in kernel in the route dictionary
+    # for the route 163.0.0.1/32 and its next-hops.
+    ExpDictIpv4KernelRoute3 = dict()
+    ExpDictIpv4KernelRoute3['Route'] = '163.0.0.1' + '/' + '32'
+    ExpDictIpv4KernelRoute3['NumberNexthops'] = '1'
+    ExpDictIpv4KernelRoute3['2'] = dict()
+    ExpDictIpv4KernelRoute3['2']['Distance'] = ''
+    ExpDictIpv4KernelRoute3['2']['Metric'] = ''
+    ExpDictIpv4KernelRoute3['2']['RouteType'] = 'zebra'
+
+    # Populate the expected RIB ("show rib") route dictionary for the
+    # route a234:a234::1/128 and its next-hops.
+    ExpRibDictIpv6StaticRoute1 = dict()
+    ExpRibDictIpv6StaticRoute1['Route'] = 'a234:a234::1' + '/' + '128'
+    ExpRibDictIpv6StaticRoute1['NumberNexthops'] = '4'
+    ExpRibDictIpv6StaticRoute1['1'] = dict()
+    ExpRibDictIpv6StaticRoute1['1']['Distance'] = '1'
+    ExpRibDictIpv6StaticRoute1['1']['Metric'] = '0'
+    ExpRibDictIpv6StaticRoute1['1']['RouteType'] = 'static'
+    ExpRibDictIpv6StaticRoute1['2'] = dict()
+    ExpRibDictIpv6StaticRoute1['2']['Distance'] = '1'
+    ExpRibDictIpv6StaticRoute1['2']['Metric'] = '0'
+    ExpRibDictIpv6StaticRoute1['2']['RouteType'] = 'static'
+    ExpRibDictIpv6StaticRoute1['3'] = dict()
+    ExpRibDictIpv6StaticRoute1['3']['Distance'] = '1'
+    ExpRibDictIpv6StaticRoute1['3']['Metric'] = '0'
+    ExpRibDictIpv6StaticRoute1['3']['RouteType'] = 'static'
+    ExpRibDictIpv6StaticRoute1['4'] = dict()
+    ExpRibDictIpv6StaticRoute1['4']['Distance'] = '1'
+    ExpRibDictIpv6StaticRoute1['4']['Metric'] = '0'
+    ExpRibDictIpv6StaticRoute1['4']['RouteType'] = 'static'
+
+    # Populate the expected FIB ("show ipv6 route") route dictionary for the
+    # route a234:a234::1/128 and its next-hops.
+    ExpRouteDictIpv6StaticRoute1 = ExpRibDictIpv6StaticRoute1
+
+    # Populate the version of the route in kernel in the route dictionary
+    # for the route a234:a234::1/128 and its next-hops.
+    ExpDictIpv6KernelRoute1 = dict()
+    ExpDictIpv6KernelRoute1['Route'] = 'a234:a234::1' + '/' + '128'
+    ExpDictIpv6KernelRoute1['NumberNexthops'] = '4'
+    ExpDictIpv6KernelRoute1['1'] = dict()
+    ExpDictIpv6KernelRoute1['1']['Distance'] = ''
+    ExpDictIpv6KernelRoute1['1']['Metric'] = ''
+    ExpDictIpv6KernelRoute1['1']['RouteType'] = 'zebra'
+    ExpDictIpv6KernelRoute1['2'] = dict()
+    ExpDictIpv6KernelRoute1['2']['Distance'] = ''
+    ExpDictIpv6KernelRoute1['2']['Metric'] = ''
+    ExpDictIpv6KernelRoute1['2']['RouteType'] = 'zebra'
+    ExpDictIpv6KernelRoute1['3'] = dict()
+    ExpDictIpv6KernelRoute1['3']['Distance'] = ''
+    ExpDictIpv6KernelRoute1['3']['Metric'] = ''
+    ExpDictIpv6KernelRoute1['3']['RouteType'] = 'zebra'
+    ExpDictIpv6KernelRoute1['4'] = dict()
+    ExpDictIpv6KernelRoute1['4']['Distance'] = ''
+    ExpDictIpv6KernelRoute1['4']['Metric'] = ''
+    ExpDictIpv6KernelRoute1['4']['RouteType'] = 'zebra'
+
+    # Populate the expected RIB ("show rib") route dictionary for the
+    # route 2234:2234::1/128 and its next-hops.
+    ExpRibDictIpv6StaticRoute2 = dict()
+    ExpRibDictIpv6StaticRoute2['Route'] = '2234:2234::1' + '/' + '128'
+    ExpRibDictIpv6StaticRoute2['NumberNexthops'] = '1'
+    ExpRibDictIpv6StaticRoute2['4'] = dict()
+    ExpRibDictIpv6StaticRoute2['4']['Distance'] = '1'
+    ExpRibDictIpv6StaticRoute2['4']['Metric'] = '0'
+    ExpRibDictIpv6StaticRoute2['4']['RouteType'] = 'static'
+
+    # Populate the expected FIB ("show ipv6 route") route dictionary for the
+    # route 2234:2234::1/128 and its next-hops.
+    ExpRouteDictIpv6StaticRoute2 = ExpRibDictIpv6StaticRoute2
+
+    # Populate the version of the route in kernel in the route dictionary
+    # for the route 2234:2234::1/128 and its next-hops.
+    ExpDictIpv6KernelRoute2 = dict()
+    ExpDictIpv6KernelRoute2['Route'] = '2234:2234::1' + '/' + '128'
+    ExpDictIpv6KernelRoute2['NumberNexthops'] = '1'
+    ExpDictIpv6KernelRoute2['4'] = dict()
+    ExpDictIpv6KernelRoute2['4']['Distance'] = ''
+    ExpDictIpv6KernelRoute2['4']['Metric'] = ''
+    ExpDictIpv6KernelRoute2['4']['RouteType'] = 'zebra'
+
+    # Populate the expected RIB ("show rib") route dictionary for the
+    # route 3234:3234::1/128 and its next-hops.
+    ExpRibDictIpv6StaticRoute3 = dict()
+    ExpRibDictIpv6StaticRoute3['Route'] = '3234:3234::1' + '/' + '128'
+    ExpRibDictIpv6StaticRoute3['NumberNexthops'] = '1'
+    ExpRibDictIpv6StaticRoute3['2'] = dict()
+    ExpRibDictIpv6StaticRoute3['2']['Distance'] = '1'
+    ExpRibDictIpv6StaticRoute3['2']['Metric'] = '0'
+    ExpRibDictIpv6StaticRoute3['2']['RouteType'] = 'static'
+
+    # Populate the expected FIB ("show ipv6 route") route dictionary for the
+    # route 3234:3234::1/128 and its next-hops.
+    ExpRouteDictIpv6StaticRoute3 = ExpRibDictIpv6StaticRoute3
+
+    # Populate the version of the route in kernel in the route dictionary
+    # for the route 3234:3234::1/128 and its next-hops.
+    ExpDictIpv6KernelRoute3 = dict()
+    ExpDictIpv6KernelRoute3['Route'] = '3234:3234::1' + '/' + '128'
+    ExpDictIpv6KernelRoute3['NumberNexthops'] = '1'
+    ExpDictIpv6KernelRoute3['2'] = dict()
+    ExpDictIpv6KernelRoute3['2']['Distance'] = ''
+    ExpDictIpv6KernelRoute3['2']['Metric'] = ''
+    ExpDictIpv6KernelRoute3['2']['RouteType'] = 'zebra'
+
+    time.sleep(5)
+
+    LogOutput('info', "\n\n\n######### Verifying the IPv4 static routes on "
+              "switch 1#########")
+
+    # Verify route 123.0.0.1/32 and next-hops in RIB, FIB and verify the
+    # presence of all next-hops in running-config
+    verify_route_in_show_route(switch1, True, ExpRouteDictIpv4StaticRoute1,
+                               'static')
+    verify_route_in_show_rib(switch1, ExpRibDictIpv4StaticRoute1, 'static')
+    verify_route_in_show_kernel_route(switch1, True,
+                                      ExpDictIpv4KernelRoute1, 'zebra')
+
+    # Verify route 143.0.0.1/32 and next-hops in RIB, FIB and verify the
+    # presence of all next-hops in running-config
+    verify_route_in_show_route(switch1, True, ExpRouteDictIpv4StaticRoute2,
+                               'static')
+    verify_route_in_show_rib(switch1, ExpRibDictIpv4StaticRoute2, 'static')
+    verify_route_in_show_kernel_route(switch1, True,
+                                      ExpDictIpv4KernelRoute2, 'zebra')
+
+    # Verify route 163.0.0.1/32 and next-hops in RIB, FIB and verify the
+    # presence of all next-hops in running-config
+    verify_route_in_show_route(switch1, True, ExpRouteDictIpv4StaticRoute3,
+                               'static')
+    verify_route_in_show_rib(switch1, ExpRibDictIpv4StaticRoute3, 'static')
+    verify_route_in_show_kernel_route(switch1, True,
+                                      ExpDictIpv4KernelRoute3, 'zebra')
+
+    LogOutput('info', "\n\n\n######### Verifying the IPv6 static routes on "
+              "switch 1#########")
+
+    # Verify route a234:a234::1/128 and next-hops in RIB, FIB and verify the
+    # presence of all next-hops in running-config
+    verify_route_in_show_route(switch1, False, ExpRouteDictIpv6StaticRoute1,
+                               'static')
+    verify_route_in_show_rib(switch1, ExpRibDictIpv6StaticRoute1, 'static')
+    verify_route_in_show_kernel_route(switch1, False,
+                                      ExpDictIpv6KernelRoute1, 'zebra')
+
+    # Verify route 2234:2234::1/128 and next-hops in RIB, FIB and verify the
+    # presence of all next-hops in running-config
+    verify_route_in_show_route(switch1, False, ExpRouteDictIpv6StaticRoute2,
+                               'static')
+    verify_route_in_show_rib(switch1, ExpRibDictIpv6StaticRoute2, 'static')
+    verify_route_in_show_kernel_route(switch1, False,
+                                      ExpDictIpv6KernelRoute2, 'zebra')
+
+    # Verify route 3234:3234::1/128 and next-hops in RIB, FIB and verify the
+    # presence of all next-hops in running-config
+    verify_route_in_show_route(switch1, False, ExpRouteDictIpv6StaticRoute3,
+                               'static')
+    verify_route_in_show_rib(switch1, ExpRibDictIpv6StaticRoute3, 'static')
+    verify_route_in_show_kernel_route(switch1, False,
+                                      ExpDictIpv6KernelRoute3, 'zebra')
+
+    LogOutput('info', "\n\n\n######### Verification of "
+              "IPv4 and IPv6 static routes on switch 1 passed after "
+              "restart#########")
+
+
+# This test restarts zebra process and checks if the routes and next-hops show
+# correctly in the output of "show ip route/show rib" after zebra has restarted.
+# Before zebra has come back up from restart, we restore interface addresses on
+# the interfaces on which we changed the addresses on in the test case
+# interface_addr_change_before_zebra_restart.
+def interface_addr_restore_before_zebra_restart(**kwargs):
+
+    switch1 = kwargs.get('switch1', None)
+    switch2 = kwargs.get('switch2', None)
+
+    switch1.commandErrorCheck = 0
+    switch2.commandErrorCheck = 0
+
+    zebra_stop_command_string = "systemctl stop ops-zebra"
+    zebra_start_command_string = "systemctl start ops-zebra"
+
+    LogOutput('info', "\n\n\n######### Restarting zebra and restoring "
+              " some interface addresses on switch1.#########")
+
+    LogOutput('info', "\n\n\n######### Restarting zebra. Stopping ops-zebra service on"
+              "switch 1#########")
+
+    # Execute the command to stop zebra on the Linux bash interface
+    devIntRetStruct = switch1.DeviceInteract(command=zebra_stop_command_string)
+    retCode = devIntRetStruct.get('returnCode')
+
+    if retCode != 0:
+        assert "Failed to stop zebra"
+
+    LogOutput('info', "\n\n\n######### restoring some interface IP addresses"
+              " after zebra has gone down on switch 1#########")
+
+    # Re-configure IPv4 address on interface 1 on switch1
+    retStruct = InterfaceIpConfig(deviceObj=switch1,
+                                  interface=switch1.linkPortMapping['lnk01'],
+                                  addr="1.1.1.1", mask=24, config=True)
+    retCode = retStruct.returnCode()
+    if retCode != 0:
+        assert "Failed to re-configure an ipv4 address"
+
+    # Re-configure IPv6 address on interface 1 on switch1
+    retStruct = InterfaceIpConfig(deviceObj=switch1,
+                                  interface=switch1.linkPortMapping['lnk01'],
+                                  addr="111:111::1", mask=64, ipv6flag=True,
+                                  config=True)
+    retCode = retStruct.returnCode()
+    if retCode != 0:
+        assert "Failed to re-configure an ipv6 address"
+
+    LogOutput('info', "\n\n\n######### Restarting zebra. Starting ops-zebra service on"
+              "switch 1#########")
+
+    # Execute the command to start zebra on the Linux bash interface
+    devIntRetStruct = switch1.DeviceInteract(command=zebra_start_command_string)
+    retCode = devIntRetStruct.get('returnCode')
+
+    if retCode != 0:
+        assert "Failed to start zebra"
+
+    # Populate the expected RIB ("show rib") route dictionary for the route
+    # 123.0.0.1/32 and its next-hops.
+    ExpRibDictIpv4StaticRoute1 = dict()
+    ExpRibDictIpv4StaticRoute1['Route'] = '123.0.0.1' + '/' + '32'
+    ExpRibDictIpv4StaticRoute1['NumberNexthops'] = '4'
+    ExpRibDictIpv4StaticRoute1['1.1.1.2'] = dict()
+    ExpRibDictIpv4StaticRoute1['1.1.1.2']['Distance'] = '1'
+    ExpRibDictIpv4StaticRoute1['1.1.1.2']['Metric'] = '0'
+    ExpRibDictIpv4StaticRoute1['1.1.1.2']['RouteType'] = 'static'
+    ExpRibDictIpv4StaticRoute1['2'] = dict()
+    ExpRibDictIpv4StaticRoute1['2']['Distance'] = '1'
+    ExpRibDictIpv4StaticRoute1['2']['Metric'] = '0'
+    ExpRibDictIpv4StaticRoute1['2']['RouteType'] = 'static'
+    ExpRibDictIpv4StaticRoute1['3'] = dict()
+    ExpRibDictIpv4StaticRoute1['3']['Distance'] = '1'
+    ExpRibDictIpv4StaticRoute1['3']['Metric'] = '0'
+    ExpRibDictIpv4StaticRoute1['3']['RouteType'] = 'static'
+    ExpRibDictIpv4StaticRoute1['4.4.4.1'] = dict()
+    ExpRibDictIpv4StaticRoute1['4.4.4.1']['Distance'] = '1'
+    ExpRibDictIpv4StaticRoute1['4.4.4.1']['Metric'] = '0'
+    ExpRibDictIpv4StaticRoute1['4.4.4.1']['RouteType'] = 'static'
+
+    # Populate the expected FIB ("show ip route") route dictionary for the
+    # route 123.0.0.1/32 and its next-hops.
+    ExpRouteDictIpv4StaticRoute1 = ExpRibDictIpv4StaticRoute1
+
+    # Populate the version of the route in kernel in the route dictionary
+    # for the route 123.0.0.1/32 and its next-hops.
+    ExpDictIpv4KernelRoute1 = dict()
+    ExpDictIpv4KernelRoute1['Route'] = '123.0.0.1' + '/' + '32'
+    ExpDictIpv4KernelRoute1['NumberNexthops'] = '4'
+    ExpDictIpv4KernelRoute1['1.1.1.2'] = dict()
+    ExpDictIpv4KernelRoute1['1.1.1.2']['Distance'] = ''
+    ExpDictIpv4KernelRoute1['1.1.1.2']['Metric'] = ''
+    ExpDictIpv4KernelRoute1['1.1.1.2']['RouteType'] = 'zebra'
+    ExpDictIpv4KernelRoute1['2'] = dict()
+    ExpDictIpv4KernelRoute1['2']['Distance'] = ''
+    ExpDictIpv4KernelRoute1['2']['Metric'] = ''
+    ExpDictIpv4KernelRoute1['2']['RouteType'] = 'zebra'
+    ExpDictIpv4KernelRoute1['3'] = dict()
+    ExpDictIpv4KernelRoute1['3']['Distance'] = ''
+    ExpDictIpv4KernelRoute1['3']['Metric'] = ''
+    ExpDictIpv4KernelRoute1['3']['RouteType'] = 'zebra'
+    ExpDictIpv4KernelRoute1['4.4.4.1'] = dict()
+    ExpDictIpv4KernelRoute1['4.4.4.1']['Distance'] = ''
+    ExpDictIpv4KernelRoute1['4.4.4.1']['Metric'] = ''
+    ExpDictIpv4KernelRoute1['4.4.4.1']['RouteType'] = 'zebra'
+
+    # Populate the expected RIB ("show rib") route dictionary for the
+    # route 143.0.0.1/32 and its next-hops.
+    ExpRibDictIpv4StaticRoute2 = dict()
+    ExpRibDictIpv4StaticRoute2['Route'] = '143.0.0.1' + '/' + '32'
+    ExpRibDictIpv4StaticRoute2['NumberNexthops'] = '1'
+    ExpRibDictIpv4StaticRoute2['4.4.4.1'] = dict()
+    ExpRibDictIpv4StaticRoute2['4.4.4.1']['Distance'] = '1'
+    ExpRibDictIpv4StaticRoute2['4.4.4.1']['Metric'] = '0'
+    ExpRibDictIpv4StaticRoute2['4.4.4.1']['RouteType'] = 'static'
+
+    # Populate the expected FIB ("show ip route") route dictionary for the
+    # route 143.0.0.1/32 and its next-hops.
+    ExpRouteDictIpv4StaticRoute2 = ExpRibDictIpv4StaticRoute2
+
+    # Populate the version of the route in kernel in the route dictionary
+    # for the route 143.0.0.1/32 and its next-hops.
+    ExpDictIpv4KernelRoute2 = dict()
+    ExpDictIpv4KernelRoute2['Route'] = '143.0.0.1' + '/' + '32'
+    ExpDictIpv4KernelRoute2['NumberNexthops'] = '1'
+    ExpDictIpv4KernelRoute2['4.4.4.1'] = dict()
+    ExpDictIpv4KernelRoute2['4.4.4.1']['Distance'] = ''
+    ExpDictIpv4KernelRoute2['4.4.4.1']['Metric'] = ''
+    ExpDictIpv4KernelRoute2['4.4.4.1']['RouteType'] = 'zebra'
+
+    # Populate the expected RIB ("show rib") route dictionary for the
+    # route 163.0.0.1/32 and its next-hops.
+    ExpRibDictIpv4StaticRoute3 = dict()
+    ExpRibDictIpv4StaticRoute3['Route'] = '163.0.0.1' + '/' + '32'
+    ExpRibDictIpv4StaticRoute3['NumberNexthops'] = '1'
+    ExpRibDictIpv4StaticRoute3['2'] = dict()
+    ExpRibDictIpv4StaticRoute3['2']['Distance'] = '1'
+    ExpRibDictIpv4StaticRoute3['2']['Metric'] = '0'
+    ExpRibDictIpv4StaticRoute3['2']['RouteType'] = 'static'
+
+    # Populate the expected FIB ("show ip route") route dictionary for the
+    # route 163.0.0.1/32 and its next-hops.
+    ExpRouteDictIpv4StaticRoute3 = ExpRibDictIpv4StaticRoute3
+
+    # Populate the version of the route in kernel in the route dictionary
+    # for the route 163.0.0.1/32 and its next-hops.
+    ExpDictIpv4KernelRoute3 = dict()
+    ExpDictIpv4KernelRoute3['Route'] = '163.0.0.1' + '/' + '32'
+    ExpDictIpv4KernelRoute3['NumberNexthops'] = '1'
+    ExpDictIpv4KernelRoute3['2'] = dict()
+    ExpDictIpv4KernelRoute3['2']['Distance'] = ''
+    ExpDictIpv4KernelRoute3['2']['Metric'] = ''
+    ExpDictIpv4KernelRoute3['2']['RouteType'] = 'zebra'
+
+    # Populate the expected RIB ("show rib") route dictionary for the
+    # route a234:a234::1/128 and its next-hops.
+    ExpRibDictIpv6StaticRoute1 = dict()
+    ExpRibDictIpv6StaticRoute1['Route'] = 'a234:a234::1' + '/' + '128'
+    ExpRibDictIpv6StaticRoute1['NumberNexthops'] = '4'
+    ExpRibDictIpv6StaticRoute1['1'] = dict()
+    ExpRibDictIpv6StaticRoute1['1']['Distance'] = '1'
+    ExpRibDictIpv6StaticRoute1['1']['Metric'] = '0'
+    ExpRibDictIpv6StaticRoute1['1']['RouteType'] = 'static'
+    ExpRibDictIpv6StaticRoute1['2'] = dict()
+    ExpRibDictIpv6StaticRoute1['2']['Distance'] = '1'
+    ExpRibDictIpv6StaticRoute1['2']['Metric'] = '0'
+    ExpRibDictIpv6StaticRoute1['2']['RouteType'] = 'static'
+    ExpRibDictIpv6StaticRoute1['3'] = dict()
+    ExpRibDictIpv6StaticRoute1['3']['Distance'] = '1'
+    ExpRibDictIpv6StaticRoute1['3']['Metric'] = '0'
+    ExpRibDictIpv6StaticRoute1['3']['RouteType'] = 'static'
+    ExpRibDictIpv6StaticRoute1['4'] = dict()
+    ExpRibDictIpv6StaticRoute1['4']['Distance'] = '1'
+    ExpRibDictIpv6StaticRoute1['4']['Metric'] = '0'
+    ExpRibDictIpv6StaticRoute1['4']['RouteType'] = 'static'
+
+    # Populate the expected FIB ("show ipv6 route") route dictionary for the
+    # route a234:a234::1/128 and its next-hops.
+    ExpRouteDictIpv6StaticRoute1 = ExpRibDictIpv6StaticRoute1
+
+    # Populate the version of the route in kernel in the route dictionary
+    # for the route a234:a234::1/128 and its next-hops.
+    ExpDictIpv6KernelRoute1 = dict()
+    ExpDictIpv6KernelRoute1['Route'] = 'a234:a234::1' + '/' + '128'
+    ExpDictIpv6KernelRoute1['NumberNexthops'] = '4'
+    ExpDictIpv6KernelRoute1['1'] = dict()
+    ExpDictIpv6KernelRoute1['1']['Distance'] = ''
+    ExpDictIpv6KernelRoute1['1']['Metric'] = ''
+    ExpDictIpv6KernelRoute1['1']['RouteType'] = 'zebra'
+    ExpDictIpv6KernelRoute1['2'] = dict()
+    ExpDictIpv6KernelRoute1['2']['Distance'] = ''
+    ExpDictIpv6KernelRoute1['2']['Metric'] = ''
+    ExpDictIpv6KernelRoute1['2']['RouteType'] = 'zebra'
+    ExpDictIpv6KernelRoute1['3'] = dict()
+    ExpDictIpv6KernelRoute1['3']['Distance'] = ''
+    ExpDictIpv6KernelRoute1['3']['Metric'] = ''
+    ExpDictIpv6KernelRoute1['3']['RouteType'] = 'zebra'
+    ExpDictIpv6KernelRoute1['4'] = dict()
+    ExpDictIpv6KernelRoute1['4']['Distance'] = ''
+    ExpDictIpv6KernelRoute1['4']['Metric'] = ''
+    ExpDictIpv6KernelRoute1['4']['RouteType'] = 'zebra'
+
+    # Populate the expected RIB ("show rib") route dictionary for the
+    # route 2234:2234::1/128 and its next-hops.
+    ExpRibDictIpv6StaticRoute2 = dict()
+    ExpRibDictIpv6StaticRoute2['Route'] = '2234:2234::1' + '/' + '128'
+    ExpRibDictIpv6StaticRoute2['NumberNexthops'] = '1'
+    ExpRibDictIpv6StaticRoute2['4'] = dict()
+    ExpRibDictIpv6StaticRoute2['4']['Distance'] = '1'
+    ExpRibDictIpv6StaticRoute2['4']['Metric'] = '0'
+    ExpRibDictIpv6StaticRoute2['4']['RouteType'] = 'static'
+
+    # Populate the expected FIB ("show ipv6 route") route dictionary for the
+    # route 2234:2234::1/128 and its next-hops.
+    ExpRouteDictIpv6StaticRoute2 = ExpRibDictIpv6StaticRoute2
+
+    # Populate the version of the route in kernel in the route dictionary
+    # for the route 2234:2234::1/128 and its next-hops.
+    ExpDictIpv6KernelRoute2 = dict()
+    ExpDictIpv6KernelRoute2['Route'] = '2234:2234::1' + '/' + '128'
+    ExpDictIpv6KernelRoute2['NumberNexthops'] = '1'
+    ExpDictIpv6KernelRoute2['4'] = dict()
+    ExpDictIpv6KernelRoute2['4']['Distance'] = ''
+    ExpDictIpv6KernelRoute2['4']['Metric'] = ''
+    ExpDictIpv6KernelRoute2['4']['RouteType'] = 'zebra'
+
+    # Populate the expected RIB ("show rib") route dictionary for the
+    # route 3234:3234::1/128 and its next-hops.
+    ExpRibDictIpv6StaticRoute3 = dict()
+    ExpRibDictIpv6StaticRoute3['Route'] = '3234:3234::1' + '/' + '128'
+    ExpRibDictIpv6StaticRoute3['NumberNexthops'] = '1'
+    ExpRibDictIpv6StaticRoute3['2'] = dict()
+    ExpRibDictIpv6StaticRoute3['2']['Distance'] = '1'
+    ExpRibDictIpv6StaticRoute3['2']['Metric'] = '0'
+    ExpRibDictIpv6StaticRoute3['2']['RouteType'] = 'static'
+
+    # Populate the expected FIB ("show ipv6 route") route dictionary for the
+    # route 3234:3234::1/128 and its next-hops.
+    ExpRouteDictIpv6StaticRoute3 = ExpRibDictIpv6StaticRoute3
+
+    # Populate the version of the route in kernel in the route dictionary
+    # for the route 3234:3234::1/128 and its next-hops.
+    ExpDictIpv6KernelRoute3 = dict()
+    ExpDictIpv6KernelRoute3['Route'] = '3234:3234::1' + '/' + '128'
+    ExpDictIpv6KernelRoute3['NumberNexthops'] = '1'
+    ExpDictIpv6KernelRoute3['2'] = dict()
+    ExpDictIpv6KernelRoute3['2']['Distance'] = ''
+    ExpDictIpv6KernelRoute3['2']['Metric'] = ''
+    ExpDictIpv6KernelRoute3['2']['RouteType'] = 'zebra'
+
+    time.sleep(5)
+
+    LogOutput('info', "\n\n\n######### Verifying the IPv4 static routes on "
+              "switch 1#########")
+
+    # Verify route 123.0.0.1/32 and next-hops in RIB, FIB and verify the
+    # presence of all next-hops in running-config
+    verify_route_in_show_route(switch1, True, ExpRouteDictIpv4StaticRoute1,
+                               'static')
+    verify_route_in_show_rib(switch1, ExpRibDictIpv4StaticRoute1, 'static')
+    verify_route_in_show_kernel_route(switch1, True,
+                                      ExpDictIpv4KernelRoute1, 'zebra')
+
+    # Verify route 143.0.0.1/32 and next-hops in RIB, FIB and verify the
+    # presence of all next-hops in running-config
+    verify_route_in_show_route(switch1, True, ExpRouteDictIpv4StaticRoute2,
+                               'static')
+    verify_route_in_show_rib(switch1, ExpRibDictIpv4StaticRoute2, 'static')
+    verify_route_in_show_kernel_route(switch1, True,
+                                      ExpDictIpv4KernelRoute2, 'zebra')
+
+    # Verify route 163.0.0.1/32 and next-hops in RIB, FIB and verify the
+    # presence of all next-hops in running-config
+    verify_route_in_show_route(switch1, True, ExpRouteDictIpv4StaticRoute3,
+                               'static')
+    verify_route_in_show_rib(switch1, ExpRibDictIpv4StaticRoute3, 'static')
+    verify_route_in_show_kernel_route(switch1, True,
+                                      ExpDictIpv4KernelRoute3, 'zebra')
+
+    LogOutput('info', "\n\n\n######### Verifying the IPv6 static routes on "
+              "switch 1#########")
+
+    # Verify route a234:a234::1/128 and next-hops in RIB, FIB and verify the
+    # presence of all next-hops in running-config
+    verify_route_in_show_route(switch1, False, ExpRouteDictIpv6StaticRoute1,
+                               'static')
+    verify_route_in_show_rib(switch1, ExpRibDictIpv6StaticRoute1, 'static')
+    verify_route_in_show_kernel_route(switch1, False,
+                                      ExpDictIpv6KernelRoute1, 'zebra')
+
+    # Verify route 2234:2234::1/128 and next-hops in RIB, FIB and verify the
+    # presence of all next-hops in running-config
+    verify_route_in_show_route(switch1, False, ExpRouteDictIpv6StaticRoute2,
+                               'static')
+    verify_route_in_show_rib(switch1, ExpRibDictIpv6StaticRoute2, 'static')
+    verify_route_in_show_kernel_route(switch1, False,
+                                      ExpDictIpv6KernelRoute2, 'zebra')
+
+    # Verify route 3234:3234::1/128 and next-hops in RIB, FIB and verify the
+    # presence of all next-hops in running-config
+    verify_route_in_show_route(switch1, False, ExpRouteDictIpv6StaticRoute3,
+                               'static')
+    verify_route_in_show_rib(switch1, ExpRibDictIpv6StaticRoute3, 'static')
+    verify_route_in_show_kernel_route(switch1, False,
+                                      ExpDictIpv6KernelRoute3, 'zebra')
+
+    LogOutput('info', "\n\n\n######### Verification of "
+              "IPv4 and IPv6 static routes on switch 1 passed#########")
+
+
 def all_configuration_deleted_before_zebra_restart(**kwargs):
 
     switch1 = kwargs.get('switch1', None)
@@ -2724,6 +3356,16 @@ class Test_zebra_restartability:
         dut01Obj = self.topoObj.deviceObjGet(device="dut01")
         dut02Obj = self.topoObj.deviceObjGet(device="dut02")
         interface_up_before_zebra_restart(switch1=dut01Obj, switch2=dut02Obj)
+
+    def test_interface_addr_change_before_zebra_restart(self):
+        dut01Obj = self.topoObj.deviceObjGet(device="dut01")
+        dut02Obj = self.topoObj.deviceObjGet(device="dut02")
+        interface_addr_change_before_zebra_restart(switch1=dut01Obj, switch2=dut02Obj)
+
+    def test_interface_addr_restore_before_zebra_restart(self):
+        dut01Obj = self.topoObj.deviceObjGet(device="dut01")
+        dut02Obj = self.topoObj.deviceObjGet(device="dut02")
+        interface_addr_restore_before_zebra_restart(switch1=dut01Obj, switch2=dut02Obj)
 
     def test_all_configuration_deleted_before_zebra_restart(self):
         dut01Obj = self.topoObj.deviceObjGet(device="dut01")

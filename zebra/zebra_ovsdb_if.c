@@ -81,6 +81,7 @@ static int system_configured = false;
 static struct ovsdb_idl_txn *zebra_txn = NULL;
 bool zebra_txn_updates = false;
 
+struct prefix router_id_prefix;
 /*
  * Keep track if we are executing the reconfigure loop for
  * the first time.
@@ -2830,6 +2831,10 @@ ovsdb_init (const char *db_path)
   ovsdb_idl_add_column(idl, &ovsrec_vrf_col_name);
   ovsdb_idl_add_column(idl, &ovsrec_vrf_col_ports);
 
+  /* Register for Active Router-ID column in the VRF table */
+  ovsdb_idl_add_column(idl, &ovsrec_vrf_col_active_router_id);
+  ovsdb_idl_omit_alert(idl, &ovsrec_vrf_col_active_router_id);
+
   /*
    * Intialize the local L3 port hash.
    */
@@ -2996,7 +3001,7 @@ zebra_ovs_clear_fds (void)
 static inline void
 zebra_chk_for_system_configured (void)
 {
-  const struct ovsrec_system *ovs_vsw = NULL;
+  static const struct ovsrec_system *ovs_vsw = NULL;
 
   if (system_configured)
     /* Nothing to do if we're already configured. */
@@ -4035,6 +4040,8 @@ zebra_handle_port_add_delete_changes (void)
   list_free(zebra_route_del_list);
 
   zebra_cleanup_if_port_updated_or_changed();
+
+  zebra_ovsdb_update_active_router_id();
 }
 
 /* Check if any changes are there to the idl and update
@@ -4697,6 +4704,49 @@ zebra_update_selected_route_to_db (struct route_node *rn, struct rib *route,
         zebra_ovs_update_selected_route(ovs_route, &selected);
     }
   return 0;
+}
+
+/*
+ * Update System table router_id in OVSDB
+ */
+void
+zebra_ovsdb_update_active_router_id(void)
+{
+  char prefix_str[256];
+  const struct ovsrec_vrf *ovs_vrf = NULL;
+  char *router_id = NULL;
+
+  memset(prefix_str, 0, sizeof(prefix_str));
+  prefix2str(&router_id_prefix, prefix_str, sizeof(prefix_str));
+
+  router_id = strtok(prefix_str, "/");
+  if (router_id != NULL && router_id_prefix.prefixlen > 0)
+  {
+      /* Update router id for each VRF */
+      OVSREC_VRF_FOR_EACH(ovs_vrf, idl) {
+          /*
+           * TODO: For each VRF check for user configured router-id,
+           *       if it is already present then do not use ZEBRA identified router-id,
+           *       instead update the user configured router-id as active_router_id.
+           *       Routing deamons will pick the active_router_id and use it as
+           *       the protocol specific router-id.
+           *       Below is the sample code which need to be added once user configurable
+           *       router-id support is available.
+           *
+           *       if (!ovs_vrf->router_id &&
+           *           strcmp(ovs_vrf->router_id, ovs_vrf->active_router_id) != 0){
+           *          ovsrec_vrf_set_active_router_id(ovs_vrf, ovs_vrf->router_id);
+           *       }
+           */
+          /* Set the active router id if not set already */
+          if(ovs_vrf->active_router_id == NULL ||
+                  strcmp(ovs_vrf->active_router_id, router_id) != 0){
+              ovsrec_vrf_set_active_router_id(ovs_vrf, router_id);
+              VLOG_DBG("Zebra identified active_router_id = %s", router_id);
+              zebra_txn_updates = true;
+          }
+      }
+  }
 }
 
 /*

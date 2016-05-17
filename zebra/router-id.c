@@ -49,6 +49,7 @@ static struct list _rid_lo_sorted_list;
 static struct list *rid_all_sorted_list = &_rid_all_sorted_list;
 static struct list *rid_lo_sorted_list = &_rid_lo_sorted_list;
 static struct prefix rid_user_assigned;
+extern struct prefix router_id_prefix;
 
 /* master zebra server structure */
 extern struct zebra_t zebrad;
@@ -116,6 +117,7 @@ router_id_set (struct prefix *p)
 
   router_id_get (&p2);
 
+  router_id_prefix = p2;
   for (ALL_LIST_ELEMENTS_RO (zebrad.client_list, node, client))
     zsend_router_id_update (client, &p2);
 }
@@ -148,6 +150,7 @@ router_id_add_address (struct connected *ifc)
   if (prefix_same (&before, &after))
     return;
 
+  router_id_prefix = after;
   for (ALL_LIST_ELEMENTS_RO (zebrad.client_list, node, client))
     zsend_router_id_update (client, &after);
 }
@@ -181,6 +184,7 @@ router_id_del_address (struct connected *ifc)
   if (prefix_same (&before, &after))
     return;
 
+  router_id_prefix = after;
   for (ALL_LIST_ELEMENTS_RO (zebrad.client_list, node, client))
     zsend_router_id_update (client, &after);
 }

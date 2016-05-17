@@ -2770,6 +2770,8 @@ ovsdb_init (const char *db_path)
 
   /* Cache OpenVSwitch table */
   ovsdb_idl_add_table(idl, &ovsrec_table_system);
+  ovsdb_idl_add_column(idl, &ovsrec_system_col_router_id);
+  ovsdb_idl_omit_alert(idl, &ovsrec_system_col_router_id);
 
   ovsdb_idl_add_column(idl, &ovsrec_system_col_cur_cfg);
   ovsdb_idl_add_column(idl, &ovsrec_system_col_hostname);
@@ -2990,13 +2992,13 @@ zebra_ovs_clear_fds (void)
   loop->timeout_where = NULL;
 }
 
+static const struct ovsrec_system *ovs_vsw = NULL;
 /* Check if the system is already configured. The daemon should
  * not process any callbacks unless the system is configured.
  */
 static inline void
 zebra_chk_for_system_configured (void)
 {
-  const struct ovsrec_system *ovs_vsw = NULL;
 
   if (system_configured)
     /* Nothing to do if we're already configured. */
@@ -3925,6 +3927,8 @@ zebra_handle_interface_admin_state_changes (void)
                * state.
                */
               zebra_update_port_active_state(interface_row);
+
+              zebra_update_system_table_router_id(interface_row);
             }
         }
     }
@@ -4688,6 +4692,82 @@ zebra_update_selected_route_to_db (struct route_node *rn, struct rib *route,
         zebra_ovs_update_selected_route(ovs_route, &selected);
     }
   return 0;
+}
+
+char *
+get_ip_address_from_interface(const char *if_name)
+{
+  const struct ovsrec_port *port_row = NULL;
+  const struct ovsrec_port *port_iterator = NULL;
+  char *ip_address = NULL;
+
+  OVSREC_PORT_FOR_EACH(port_iterator, idl)
+  {
+     if (strcmp(port_iterator->name, if_name) == 0) {
+        port_row = port_iterator;
+        break;
+     }
+  }
+
+  if (port_row != NULL)
+  {
+     if (port_row->ip4_address)
+         ip_address = port_row->ip4_address;
+
+     else if (port_row->ip6_address)
+         ip_address = port_row->ip6_address;
+  }
+
+  return ip_address;
+
+}
+
+
+/*
+ * Update System table router_id in OVSDB
+ */
+void
+zebra_update_system_table_router_id(const struct ovsrec_interface *interface_row)
+{
+  char buf[128];
+  const char *mgmt_up_str = NULL;
+  struct smap smap_router_id;
+  const struct ovsrec_system *system = NULL;
+  char *router_id = NULL;
+  char *ip_address = NULL;
+
+  system = ovs_vsw;
+  if (system == NULL) {
+      zlog_err("Unable to fetch System row");
+      return;
+  }
+
+  if (interface_row->admin_state &&
+      (strcmp(interface_row->admin_state,
+         OVSREC_INTERFACE_ADMIN_STATE_UP) == 0)){
+      ip_address = get_ip_address_from_interface(interface_row->name);
+
+      if (!ip_address){
+        zlog_err("Could not find ip address for this interface");
+        return;
+      }
+      router_id = strtok(ip_address, "/");
+
+      if (smap_count(&(system->router_id)) < 1){
+          if (NULL != smap_get(&(system->router_id), "router_id")){
+              smap_clone(&smap_router_id, &(system->router_id));
+              smap_replace(&smap_router_id, "router_id", router_id);
+          }
+          else {
+              smap_init(&smap_router_id);
+              smap_add(&smap_router_id, "router_id", router_id);
+          }
+          ovsrec_system_set_router_id(system, &smap_router_id);
+          zebra_txn_updates = true;
+          smap_destroy(&smap_router_id);
+      }
+  }
+  return;
 }
 
 /*

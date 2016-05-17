@@ -52,7 +52,9 @@ void bgp_ovsdb_exit(void);
 /* Initialize and integrate the ovs poll loop with the daemon */
 void bgp_ovsdb_init_poll_loop (struct bgp_master *bm);
 boolean  get_global_ecmp_status(void);
+#ifndef ENABLE_OVSDB
 extern void update_bgp_router_id_in_ovsdb (int64_t asn, char *router_id);
+#endif
 extern void bgp_daemon_ovsdb_neighbor_update (struct peer *peer, bool update_stats_too);
 
 #endif /* BGP_OVSDB_IF_H */

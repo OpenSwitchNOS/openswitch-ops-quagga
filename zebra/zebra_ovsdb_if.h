@@ -96,6 +96,7 @@ void zebra_dump_internal_rib_entry (struct prefix *p, struct rib* rib);
 void zebra_dump_internal_route_node (struct route_node *rn);
 void zebra_dump_internal_route_table (struct route_table *table);
 void cleanup_kernel_routes_after_restart();
+void zebra_update_system_table_router_id(const struct ovsrec_interface *interface_row);
 extern int zebra_create_txn (void);
 extern int zebra_finish_txn (void);
 

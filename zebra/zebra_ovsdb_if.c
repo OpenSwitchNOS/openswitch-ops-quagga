@@ -2851,11 +2851,16 @@ ovsdb_init (const char *db_path)
   ovsdb_idl_add_table(idl, &ovsrec_table_interface);
   ovsdb_idl_add_column(idl, &ovsrec_interface_col_name);
   ovsdb_idl_add_column(idl, &ovsrec_interface_col_admin_state);
+  ovsdb_idl_add_column(idl, &ovsrec_interface_col_type);
 
   /* Register for the vrf table to find the if the port is L2/L# */
   ovsdb_idl_add_table(idl, &ovsrec_table_vrf);
   ovsdb_idl_add_column(idl, &ovsrec_vrf_col_name);
   ovsdb_idl_add_column(idl, &ovsrec_vrf_col_ports);
+
+  /* Register for Active Router-ID column in the VRF table */
+  ovsdb_idl_add_column(idl, &ovsrec_vrf_col_active_router_id);
+  ovsdb_idl_omit_alert(idl, &ovsrec_vrf_col_active_router_id);
 
   /*
    * Intialize the local L3 port hash.
@@ -3975,6 +3980,219 @@ zebra_handle_interface_admin_state_changes (void)
 }
 
 /*
+ * Function to identify IPv4 router-id from the available port list.
+ * It first checks if the current value of active_router_id is present in the
+ * L3 port cache, if its present then it does not generate new router-id.
+ * If new router-id to be generated then it first checks for any available
+ * loopback interface and use that as router-id. If no loopback interface
+ * available then it picks the first available L3 port IP4 address as
+ * active router-id.
+ */
+char *
+zebra_ovsdb_get_router_id(char *active_router_id)
+{
+  struct shash_node *node, *next;
+  struct zebra_l3_port* l3_port = NULL;
+  char *int_ip_addr = NULL;
+  char *router_id = NULL;
+  bool found_loopback = false;
+  int interface_index;
+  const struct ovsrec_port* ovsrec_port = NULL;
+  const struct ovsrec_interface* interface = NULL;
+
+  if (!shash_count(&zebra_cached_l3_ports))
+    {
+      VLOG_ERR("The L3 port hash table is empty. Can not get the router id");
+      return NULL;
+    }
+
+  /* Check if active_router_id present in current available L3 port cache */
+  SHASH_FOR_EACH_SAFE (node, next, &zebra_cached_l3_ports)
+    {
+      if (!(node->data))
+        {
+          VLOG_DBG("No node data found\n");
+          continue;
+        }
+
+      l3_port = (struct zebra_l3_port*)node->data;
+
+      /* Return if active_router_id already present in L3 port cache*/
+      if (active_router_id != NULL &&
+           l3_port->ip4_address != NULL &&
+           strcmp (active_router_id, l3_port->ip4_address) == 0)
+          return NULL;
+    }
+
+  /* Find Loopback interface if present */
+  SHASH_FOR_EACH_SAFE (node, next, &zebra_cached_l3_ports)
+    {
+      if (!(node->data))
+        {
+          VLOG_DBG("No node data found\n");
+          continue;
+        }
+
+      l3_port = (struct zebra_l3_port*)node->data;
+
+      if (l3_port->ip4_address != NULL)
+        {
+          /* Get Port from UUID */
+          ovsrec_port = ovsrec_port_get_for_uuid(idl,
+                            (const struct uuid *)&(l3_port->ovsrec_port_uuid));
+          if (!ovsrec_port)
+            {
+              VLOG_ERR("The port pointer is NULL");
+              continue;
+            }
+
+          if (ovsrec_port->n_interfaces)
+            {
+              /* Get the first available Loopback interface */
+              for (interface_index = 0;
+                   interface_index < ovsrec_port->n_interfaces;
+                   ++interface_index)
+                {
+                  interface = ovsrec_port->interfaces[interface_index];
+
+                  if (!interface)
+                    {
+                      VLOG_DBG("The interface pointer in port is NULL");
+                      continue;
+                    }
+
+                  if (interface->type &&
+                      !strcmp(interface->type, OVSREC_INTERFACE_TYPE_LOOPBACK))
+                    {
+                      VLOG_DBG("Found a loopback interface %s ",
+                                interface->name);
+                      found_loopback = true;
+                      break;    // break from interfaces loop
+                    }
+                }
+              if (found_loopback == true)
+                {
+                  break;   // break from ports loop
+                }
+            }
+        }
+    }
+
+  /* If loopback interface is not available then get the any first available L3 port */
+  if (!found_loopback)
+    {
+      SHASH_FOR_EACH_SAFE (node, next, &zebra_cached_l3_ports)
+        {
+          if (!(node->data))
+            {
+              VLOG_DBG("No node data found\n");
+              continue;
+            }
+
+          l3_port = (struct zebra_l3_port*)node->data;
+
+          if (l3_port->ip4_address != NULL ||
+               shash_count(&(l3_port->ip4_address_secondary)))
+              break;
+        }
+    }
+
+  /* Get the IPv4 address or secondary IPv4 address from the selected port */
+  if (l3_port != NULL)
+    {
+      VLOG_DBG("L3 port selected for router ID is %s ipaddr = %s\n",
+                        l3_port->port_name, l3_port->ip4_address);
+      if(l3_port->ip4_address != NULL)
+          int_ip_addr = strdup(l3_port->ip4_address);
+      else
+        {
+          SHASH_FOR_EACH_SAFE (node, next,
+                                &(l3_port->ip4_address_secondary)){
+              if (!(node->data))
+                {
+                  VLOG_DBG("No node data found\n");
+                  continue;
+                }
+              int_ip_addr = strdup((char*)node->data);
+              break;
+            }
+        }
+    }
+
+  /* Form the new active router-id */
+  if (int_ip_addr != NULL)
+    {
+      router_id = strtok(int_ip_addr, "/");
+    }
+
+  VLOG_DBG("Identified router ID is %s\n", router_id);
+  return router_id;
+}
+
+/*
+ * Funtion to update the VRF table active_router_id in OVSDB.
+ * If there are any updates for the port list cache, then this function
+ * identifies router-id based on the current list of L3 portsto the
+ * VRF table's active_router_id column based on current list of L3 ports.
+ */
+static void
+zebra_ovsdb_update_active_router_id(void)
+{
+  const struct ovsrec_vrf *ovs_vrf = NULL;
+  char *router_id = NULL;
+
+  if (!zebra_get_if_port_updated_or_changed())
+    {
+      VLOG_DBG("No L3 port changes, no need to update active router ID");
+      return;
+    }
+
+  /* Update active router id for the Default VRF */
+  OVSREC_VRF_FOR_EACH(ovs_vrf, idl)
+    {
+      if (!strcmp(ovs_vrf->name, DEFAULT_VRF_NAME))
+        {
+          /*
+           *  TODO Currently we are only suporting default VRF,
+           *       we need to expand this logic for all VRFs
+           */
+
+          router_id = zebra_ovsdb_get_router_id(ovs_vrf->active_router_id);
+
+          VLOG_DBG("For VRF %s Zebra identified active_router_id = %s",
+                    ovs_vrf->name, router_id);
+          if (router_id != NULL)
+            {
+              /*
+               * TODO: For each VRF check for user configured router-id,
+               *       if it is already present then do not use ZEBRA identified router-id,
+               *       instead update the user configured router-id as active_router_id.
+               *       Routing deamons will pick the active_router_id and use it as
+               *       the protocol specific router-id.
+               *       Below is the sample code which need to be added once user configurable
+               *       router-id support is available.
+               *
+               *       if (!ovs_vrf->router_id &&
+               *           strcmp(ovs_vrf->router_id, ovs_vrf->active_router_id) != 0){
+               *          ovsrec_vrf_set_active_router_id(ovs_vrf, ovs_vrf->router_id);
+               *       }
+               */
+              /*
+               * Create a transaction for an active router id update to OVSDB from
+               * the zebra main thread.
+               */
+              zebra_create_txn();
+              /* Set the active router id */
+              ovsrec_vrf_set_active_router_id(ovs_vrf, router_id);
+              zebra_txn_updates = true;
+              free(router_id);
+              zebra_finish_txn(true);
+            }
+        }
+    }
+}
+
+/*
  * This function handles the port add/delete events. THis function
  * eventually deletes the next-hops or routes if the resolving
  * interface is deleted or chnaged to L2.
@@ -4045,6 +4263,8 @@ zebra_handle_port_add_delete_changes (void)
                      &zebra_updated_or_changed_l3_ports, false);
     }
 
+  /* Update Active Router-ID */
+  zebra_ovsdb_update_active_router_id();
   /*
    * Walk the zebra route table and find which nexthops need to be
    * deleted from the kernel and OVSDB.
@@ -4062,6 +4282,7 @@ zebra_handle_port_add_delete_changes (void)
   list_free(zebra_route_del_list);
 
   zebra_cleanup_if_port_updated_or_changed();
+
 }
 
 /* Check if any changes are there to the idl and update

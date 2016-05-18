@@ -20,6 +20,7 @@
 from opsvsi.docker import *
 from opsvsi.opsvsitest import *
 from opsvsiutils.systemutil import *
+import pytest
 
 
 class myTopo(Topo):
@@ -263,6 +264,7 @@ class ecmpStaticRouteTest(OpsVsiTest):
         info('\n########## IPv4 ECMP route delete test completed ##########\n')
 
 
+@pytest.mark.skipif(True, reason="Skipping old tests")
 class Test_zebra_ecmp_static_routes_ft:
 
     def setup_class(cls):

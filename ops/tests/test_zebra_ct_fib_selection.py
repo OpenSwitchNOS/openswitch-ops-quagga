@@ -20,6 +20,7 @@
 from opsvsi.docker import *
 from opsvsi.opsvsitest import *
 from opsvsiutils.systemutil import *
+import pytest
 
 
 class myTopo(Topo):
@@ -145,6 +146,7 @@ class fibSelectionCTTest(OpsVsiTest):
         info('########## Test Passed ##########\n')
 
 
+@pytest.mark.skipif(True, reason="Skipping old tests")
 class Test_zebra_fib_selection:
 
     def setup_class(cls):

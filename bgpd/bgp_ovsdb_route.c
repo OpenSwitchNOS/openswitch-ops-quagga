@@ -844,14 +844,12 @@ bgp_ovsdb_announce_rib_entry(struct prefix *p,
                 return 0;
             }
         }
-        else {
-            rib = ovsrec_route_get_for_uuid(idl, &hmap_entry->uuid);
-            break;
-        }
     }
 
     START_DB_TXN(txn, "Failed to create route table txn",
                  TXN_BGP_UPD_ANNOUNCE, p, info, bgp->as, safi);
+
+    rib = bgp_ovsdb_lookup_rib_entry(p);
 
     if (!rib) {
         VLOG_DBG("Inserting route %s\n", pr);
@@ -884,9 +882,15 @@ bgp_ovsdb_announce_rib_entry(struct prefix *p,
     {
         VLOG_DBG("Found route %s, updating ...\n", pr);
         /* Update global hash map entry with update operation */
-        hmap_entry->needs_review = 0;
-        hmap_entry->state = IN_FLIGHT;
-        hmap_entry->op_type = UPDATE;
+
+        HMAP_FOR_EACH_IN_BUCKET(hmap_entry, node, lookup_hash, &global_hmap) {
+            if(!strcmp(hmap_entry->prefix, pr) && (hmap_entry->table_type == ROUTE)){
+                hmap_entry->needs_review = 0;
+                hmap_entry->state = IN_FLIGHT;
+                hmap_entry->op_type = UPDATE;
+                break;
+            }
+        }
     }
     /* Nexthops */
     struct in_addr *nexthop = &info->attr->nexthop;

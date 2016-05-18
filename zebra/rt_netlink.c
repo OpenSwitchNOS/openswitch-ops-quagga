@@ -97,7 +97,7 @@ set_ifindex(struct interface *ifp, unsigned int ifi_index)
 	    	       ifi_index, oifp->name, ifp->name);
 	  if (if_is_up(oifp))
 	    zlog_err("interface rename detected on up interface: index %d "
-		     "was renamed from %s to %s, results are uncertain!", 
+		     "was renamed from %s to %s, results are uncertain!",
 	    	     ifi_index, oifp->name, ifp->name);
 	  if_delete_update(oifp);
         }
@@ -228,7 +228,6 @@ netlink_request (int family, int type, struct nlsock *nl)
     struct rtgenmsg g;
   } req;
 
-
   /* Check netlink socket. */
   if (nl->sock < 0)
     {
@@ -247,7 +246,7 @@ netlink_request (int family, int type, struct nlsock *nl)
   req.nlh.nlmsg_seq = ++nl->seq;
   req.g.rtgen_family = family;
 
-  /* linux appears to check capabilities on every message 
+  /* linux appears to check capabilities on every message
    * have to raise caps for every message sent
    */
   if (zserv_privs.change (ZPRIVS_RAISE))
@@ -338,7 +337,7 @@ netlink_parse_info (int (*filter) (struct sockaddr_nl *, struct nlmsghdr *),
 #endif
           return -1;
         }
-      
+
       for (h = (struct nlmsghdr *) buf; NLMSG_OK (h, (unsigned int) status);
            h = NLMSG_NEXT (h, status))
         {
@@ -517,7 +516,7 @@ netlink_interface (struct sockaddr_nl *snl, struct nlmsghdr *h)
   /* Looking up interface name. */
   memset (tb, 0, sizeof tb);
   netlink_parse_rtattr (tb, IFLA_MAX, IFLA_RTA (ifi), len);
-  
+
 #ifdef IFLA_WIRELESS
   /* check for wireless messages to ignore */
   if ((tb[IFLA_WIRELESS] != NULL) && (ifi->ifi_change == 0))
@@ -607,7 +606,7 @@ netlink_interface_addr (struct sockaddr_nl *snl, struct nlmsghdr *h)
 			       buf, BUFSIZ), ifa->ifa_prefixlen);
       if (tb[IFA_LABEL] && strcmp (ifp->name, RTA_DATA (tb[IFA_LABEL])))
         zlog_debug ("  IFA_LABEL     %s", (char *)RTA_DATA (tb[IFA_LABEL]));
-      
+
       if (tb[IFA_CACHEINFO])
         {
           struct ifa_cacheinfo *ci = RTA_DATA (tb[IFA_CACHEINFO]);
@@ -615,13 +614,13 @@ netlink_interface_addr (struct sockaddr_nl *snl, struct nlmsghdr *h)
                       ci->ifa_prefered, ci->ifa_valid);
         }
     }
-  
+
   /* logic copied from iproute2/ip/ipaddress.c:print_addrinfo() */
   if (tb[IFA_LOCAL] == NULL)
     tb[IFA_LOCAL] = tb[IFA_ADDRESS];
   if (tb[IFA_ADDRESS] == NULL)
     tb[IFA_ADDRESS] = tb[IFA_LOCAL];
-  
+
   /* local interface address */
   addr = (tb[IFA_LOCAL] ? RTA_DATA(tb[IFA_LOCAL]) : NULL);
 
@@ -682,6 +681,41 @@ netlink_interface_addr (struct sockaddr_nl *snl, struct nlmsghdr *h)
 
   return 0;
 }
+
+#ifdef ENABLE_OVSDB
+/*
+ * Add RIB to head of the route node. This rib node should be only
+ * present in the shadow_table.
+ */
+static void
+add_rib_node_to_rn (struct route_node *rn, struct rib *rib)
+{
+  struct rib *head;
+  rib_dest_t *dest;
+
+  assert (rib && rn);
+
+  zlog(NULL, LOG_DEBUG, "rn %p, rib %p", rn, rib);
+
+  dest = rib_dest_from_rnode (rn);
+  if (!dest)
+    {
+      dest = XCALLOC (MTYPE_RIB_DEST, sizeof (rib_dest_t));
+      route_lock_node (rn); /* rn route table reference */
+      rn->info = dest;
+      dest->rnode = rn;
+    }
+
+  head = dest->routes;
+  if (head)
+    {
+      head->prev = rib;
+    }
+
+  rib->next = head;
+  dest->routes = rib;
+}
+#endif
 
 /* Looking up routing table by netlink interface. */
 static int
@@ -843,6 +877,328 @@ netlink_routing_table (struct sockaddr_nl *snl, struct nlmsghdr *h)
 
   return 0;
 }
+
+#ifdef ENABLE_OVSDB
+/* Looking up routing table by netlink interface. In the current netlink
+   based recovery is not vrf aware. */
+static int
+ops_zebra_netlink_routing_table (struct sockaddr_nl *snl,
+                                struct nlmsghdr *h)
+{
+  int len;
+  struct rtmsg *rtm;
+  struct rtattr *tb[RTA_MAX + 1];
+  u_char flags = 0;
+  char prefix_str[256];
+  struct route_table *shadow_table;
+  struct route_node *rn;
+  struct nexthop* nexthop;
+
+  char anyaddr[16] = { 0 };
+
+  int index;
+  int table;
+  int metric;
+  int priority;
+
+  void *dest;
+  void *gate;
+  void *src;
+
+  rtm = NLMSG_DATA (h);
+
+  if (h->nlmsg_type != RTM_NEWROUTE)
+    return 0;
+
+  table = rtm->rtm_table;
+
+  len = h->nlmsg_len - NLMSG_LENGTH (sizeof (struct rtmsg));
+  if (len < 0)
+    return -1;
+
+  memset (tb, 0, sizeof tb);
+  netlink_parse_rtattr (tb, RTA_MAX, RTM_RTA (rtm), len);
+
+  if (rtm->rtm_flags & RTM_F_CLONED)
+    return 0;
+
+  if (rtm->rtm_protocol == RTPROT_REDIRECT)
+    return 0;
+
+  if (rtm->rtm_protocol == RTPROT_KERNEL)
+    return 0;
+
+  if (rtm->rtm_src_len != 0)
+    return 0;
+
+  /* Route which inserted by Zebra. */
+  if (rtm->rtm_protocol == RTPROT_ZEBRA)
+    flags |= ZEBRA_FLAG_SELFROUTE;
+  else
+    return 0;
+
+  index = 0;
+  metric = 0;
+  dest = NULL;
+  gate = NULL;
+  src = NULL;
+
+  if (tb[RTA_OIF])
+    index = *(int *) RTA_DATA (tb[RTA_OIF]);
+
+  if (tb[RTA_DST])
+    dest = RTA_DATA (tb[RTA_DST]);
+  else
+    dest = anyaddr;
+
+  if (tb[RTA_PREFSRC])
+    src = RTA_DATA (tb[RTA_PREFSRC]);
+
+  if (tb[RTA_GATEWAY])
+    gate = RTA_DATA (tb[RTA_GATEWAY]);
+
+  if (tb[RTA_PRIORITY])
+    priority = *(int *) RTA_DATA(tb[RTA_PRIORITY]);
+
+  if (tb[RTA_METRICS])
+    metric = *(int *) RTA_DATA(tb[RTA_METRICS]);
+
+  if (rtm->rtm_family == AF_INET)
+    {
+      struct prefix_ipv4 p;
+      p.family = AF_INET;
+      memcpy(&p.prefix, dest, 4);
+      p.prefixlen = rtm->rtm_dst_len;
+
+      zlog(NULL, LOG_DEBUG, "Read prefix is %s/%u from netlink after "
+           "restart", inet_ntoa(p.prefix), p.prefixlen);
+
+      struct rib *rib;
+      struct rtnexthop *rtnh =
+          (struct rtnexthop *) RTA_DATA (tb[RTA_MULTIPATH]);
+
+      rib = XCALLOC (MTYPE_RIB, sizeof (struct rib));
+      rib->type = ZEBRA_ROUTE_KERNEL;
+      rib->distance = 0;
+      rib->flags = flags;
+      rib->metric = metric;
+      rib->table = table;
+      rib->nexthop_num = 0;
+      rib->uptime = time (NULL);
+      rib->ovsdb_route_row_uuid_ptr = NULL;
+
+      if (tb[RTA_MULTIPATH])
+        {
+          len = RTA_PAYLOAD (tb[RTA_MULTIPATH]);
+          for (;;)
+           {
+             if (len < (int) sizeof (*rtnh) || rtnh->rtnh_len > len)
+               break;
+
+             index = rtnh->rtnh_ifindex;
+             zlog(NULL, LOG_DEBUG, "nexthop number = %u, ifindex = %u",
+                  rib->nexthop_num, index);
+
+             gate = 0;
+             if (rtnh->rtnh_len > sizeof (*rtnh))
+               {
+                 memset (tb, 0, sizeof (tb));
+                 netlink_parse_rtattr(tb, RTA_MAX, RTNH_DATA (rtnh),
+                                      rtnh->rtnh_len - sizeof (*rtnh));
+                 if (tb[RTA_GATEWAY])
+                   gate = RTA_DATA (tb[RTA_GATEWAY]);
+               }
+
+             if (gate)
+               {
+                 nexthop_ipv4_add (rib, gate, src);
+                 zlog(NULL, LOG_DEBUG, "Added an IPv4 address");
+               }
+             else
+               {
+                 char* ifname = ifindex2ifname(index);
+                 zlog(NULL, LOG_DEBUG, "Added an IPv4 ifindex and ifname %s",
+                      ifname);
+
+                 if (strcmp(ifname, "unknown") != 0)
+                   nexthop_ifname_add(rib, ifname);
+                 else
+                   zlog(NULL, LOG_DEBUG, "Error adding if name %s to the next-hop",
+                        ifname);
+               }
+
+             /*
+              * TODO: Add support for NEXTHOP_TYPE_IPV4_IFINDEX
+              */
+
+             len -= NLMSG_ALIGN(rtnh->rtnh_len);
+             rtnh = RTNH_NEXT(rtnh);
+           }
+        }
+      else
+        {
+          if (gate)
+            {
+              nexthop_ipv4_add (rib, gate, src);
+              zlog(NULL, LOG_DEBUG, "Added an IPv4 address");
+            }
+          else
+            {
+                char* ifname = ifindex2ifname(index);
+                zlog(NULL, LOG_DEBUG, "Added an IPv4 ifname %s",
+                     ifname);
+
+                if (strcmp(ifname, "unknown") != 0)
+                  nexthop_ifname_add(rib, ifname);
+                else
+                  zlog(NULL, LOG_DEBUG, "Not adding if name %s to the next-hop",
+                       ifname);
+            }
+
+          /*
+           * TODO: Add support for NEXTHOP_TYPE_IPV4_IFINDEX
+           */
+        }
+
+      if (rib->nexthop_num == 0)
+        XFREE (MTYPE_RIB, rib);
+      else
+        {
+          /* Lookup shadow table.  */
+          shadow_table = vrf_shadow_table(AFI_IP, SAFI_UNICAST, 0);
+
+          if (shadow_table)
+            {
+              /* Make it sure prefixlen is applied to the prefix. */
+              apply_mask_ipv4(&p);
+
+              /* Lookup route node.*/
+              rn = route_node_get(shadow_table, &p);
+              assert(rn);
+
+              /*
+               * Add the allocated rib entry to the route node
+               */
+              add_rib_node_to_rn(rn, rib);
+
+              /*
+               * Set the appropriate flags on the nexthops
+               * in kernel
+               */
+              nexthop = rib->nexthop;
+              while (nexthop)
+                {
+                  SET_FLAG(nexthop->flags, NEXTHOP_FLAG_FIB);
+                  SET_FLAG(nexthop->flags, NEXTHOP_FLAG_ACTIVE);
+                  nexthop = nexthop->next;
+                }
+
+              /*
+               * Set the retain mode flag on the route node
+               */
+              rn->retain_mode_flags =
+                            RETAIN_MODE_ROUTE_IN_KERNEL_AFTER_RESTART;
+            }
+          else
+            XFREE (MTYPE_RIB, rib);
+        }
+    }
+
+#ifdef HAVE_IPV6
+  if (rtm->rtm_family == AF_INET6)
+    {
+      struct prefix_ipv6 p;
+      char prefix_str[256];
+      rib_dest_t* rib_list_head;
+      struct rib *rib;
+
+      p.family = AF_INET6;
+      memcpy (&p.prefix, dest, 16);
+      p.prefixlen = rtm->rtm_dst_len;
+
+      memset(prefix_str, 0, 256);
+      inet_ntop(AF_INET6, &p.prefix, prefix_str, sizeof(prefix_str));
+
+      zlog(NULL, LOG_DEBUG, "Read prefix is %s/%u from netlink after "
+           "restart", prefix_str, p.prefixlen);
+
+      /* Lookup shadow table.  */
+      shadow_table = vrf_shadow_table(AFI_IP6, SAFI_UNICAST, 0);
+
+      if (shadow_table)
+        {
+          /* Make sure mask is applied. */
+          apply_mask_ipv6(&p);
+
+          /* Lookup route node.*/
+          rn = route_node_get(shadow_table, &p);
+          assert(rn);
+
+          rib_list_head = rib_dest_from_rnode(rn);
+
+          (rib) = (rib_list_head) ? (rib_list_head)->routes : NULL;
+
+          if (!rib)
+            {
+              rib = XCALLOC (MTYPE_RIB, sizeof (struct rib));
+              rib->type = ZEBRA_ROUTE_KERNEL;
+              rib->distance = 0;
+              rib->flags = flags;
+              rib->metric = metric;
+              rib->table = table;
+              rib->nexthop_num = 0;
+              rib->uptime = time (NULL);
+              rib->ovsdb_route_row_uuid_ptr = NULL;
+            }
+
+          if (gate)
+            nexthop_ipv6_add(rib, gate);
+          else
+            {
+              char* ifname = ifindex2ifname(index);
+              zlog(NULL, LOG_DEBUG, "Added an IPv6 ifindex and "
+                   "ifname %s", ifname);
+
+              if (strcmp(ifname, "unknown") != 0)
+                nexthop_ifname_add(rib, ifname);
+              else
+                zlog(NULL, LOG_DEBUG, "Not adding if name %s to "
+                     "the next-hop", ifname);
+            }
+
+          /*
+           * TODO: Add support for NEXTHOP_TYPE_IPV6_IFINDEX
+           */
+
+          /*
+           * Set the appropriate flags on the nexthops
+           */
+          nexthop = rib->nexthop;
+          while (nexthop)
+            {
+              SET_FLAG(nexthop->flags, NEXTHOP_FLAG_FIB);
+              SET_FLAG(nexthop->flags, NEXTHOP_FLAG_ACTIVE);
+              nexthop = nexthop->next;
+            }
+
+          /*
+           * Set the restart flag on the route node
+           */
+          rn->retain_mode_flags =
+                    RETAIN_MODE_ROUTE_IN_KERNEL_AFTER_RESTART;
+
+          if (rib->nexthop_num == 0)
+            XFREE (MTYPE_RIB, rib);
+          else
+            if (rib->nexthop_num == 1)
+              add_rib_node_to_rn(rn, rib);
+        }
+    }
+#endif /* HAVE_IPV6 */
+
+  return 0;
+}
+#endif
 
 static const struct message rtproto_str[] = {
   {RTPROT_REDIRECT, "redirect"},
@@ -1105,7 +1461,7 @@ netlink_link_change (struct sockaddr_nl *snl, struct nlmsghdr *h)
       return 0;
     }
 #endif /* IFLA_WIRELESS */
-  
+
   if (tb[IFLA_IFNAME] == NULL)
     return -1;
   name = (char *) RTA_DATA (tb[IFLA_IFNAME]);
@@ -1257,7 +1613,14 @@ netlink_route_read (void)
   ret = netlink_request (AF_INET, RTM_GETROUTE, &netlink_cmd);
   if (ret < 0)
     return ret;
+
+#ifdef ENABLE_OVSDB
+  ret = netlink_parse_info (ops_zebra_netlink_routing_table,
+                            &netlink_cmd);
+#else
   ret = netlink_parse_info (netlink_routing_table, &netlink_cmd);
+#endif
+
   if (ret < 0)
     return ret;
 
@@ -1266,7 +1629,14 @@ netlink_route_read (void)
   ret = netlink_request (AF_INET6, RTM_GETROUTE, &netlink_cmd);
   if (ret < 0)
     return ret;
+
+#ifdef ENABLE_OVSDB
+  ret = netlink_parse_info (ops_zebra_netlink_routing_table,
+                            &netlink_cmd);
+#else
   ret = netlink_parse_info (netlink_routing_table, &netlink_cmd);
+#endif
+
   if (ret < 0)
     return ret;
 #endif /* HAVE_IPV6 */
@@ -1274,7 +1644,7 @@ netlink_route_read (void)
   return 0;
 }
 
-/* Utility function  comes from iproute2. 
+/* Utility function  comes from iproute2.
    Authors:	Alexey Kuznetsov, <kuznet@ms2.inr.ac.ru> */
 int
 addattr_l (struct nlmsghdr *n, size_t maxlen, int type, void *data, int alen)
@@ -1316,7 +1686,7 @@ rta_addattr_l (struct rtattr *rta, int maxlen, int type, void *data, int alen)
   return 0;
 }
 
-/* Utility function comes from iproute2. 
+/* Utility function comes from iproute2.
    Authors:	Alexey Kuznetsov, <kuznet@ms2.inr.ac.ru> */
 int
 addattr32 (struct nlmsghdr *n, size_t maxlen, int type, int data)
@@ -1392,8 +1762,8 @@ netlink_talk (struct nlmsghdr *n, struct nlsock *nl)
     }
 
 
-  /* 
-   * Get reply from netlink socket. 
+  /*
+   * Get reply from netlink socket.
    * The reply should either be an acknowlegement or an error.
    */
   return netlink_parse_info (netlink_talk_filter, nl);

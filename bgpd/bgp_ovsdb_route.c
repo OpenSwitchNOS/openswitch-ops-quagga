@@ -843,10 +843,10 @@ bgp_ovsdb_announce_rib_entry(struct prefix *p,
                 hmap_entry->needs_review = 1;
                 return 0;
             }
-        }
-        else {
-            rib = ovsrec_route_get_for_uuid(idl, &hmap_entry->uuid);
-            break;
+            else{
+                rib = ovsrec_route_get_for_uuid(idl, &hmap_entry->uuid);
+                break;
+            }
         }
     }
 

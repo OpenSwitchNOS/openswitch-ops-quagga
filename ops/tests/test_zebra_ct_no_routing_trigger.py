@@ -944,11 +944,12 @@ def routing_trigger_static_routes(**kwargs):
 
 
 # Set the maximum timeout for all the test cases
-@pytest.mark.timeout(5000)
+# @pytest.mark.timeout(5000)
 
 
 # Test class for testing "no routing"/"routing" triggers on static routes
 # cleanup from RIB/FIB/rinning-config.
+@pytest.mark.skipif(True, reason="Skipping old tests")
 class Test_ecmp_no_routing_trigger:
     def setup_class(cls):
         # Test object will parse command line and formulate the env

@@ -4207,16 +4207,25 @@ zebra_ovspoll_enqueue (zebra_ovsdb_t *zovs_g)
     }
 
   /* Populate the timeout event */
-  timeout = loop->timeout_when - time_msec();
-  if (timeout > 0 && loop->timeout_when > 0 &&
-      loop->timeout_when < LLONG_MAX)
+  if (loop->timeout_when == LLONG_MIN)
     {
-      /* Convert msec to sec */
-      timeout = (timeout + 999)/1000;
-
       thread_add_timer(zovs_g->master,
 		       zovs_read_cb, zovs_g,
-		       timeout);
+		       0);
+    }
+  else
+    {
+      timeout = loop->timeout_when - time_msec();
+      if (timeout > 0 && loop->timeout_when > 0 &&
+          loop->timeout_when < LLONG_MAX)
+        {
+          /* Convert msec to sec */
+          timeout = (timeout + 999)/1000;
+
+          thread_add_timer(zovs_g->master,
+                           zovs_read_cb, zovs_g,
+                           timeout);
+        }
     }
 
   return retval;

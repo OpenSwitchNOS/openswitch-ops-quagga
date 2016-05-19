@@ -517,10 +517,11 @@ def delete_static_bgp_routes(**kwargs):
 
 
 # Set the maximum timeout for all the test cases
-@pytest.mark.timeout(5000)
+# @pytest.mark.timeout(5000)
 
 
 # Test class for testing static/BGP routes add and delete triggers.
+@pytest.mark.skipif(True, reason="Skipping old tests")
 class Test_static_bgp_nexthop_selection:
     def setup_class(cls):
         # Test object will parse command line and formulate the env

@@ -56,6 +56,7 @@
 #include "bgpd/bgp_table.h"
 #include "bgpd/bgp_route.h"
 #include "linklist.h"
+#include "dynamic-string.h"
 #include "sockunion.h"
 #include  <diag_dump.h>
 #include "bgpd/bgp_fsm.h"
@@ -96,7 +97,6 @@ static char *appctl_path = NULL;
 static struct unixctl_server *appctl;
 static int system_configured = false;
 static int diag_buffer_len = BUF_LEN;
-#define MAX_LEN (diag_buffer_len - 1 - len)
 /*
  * Global System ECMP status affects maxpath config
  * Keep a local ECMP status to update when needed
@@ -117,13 +117,13 @@ bgp_unixctl_dump (struct unixctl_conn *conn, int argc OVS_UNUSED,
     const char *argv[] OVS_UNUSED, void *aux OVS_UNUSED)
 {
     char err_str[MAX_ERR_STR_LEN];
-    char *buf = xcalloc(1, BUF_LEN);
+    char *buf = xcalloc(1, diag_buffer_len);
     if(!buf) {
         snprintf(err_str,sizeof(err_str),
-                 "bpg daemon failed to allocate %d bytes", BUF_LEN);
+                 "bpg daemon failed to allocate %d bytes", diag_buffer_len);
         unixctl_command_reply(conn, err_str);
     } else {
-        bgpd_dump(buf,BUF_LEN);
+        bgpd_dump(buf,diag_buffer_len);
         unixctl_command_reply(conn, buf);
         free(buf);
     }
@@ -414,17 +414,17 @@ ovsdb_init (const char *db_path)
 }
 
 /* Show BGP peer's summary information. */
-static int
-bgp_dump_summary (char *buf, int offset, struct bgp *bgp, int afi, int safi)
+static void
+bgp_dump_summary (struct ds *ds, struct bgp *bgp, int afi, int safi)
 {
     struct peer *peer;
     struct listnode *node, *nnode;
     char timebuf[BGP_UPTIME_LEN];
     unsigned int count = 0;
-    int n, len = offset;
-    if(!bgp || !buf) {
+    int n;
+    if(!bgp || !ds) {
         VLOG_ERR("Invalid Entry\n");
-        return 0;
+        return;
     }
     /* Header string for each address family. */
     static char header[] = "Neighbor           AS MsgRcvd MsgSent"
@@ -435,34 +435,32 @@ bgp_dump_summary (char *buf, int offset, struct bgp *bgp, int afi, int safi)
            if (!count) {
                unsigned long ents;
 
-               len += snprintf(&buf[len], MAX_LEN,
-                               "BGP router identifier %s, local AS number %u\n"
-                               "RIB table counts %ld\n"
-                               "Peers %ld\n",
-                               inet_ntoa (bgp->router_id), bgp->as,
-                               bgp_table_count (bgp->rib[afi][safi]),
-                               listcount (bgp->peer));
+               ds_put_format(ds,
+                             "BGP router identifier %s, local AS number %u\n"
+                             "RIB table counts %ld\n"
+                             "Peers %ld\n",
+                             inet_ntoa (bgp->router_id), bgp->as,
+                             bgp_table_count (bgp->rib[afi][safi]),
+                             listcount (bgp->peer));
 
                if((ents = listcount (bgp->rsclient))) {
-                   len += snprintf(&buf[len], MAX_LEN,
-                                  "RS-Client peers %ld\n", ents);
+                   ds_put_format(ds, "RS-Client peers %ld\n", ents);
                }
                if((ents = listcount (bgp->group))) {
-                   len += snprintf(&buf[len], MAX_LEN,
-                                  "Peer groups %ld\n", ents);
+                   ds_put_format(ds, "Peer groups %ld\n", ents);
                }
-               len += snprintf(&buf[len], MAX_LEN,  "\n%s\n", header);
+               ds_put_format(ds, "\n%s\n", header);
            }
            count++;
 
-           len += snprintf(&buf[len], MAX_LEN, "%s", peer->host);
+           ds_put_format(ds, "%s", peer->host);
            n = 16 - strlen(peer->host);
            if (n < 1) {
-               len += snprintf(&buf[len], MAX_LEN, "\n%*s", 16, " ");
+               ds_put_format(ds, "\n%*s", 16, " ");
            } else {
-               len += snprintf(&buf[len], MAX_LEN, "%*s", n, " ");
+               ds_put_format(ds, "%*s", n, " ");
            }
-           len += snprintf(&buf[len], MAX_LEN, "%5u %7d %7d %8d %4d %4lu ",
+           ds_put_format(ds, "%5u %7d %7d %8d %4d %4lu ",
                            peer->as, peer->open_in +
                            peer->update_in + peer->keepalive_in +
                            peer->notify_in + peer->refresh_in +
@@ -472,43 +470,41 @@ bgp_dump_summary (char *buf, int offset, struct bgp *bgp, int afi, int safi)
                            peer->dynamic_cap_out,
                            0, 0, (unsigned long) peer->obuf->count);
 
-           len += snprintf(&buf[len], MAX_LEN, "%8s",
+           ds_put_format(ds, "%8s",
                  peer_uptime (peer->uptime, timebuf, BGP_UPTIME_LEN));
 
-           len += snprintf(&buf[len], MAX_LEN,  " %-11s\n",
+           ds_put_format(ds,  " %-11s\n",
                            LOOKUP(bgp_status_msg, peer->status));
         }
     } /* bgp peer loop */
 
     if (count) {
-        len += snprintf(&buf[len], MAX_LEN, "\nTotal number of neighbors "
+        ds_put_format(ds, "\nTotal number of neighbors "
                         "%d\n", count);
     } else {
-        len += snprintf(&buf[len], MAX_LEN,  "No %s neighbor is configured"
+        ds_put_format(ds,  "No %s neighbor is configured"
                         "\n\n", afi == AFI_IP ? "IPv4" : "IPv6");
     }
-    return (len - offset);
 }
 
-static int
-bgp_dump_peer(char *buf, int offset, struct peer *p)
+static void
+bgp_dump_peer(struct ds *ds, struct peer *p)
 {
     struct bgp *bgp;
     char buf1[INET6_ADDRSTRLEN];
     char timebuf[BGP_UPTIME_LEN];
     afi_t afi;
     safi_t safi;
-    int len = offset;
-    if(!p || !buf) {
+
+    if(!p || !ds) {
         VLOG_ERR("Invalid Entry\n");
-        return 0;
+        return;
     }
     bgp = p->bgp;
 
     /* Configured IP address. */
 
-    len += snprintf(&buf[len], MAX_LEN,
-                   "BGP neighbor is %s, remote AS %u, local AS %u%s%s, "
+    ds_put_format(ds, "BGP neighbor is %s, remote AS %u, local AS %u%s%s, "
                     "%s link\n", p->host, p->as,
                     p->change_local_as ? p->change_local_as : p->local_as,
                     CHECK_FLAG (p->flags, PEER_FLAG_LOCAL_AS_NO_PREPEND) ?
@@ -517,49 +513,49 @@ bgp_dump_peer(char *buf, int offset, struct peer *p)
                     " replace-as" : "", p->as == p->local_as ?
                     "internal" : "external");
 
-    len += snprintf(&buf[len], MAX_LEN, "  Remote router ID %s\n",
+    ds_put_format(ds, "  Remote router ID %s\n",
                     inet_ntop (AF_INET, &p->remote_id, buf1, BUFSIZ));
 
     /* Peer-group */
     if (p->group) {
-        len += snprintf(&buf[len], MAX_LEN, " Member of peer-group %s "
+        ds_put_format(ds, " Member of peer-group %s "
                         "for session parameters\n", p->group->name);
     }
 
     /* Status. */
-    len += snprintf(&buf[len], MAX_LEN, "  BGP state = %s",
+    ds_put_format(ds, "  BGP state = %s",
                     LOOKUP (bgp_status_msg, p->status));
     if (p->status == Established) {
-        len += snprintf(&buf[len], MAX_LEN, ", up for %8s\n",
+        ds_put_format(ds, ", up for %8s\n",
                         peer_uptime (p->uptime, timebuf, BGP_UPTIME_LEN));
     }
     else if (p->status == Active) {
         if(CHECK_FLAG (p->flags, PEER_FLAG_PASSIVE)) {
-           len += snprintf(&buf[len], MAX_LEN, " (passive)\n");
+           ds_put_format(ds, " (passive)\n");
         } else if(CHECK_FLAG (p->sflags, PEER_STATUS_NSF_WAIT)) {
-           len += snprintf(&buf[len], MAX_LEN, " (NSF passive)\n");
+           ds_put_format(ds, " (NSF passive)\n");
         }
     } else {
-        len += snprintf(&buf[len], MAX_LEN, "\n");
+        ds_put_format(ds, "\n");
     }
 
     /* read timer */
-    len += snprintf(&buf[len], MAX_LEN, "  Last read %s",
+    ds_put_format(ds, "  Last read %s",
                     peer_uptime (p->readtime, timebuf, BGP_UPTIME_LEN));
 
     /* Configured timer values. */
-    len += snprintf(&buf[len], MAX_LEN, ", hold time is %d,"
+    ds_put_format(ds, ", hold time is %d,"
                     " keepalive interval is %d seconds\n",
                     p->v_holdtime, p->v_keepalive);
 
     if (CHECK_FLAG (p->config, PEER_CONFIG_TIMER)) {
-        len += snprintf(&buf[len], MAX_LEN, "  Configured hold time is %d"
+        ds_put_format(ds, "  Configured hold time is %d"
                         ", keepalive interval is %d seconds\n", p->holdtime,
                         p->keepalive);
     }
 
     /* Packet counts. */
-    len += snprintf(&buf[len], MAX_LEN,
+    ds_put_format(ds,
                     "  Message statistics:\n"
                     "    Inq depth is 0\n"
                     "    Outq depth is %lu\n"
@@ -590,81 +586,84 @@ bgp_dump_peer(char *buf, int offset, struct peer *p)
 
     /* Default weight */
     if (CHECK_FLAG (p->config, PEER_CONFIG_WEIGHT)) {
-        len += snprintf(&buf[len], MAX_LEN, "  Default weight %d\n",
+        ds_put_format(ds, "  Default weight %d\n",
                         p->weight);
     }
-    len += snprintf(&buf[len], MAX_LEN, "  Connections established: %d\n",
+    ds_put_format(ds, "  Connections established: %d\n",
                     p->established);
 
     if (!p->dropped) {
-        len += snprintf(&buf[len], MAX_LEN, "  Last reset never\n");
+        ds_put_format(ds, "  Last reset never\n");
     } else {
-        len += snprintf(&buf[len], MAX_LEN, "  Last reset %s, due to %s\n",
+        ds_put_format(ds, "  Last reset %s, due to %s\n",
               peer_uptime (p->resettime, timebuf, BGP_UPTIME_LEN),
               peer_down_str[(int) p->last_reset]);
     }
 
     if(CHECK_FLAG (p->sflags, PEER_STATUS_PREFIX_OVERFLOW)) {
-        len += snprintf(&buf[len], MAX_LEN, "  Peer had exceeded the "
+        ds_put_format(ds, "  Peer had exceeded the "
                         "max. no. of prefixes configured.\n");
 
         if (p->t_pmax_restart) {
-            len += snprintf(&buf[len], MAX_LEN, "  Reduce the no. of prefix "
+            ds_put_format(ds, "  Reduce the no. of prefix "
                            "from %s, will restart in %ld seconds\n", p->host,
                            thread_timer_remain_second (p->t_pmax_restart));
         } else {
-            len += snprintf(&buf[len], MAX_LEN, "  Reduce the no. of prefix "
+            ds_put_format(ds, "  Reduce the no. of prefix "
                            ", clear ip bgp %s to restore peering\n", p->host);
         }
     }
 
     /* Local address. */
     if (p->su_local) {
-        len += snprintf(&buf[len], MAX_LEN, "  Local host: %s, Local port: %d\n",
+        ds_put_format(ds, "  Local host: %s, Local port: %d\n",
                         sockunion2str (p->su_local, buf1, SU_ADDRSTRLEN),
                         ntohs (p->su_local->sin.sin_port));
     }
 
     /* Remote address. */
     if (p->su_remote) {
-        len += snprintf(&buf[len], MAX_LEN, "  Foreign host: %s, Foreign port:"
+        ds_put_format(ds, "  Foreign host: %s, Foreign port:"
                      " %d\n", sockunion2str(p->su_remote, buf1, SU_ADDRSTRLEN),
                      ntohs (p->su_remote->sin.sin_port));
     }
-
-    return (len - offset);
 }
 
 static void
 bgpd_dump(char *buf, int buf_size)
 {
+    struct ds ds = DS_EMPTY_INITIALIZER;
     struct bgp *bgp;
     struct listnode *node, *nnode;
     struct peer *peer;
-    int afi, safi, len = 0;
-    bgp = bgp_get_default ();
-    char *err = "Truncated due to data exceeds";
-    char *promt = "Increase buffer size using "
+    int afi, safi, err_len, len = 0;
+
+    char *err = "\nTruncated due to data exceeds buffer size";
+    char *promt = "\nIncrease buffer size using "
                   "'ovs-appctl -t ops-bgpd bgpd/diag newsize'\n";
+    bgp = bgp_get_default ();
+
     if (bgp) {
-        len += bgp_dump_summary(buf, len, bgp, AFI_IP, SAFI_UNICAST);
+        bgp_dump_summary(&ds, bgp, AFI_IP, SAFI_UNICAST);
         for (ALL_LIST_ELEMENTS (bgp->peer, node, nnode, peer))
         {
-            if(len > diag_buffer_len) {
-                break;
-            }
-            len += bgp_dump_peer(buf, len, peer);
+            bgp_dump_peer(&ds, peer);
         }
-        if(len > diag_buffer_len) {
+        len = snprintf(buf, buf_size, ds_cstr(&ds));
+        /* Large data > buffer size: log err, truncate data,
+         * promt user to increase size */
+        if(len > buf_size) {
             VLOG_ERR("diag-dump: No more space on buffer to dump."
                      "  Data size: %d, buffer size: %d, exceeds: %d\n",
-                     len, diag_buffer_len, len - diag_buffer_len);
-            snprintf(&buf[diag_buffer_len - strlen(err) - strlen(promt) - 25],
-                     MAX_LEN, "...\n%s %d bytes.\n%s", err, diag_buffer_len,
-                     promt);
+                     len, buf_size, len - buf_size);
+            err_len = strlen(err) + strlen(promt) + 35;
+            if(buf_size > err_len) {
+                snprintf(&buf[buf_size - err_len-1], err_len, "%s\nData %d "
+                        "bytes, Buffer %d bytes%s", err, len, buf_size, promt);
+            }
         }
-        VLOG_DBG("\nWould dump %d bytes out of %d\n", len, diag_buffer_len);
     }
+    ds_destroy(&ds);
 }
 
 /*

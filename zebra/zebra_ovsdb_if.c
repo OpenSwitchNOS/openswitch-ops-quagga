@@ -4144,6 +4144,15 @@ zebra_ovs_wait (void)
   unixctl_server_wait(appctl);
 }
 
+static bool
+zebra_ovs_run_immediately()
+{
+  struct poll_loop *loop = poll_loop();
+
+  return loop->timeout_when == LLONG_MIN;
+}
+
+
 /* Callback function to handle read events
  * In the event of an update to the idl cache, this callback is triggered.
  * In this event, the changes are processed in the daemon and the cb
@@ -4167,9 +4176,11 @@ zovs_read_cb (struct thread *thread)
 
   zovs_g->read_cb_count++;
 
-  zebra_ovs_clear_fds();
-  zebra_ovs_run();
-  zebra_ovs_wait();
+  do {
+      zebra_ovs_clear_fds();
+      zebra_ovs_run();
+      zebra_ovs_wait();
+  } while (zebra_ovs_run_immediately());
 
   if (0 != zebra_ovspoll_enqueue(zovs_g))
     {

@@ -55,6 +55,7 @@
 
 #define NUM_CHAR_CMP 6
 #define NUM_CHAR_UNSUPPORTED 20
+#define MAX_ZEBRA_TXN_COUNT  100
 
 /* Local structure to hold the master thread
  * and counters for read/write callbacks
@@ -80,6 +81,7 @@ static struct unixctl_server *appctl;
 static int system_configured = false;
 static struct ovsdb_idl_txn *zebra_txn = NULL;
 bool zebra_txn_updates = false;
+int  zebra_txn_count = 0;
 
 /*
  * Keep track if we are executing the reconfigure loop for
@@ -2413,6 +2415,10 @@ zebra_find_routes_with_deleted_ports (
       return;
     }
 
+  VLOG_DBG("Cleaning-up/Populating routes in response to %s trigger",
+           (option == ZEBRA_L3_PORT_ACTIVE_STATE_CHN_OPTION) ?
+           "interface state/address change": "interface delete");
+
   for (rn = route_top (table); rn; rn = route_next (rn))
     {
       if (!rn)
@@ -2426,6 +2432,9 @@ zebra_find_routes_with_deleted_ports (
       prefix2str(p, prefix_str, sizeof(prefix_str));
 
       VLOG_DBG("Prefix %s Family %d\n",prefix_str, PREFIX_FAMILY(p));
+
+      /* Create txn for any IDL updates */
+      zebra_create_txn();
 
       RNODE_FOREACH_RIB (rn, rib)
         {
@@ -2630,7 +2639,13 @@ zebra_find_routes_with_deleted_ports (
                 }
             }
         }
+
+        /* Submit any modifications in IDl to DB */
+        zebra_finish_txn(false);
     }
+
+    /* Submit any last modifications in IDl to DB */
+    zebra_finish_txn(true);
 }
 
 /*
@@ -4052,9 +4067,6 @@ zebra_reconfigure (struct ovsdb_idl *idl)
       return;
     }
 
-  /* Create txn for any IDL updates */
-  zebra_create_txn();
-
   /* Apply all ovsdb notifications */
   if (zebra_first_run_after_restart)
     {
@@ -4086,9 +4098,6 @@ zebra_reconfigure (struct ovsdb_idl *idl)
       zebra_handle_interface_admin_state_changes();
     }
 
-  /* Submit any modifications in IDl to DB */
-  zebra_finish_txn();
-
   /* update the seq. number */
   idl_seqno = new_idl_seqno;
 }
@@ -4098,6 +4107,21 @@ zebra_reconfigure (struct ovsdb_idl *idl)
 static void
 zebra_ovs_run (void)
 {
+  if (zebra_txn_count)
+    {
+      VLOG_DBG("Processing an on-going transaction so bypass IDL read");
+      return;
+    }
+  else
+    {
+      if (zebra_txn)
+        {
+          VLOG_DBG("Release the transaction object");
+          ovsdb_idl_txn_destroy(zebra_txn);
+        }
+      zebra_txn = NULL;
+    }
+
   ovsdb_idl_run(idl);
   unixctl_server_run(appctl);
 #ifdef VRF_ENABLE
@@ -4303,6 +4327,7 @@ zebra_route_delete_nexthops (struct ovsrec_route *route, bool *nexthop_decision,
       VLOG_DBG("Need to delete the OVSDB route for prefix %s", route->prefix);
       log_event("ZEBRA_ROUTE_DEL", EV_KV("prefix", "%s",route->prefix));
       ovsrec_route_delete(route);
+      zebra_txn_updates = true;
     }
 
   free(nexthops);
@@ -5292,6 +5317,10 @@ zebra_create_txn (void)
           VLOG_ERR("%s: Transaction creation failed" , __func__);
           return 1;
         }
+      else
+        {
+          VLOG_DBG("Created a transaction for route updates to OVSDB");
+        }
     }
 
   /* Else txn already there, continue the updates and commit */
@@ -5303,28 +5332,60 @@ zebra_create_txn (void)
 ** submitted to DB.
 */
 int
-zebra_finish_txn (void)
+zebra_finish_txn (bool if_last_batch)
 {
   enum ovsdb_idl_txn_status status;
 
-  /* Commit txn if any updates to be submitted to DB */
   if (zebra_txn_updates)
+    {
+      ++zebra_txn_count;
+      zebra_txn_updates = false;
+    }
+
+  if (!if_last_batch && (zebra_txn_count < MAX_ZEBRA_TXN_COUNT))
+    {
+      VLOG_DBG("This is not the last batch of updates. Number of "
+               " transactions are %d", zebra_txn_count);
+      return(0);
+    }
+
+  /* Commit txn if any updates to be submitted to DB */
+  if (zebra_txn_count && (if_last_batch ||
+                            (zebra_txn_count >= MAX_ZEBRA_TXN_COUNT)))
     {
       if (zebra_txn)
         {
-          status = ovsdb_idl_txn_commit(zebra_txn);
+          status =  ovsdb_idl_txn_commit(zebra_txn);
+
+          VLOG_DBG("The transaction error code is %s for committing "
+                    "route batch %d",
+                    ovsdb_idl_txn_status_to_string(status),
+                    zebra_txn_count);
+
           if (!((status == TXN_SUCCESS) || (status == TXN_UNCHANGED)
                     || (status == TXN_INCOMPLETE)))
-	    /*
-	     * TODO: In case of commit failure, retry.
-	     */
-	    VLOG_ERR("Route update failed. The transaction error is %s",
-		     ovsdb_idl_txn_status_to_string(status));
-	  else
-            zebra_txn_updates = false;
+            {
+	          /*
+	           * TODO: In case of commit failure, retry.
+	           */
+	          VLOG_ERR("Route update failed. The transaction error is %s",
+		               ovsdb_idl_txn_status_to_string(status));
+            }
+	      else
+            {
+              VLOG_DBG("Successfully committed a transaction to OVSDB");
+
+              /*
+               * Reset the transaction counter
+               */
+              zebra_txn_count = 0;
+            }
         }
       else
-        VLOG_ERR("Commiting NULL txn");
+        {
+          VLOG_ERR("Commiting NULL txn");
+          return(1);
+        }
     }
 
   /* Finally in any case destory */
@@ -5332,4 +5393,6 @@ zebra_finish_txn (void)
     ovsdb_idl_txn_destroy(zebra_txn);
 
   zebra_txn = NULL;
+
+  return(0);
 }

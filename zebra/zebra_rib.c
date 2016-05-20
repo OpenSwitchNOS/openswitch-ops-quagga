@@ -1954,11 +1954,6 @@ rib_process (struct route_node *rn)
    * rib    --- NULL
    */
 
-#ifdef ENABLE_OVSDB
-  /* Create an IDL transaction to commit any route changes into DB */
-  zebra_create_txn();
-#endif
-
   /* Same RIB entry is selected. Update FIB and finish. */
   if (select && select == fib)
     {
@@ -2135,11 +2130,6 @@ end:
    * Check if the dest can be deleted now.
    */
   rib_gc_dest (rn);
-
-#ifdef ENABLE_OVSDB
-  zebra_finish_txn();
-#endif
-
 }
 
 /* Take a list of route_node structs and return 1, if there was a record
@@ -2184,6 +2174,11 @@ meta_queue_process (struct work_queue *dummy, void *data)
   struct meta_queue * mq = data;
   unsigned i;
 
+#ifdef ENABLE_OVSDB
+  /* Create an IDL transaction to commit any route changes into DB */
+  zebra_create_txn();
+#endif
+
   for (i = 0; i < MQ_SIZE; i++)
     if (process_subq (mq->subq[i], i))
       {
@@ -2192,19 +2187,25 @@ meta_queue_process (struct work_queue *dummy, void *data)
       }
 
 #ifdef ENABLE_OVSDB
-  /*
-   * Since the worker thread has finished processing all OVSDB
-   * route updates, we can cleanup the kernel of all the stale
-   * kernel next-hops.
-   */
   if (!(mq->size))
     {
+      /*
+       * Since the worker thread has finished processing all OVSDB
+       * route updates, we can cleanup the kernel of all the stale
+       * kernel next-hops.
+       */
       if (zebra_cleanup_kernel_after_restart)
         {
           VLOG_DBG("Cleaning up all the stale kernel routes");
           cleanup_kernel_routes_after_restart();
           zebra_cleanup_kernel_after_restart = false;
         }
+
+      zebra_finish_txn(true);
+    }
+  else
+    {
+      zebra_finish_txn(false);
     }
 #endif
 

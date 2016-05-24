@@ -56,6 +56,20 @@
 #include "bgpd/bgp_table.h"
 #include "bgpd/bgp_route.h"
 #include "linklist.h"
+#include "ovsdb-idl.h"
+#include "dynamic-string.h"
+#include "ovs/hash.h"
+
+struct txn_element {
+    struct hmap_node hmap_node;
+    struct ovsdb_idl_txn *txn;
+};
+
+struct hmap hmap_outstanding_txns = HMAP_INITIALIZER(&hmap_outstanding_txns);
+
+extern int txn_count;
+bool end_db_success = false;
+bool bgp_txn_started = false;
 
 /*
  * Local structure to hold the master thread
@@ -82,6 +96,45 @@ static bgp_ovsdb_t glob_bgp_ovs;
 #define MAX_BUF_LEN 10
 COVERAGE_DEFINE(bgp_ovsdb_cnt);
 VLOG_DEFINE_THIS_MODULE(bgp_ovsdb_if);
+
+static int
+txn_command_result_clear_op(enum ovsdb_idl_txn_status status, char *msg)
+{
+    if ((status != TXN_SUCCESS)
+        && (status != TXN_INCOMPLETE)
+        && (status != TXN_UNCHANGED)) {
+        VLOG_ERR("%s: BGP neighbor clear counters txn failure: %s, status %d\n",
+                 __FUNCTION__, msg, status);
+        return -1;
+    }
+    VLOG_DBG("%s txn sent, rc = %d\n",
+             msg, status);
+    return 0;
+}
+
+
+
+#define END_DB_TXN(txn, msg)                                    \
+    do {                                                        \
+        struct txn_element *elem;                               \
+        static int end_db_count = 1;                            \
+        uint32_t txn_hash;                                      \
+        time_t cur_time;                                        \
+        elem = malloc(sizeof(struct txn_element));              \
+        if (elem == NULL) {                                     \
+            return;                                             \
+        }                                                       \
+        enum ovsdb_idl_txn_status status;                       \
+        cur_time = time (NULL);                                 \
+        txn_hash = (uint32_t) cur_time;                         \
+        elem->txn = txn;                                        \
+        hmap_insert(&hmap_outstanding_txns, &elem->hmap_node,   \
+                    txn_hash);                                  \
+        status = ovsdb_idl_txn_commit(txn);                     \
+        end_db_success = true;                                  \
+        txn_command_result_clear_op(status, msg);               \
+    } while (0)
+
 
 struct ovsdb_idl *idl;
 unsigned int idl_seqno;
@@ -141,8 +194,24 @@ update_bgp_router_id_in_ovsdb (int64_t asn, char *router_id)
 {
     const struct ovsrec_bgp_router *bgp_router_row;
     const struct ovsrec_vrf *vrf_row;
+    struct ovsdb_idl_txn *txn;
     struct ovsdb_idl_txn *bgp_router_txn=NULL;
-    bgp_router_txn = ovsdb_idl_txn_create(idl);
+    struct ovsdb_idl_txn *idl_txn = NULL;
+    idl_txn = get_idl_txn(idl);
+    if (idl_txn) {
+         txn_count = 0;
+         txn = idl_txn;
+         END_DB_TXN(txn, "Clear counters end db");
+    }
+
+    bgp_router_txn = ovsdb_idl_txn_create_bgp(idl);
+    if (bgp_router_txn == NULL) {
+        return;
+    }
+    if (bgp_txn_started == false) {
+        bgp_txn_started = true;
+    }
+
     bgp_router_row =
         get_bgp_router_with_asn(DEFAULT_VRF_NAME, asn);
     if (bgp_router_row == NULL) {
@@ -151,7 +220,7 @@ update_bgp_router_id_in_ovsdb (int64_t asn, char *router_id)
         ovsrec_bgp_router_set_router_id(bgp_router_row,
                                       router_id);
     }
-    ovsdb_idl_txn_commit_block(bgp_router_txn);
+    ovsdb_idl_txn_commit(bgp_router_txn);
     ovsdb_idl_txn_destroy(bgp_router_txn);
 }
 
@@ -360,7 +429,7 @@ static void
 ovsdb_init (const char *db_path)
 {
     /* Initialize IDL through a new connection to the dB. */
-    idl = ovsdb_idl_create(db_path, &ovsrec_idl_class, false, true);
+    idl = ovsdb_idl_create(db_path, &ovsrec_idl_class, true, true);
     idl_seqno = ovsdb_idl_get_seqno(idl);
     ovsdb_idl_set_lock(idl, "OpenSwitch_bgp");
 
@@ -1083,6 +1152,7 @@ bgp_static_route_addition (struct bgp *bgp_cfg,
             else
                 VLOG_ERR("Static route addition failed!!");
         } else {
+            route_unlock_node((struct route_node *)rn);
             VLOG_DBG("Network %s already exists. Skip adding.");
         }
     }
@@ -1440,11 +1510,13 @@ bgp_daemon_ovsdb_neighbor_statistics_update (bool start_new_db_txn,
     struct peer *peer)
 {
 
-#define MAX_BGP_NEIGHBOR_STATS		64
+#define MAX_BGP_NEIGHBOR_STATS      64
 
+    struct ovsdb_idl_txn *txn;
     struct ovsdb_idl_txn *db_txn;
     char *keywords[MAX_BGP_NEIGHBOR_STATS];
     int64_t values [MAX_BGP_NEIGHBOR_STATS];
+    struct ovsdb_idl_txn *idl_txn= NULL;
     int count;
 
 #define ADD_BGPN_STAT(key, value) \
@@ -1454,20 +1526,26 @@ bgp_daemon_ovsdb_neighbor_statistics_update (bool start_new_db_txn,
 
     /* if row is not given, find it */
     if (NULL == ovs_bgp_neighbor_ptr) {
-	ovs_bgp_neighbor_ptr = get_bgp_neighbor_db_row(peer);
+    ovs_bgp_neighbor_ptr = get_bgp_neighbor_db_row(peer);
 
-	/* it is possible to come here with no db entry, this is ok */
-	if (NULL == ovs_bgp_neighbor_ptr) return;
+    /* it is possible to come here with no db entry, this is ok */
+    if (NULL == ovs_bgp_neighbor_ptr) return;
     }
-
+    idl_txn = get_idl_txn(idl);
     /* is this an independent txn or piggybacked onto another txn */
     if (start_new_db_txn) {
-	db_txn = ovsdb_idl_txn_create(idl);
-	if (NULL == db_txn) {
-	    VLOG_ERR("%%ovsdb_idl_txn_create failed in "
-		"bgp_daemon_ovsdb_neighbor_statistics_update\n");
-	    return;
-	}
+        if (idl_txn) {
+            txn_count = 0;
+            txn = idl_txn;
+            END_DB_TXN(txn, "Clear counters end db");
+        }
+
+        db_txn = ovsdb_idl_txn_create_bgp(idl);
+        if (NULL == db_txn) {
+            VLOG_ERR("%%ovsdb_idl_txn_create failed in "
+            "bgp_daemon_ovsdb_neighbor_statistics_update\n");
+            return;
+        }
     }
 
     count = 0;
@@ -1510,6 +1588,8 @@ void bgp_daemon_ovsdb_neighbor_update (struct peer *peer,
     const struct ovsrec_bgp_neighbor *ovs_bgp_neighbor_ptr;
     struct ovsdb_idl_txn *db_txn;
     enum ovsdb_idl_txn_status status;
+    struct ovsdb_idl_txn *idl_txn = NULL;
+    struct ovsdb_idl_txn *txn = NULL;
     struct smap smap;
 
     ovs_bgp_neighbor_ptr = get_bgp_neighbor_db_row(peer);
@@ -1522,12 +1602,19 @@ void bgp_daemon_ovsdb_neighbor_update (struct peer *peer,
     VLOG_DBG("updating bgp neighbor %s remote-as %d in db\n",
            ovsdb_nbr_from_row_to_peer_name(idl, ovs_bgp_neighbor_ptr, NULL),
            *ovs_bgp_neighbor_ptr->remote_as);
+    idl_txn = get_idl_txn(idl);
+    if (idl_txn) {
+         txn_count = 0;
+         txn = idl_txn;
+         END_DB_TXN(txn, "Clear counters end db");
+    }
 
-    db_txn = ovsdb_idl_txn_create(idl);
+
+    db_txn = ovsdb_idl_txn_create_bgp(idl);
     if (NULL == db_txn) {
-	VLOG_ERR("%%ovsdb_idl_txn_create failed in "
-	    "bgp_daemon_ovsdb_neighbor_update\n");
-	return;
+        VLOG_ERR("%%ovsdb_idl_txn_create failed in "
+        "bgp_daemon_ovsdb_neighbor_update\n");
+        return;
     }
 
     /* update fields of this peer/neighbor in the ovsdb */
@@ -2099,7 +2186,9 @@ bgp_nbr_read_ovsdb_apply_changes (struct ovsdb_idl *idl)
     char peer[80];
     int i, j;
     struct bgp *bgp_instance;
-    static struct ovsdb_idl_txn *confirm_txn = NULL;
+    struct ovsdb_idl_txn *confirm_txn = NULL;
+    struct ovsdb_idl_txn *txn = NULL;
+    struct ovsdb_idl_txn *idl_txn = NULL;
     enum ovsdb_idl_txn_status status;
     int req_cnt_in, perf_cnt_in, req_cnt_out, perf_cnt_out;
 
@@ -2157,39 +2246,48 @@ bgp_nbr_read_ovsdb_apply_changes (struct ovsdb_idl *idl)
             if (!confirm_txn) {
                 VLOG_DBG("Check here for clear counters for neighbor %s\n"
                          ,ovs_bgp->key_bgp_neighbors[j]);
-                confirm_txn = ovsdb_idl_txn_create(idl);
-                bgp_check_neighbor_clear_soft_in(idl, ovs_nbr,
+                idl_txn = get_idl_txn(idl);
+                if (idl_txn) {
+                    txn_count = 0;
+                    txn = idl_txn;
+                    END_DB_TXN(txn, "Clear counters end db");
+                }
+
+                confirm_txn = ovsdb_idl_txn_create_bgp(idl);
+                if(confirm_txn != NULL){
+                    bgp_check_neighbor_clear_soft_in(idl, ovs_nbr,
                                                  ovs_bgp->key_bgp_neighbors[j]);
-                bgp_check_neighbor_clear_soft_out(idl, ovs_nbr,
+                    bgp_check_neighbor_clear_soft_out(idl, ovs_nbr,
                                                  ovs_bgp->key_bgp_neighbors[j]);
-                status = ovsdb_idl_txn_commit_block(confirm_txn);
-                ovsdb_idl_txn_destroy(confirm_txn);
-                VLOG_DBG("Neighbor clear operation txn result: %s\n",
+                    status = ovsdb_idl_txn_commit_block(confirm_txn);
+                    ovsdb_idl_txn_destroy(confirm_txn);
+                    VLOG_DBG("Neighbor clear operation txn result: %s\n",
                          ovsdb_idl_txn_status_to_string(status));
-                confirm_txn = NULL;
-                req_cnt_in =
+                    confirm_txn = NULL;
+                    req_cnt_in =
                     smap_get_int(&ovs_nbr->status,
                     OVSDB_BGP_NEIGHBOR_CLEAR_COUNTERS_SOFT_IN_REQUESTED,
                     0);
 
-                perf_cnt_in =
-                    smap_get_int(&ovs_nbr->status,
-                    OVSDB_BGP_NEIGHBOR_CLEAR_COUNTERS_SOFT_IN_PERFORMED,
-                    0);
-                req_cnt_out =
-                    smap_get_int(&ovs_nbr->status,
-                    OVSDB_BGP_NEIGHBOR_CLEAR_COUNTERS_SOFT_OUT_REQUESTED,
-                    0);
+                    perf_cnt_in =
+                        smap_get_int(&ovs_nbr->status,
+                        OVSDB_BGP_NEIGHBOR_CLEAR_COUNTERS_SOFT_IN_PERFORMED,
+                        0);
+                    req_cnt_out =
+                        smap_get_int(&ovs_nbr->status,
+                        OVSDB_BGP_NEIGHBOR_CLEAR_COUNTERS_SOFT_OUT_REQUESTED,
+                        0);
 
-                perf_cnt_out =
-                    smap_get_int(&ovs_nbr->status,
-                    OVSDB_BGP_NEIGHBOR_CLEAR_COUNTERS_SOFT_OUT_PERFORMED,
-                    0);
+                    perf_cnt_out =
+                        smap_get_int(&ovs_nbr->status,
+                        OVSDB_BGP_NEIGHBOR_CLEAR_COUNTERS_SOFT_OUT_PERFORMED,
+                        0);
 
-                VLOG_INFO("After neighbor clear operation txn commit:"
+                    VLOG_INFO("After neighbor clear operation txn commit:"
                           " soft in requested count %d, performed count %d;"
                           " soft out requested count %d, performed count %d\n",
                           req_cnt_in, perf_cnt_in, req_cnt_out, perf_cnt_out);
+                }
             }
 
 	    /* remote-as */
@@ -2308,13 +2406,64 @@ bgp_apply_bgp_neighbor_changes (struct ovsdb_idl *idl)
 
     /* nothing else changed ? */
     if (!modified && !inserted) {
-	VLOG_DBG("no other changes occured in BGP Neighbor table\n");
-	return;
+    VLOG_DBG("no other changes occured in BGP Neighbor table\n");
+    return;
     }
 
     VLOG_DBG("now processing bgp neighbor modifications\n");
     bgp_nbr_read_ovsdb_apply_changes(idl);
 }
+
+static void
+bgp_ovs_commit()
+{
+    static int ovs_count = 1;
+    enum  ovsdb_idl_txn_status status;
+    struct txn_element *elem;
+    uint32_t txn_hash;
+    time_t cur_time;
+    struct ovsdb_idl_txn *txn;
+    struct ovsdb_idl_txn *idl_txn;
+    if ((end_db_success == false) && (bgp_txn_started == true)) {
+        idl_txn = get_idl_txn(idl);
+        if (idl_txn) {
+            txn = idl_txn;
+            elem = malloc(sizeof(struct txn_element));
+            if (elem == NULL)
+                return;
+            elem->txn = txn;
+            cur_time = time (NULL);
+            txn_hash = (uint32_t) cur_time;
+            hmap_insert(&hmap_outstanding_txns, &elem->hmap_node,
+                        txn_hash);
+            status = ovsdb_idl_txn_commit(txn);
+            end_db_success = true;
+        }
+    }
+}
+
+static void
+bgp_process_outstanding_txns (void)
+{
+    struct txn_element *elem;
+    enum ovsdb_idl_txn_status status;
+    struct ovsdb_idl_txn *txn;
+    bool pendingTxn;
+    HMAP_FOR_EACH(elem, hmap_node,
+                       &hmap_outstanding_txns) {
+       txn = elem->txn;
+       status = ovsdb_idl_txn_commit(txn);
+       if (status == TXN_SUCCESS) {
+           pendingTxn = false;
+           bgp_txn_complete_processing(txn, &pendingTxn);
+           if (pendingTxn == false) {
+               hmap_remove(&hmap_outstanding_txns, &elem->hmap_node);
+               ovsdb_idl_txn_destroy(txn);
+           }
+       }
+    }
+}
+
 
 static void
 bgp_reconfigure (struct ovsdb_idl *idl)
@@ -2341,7 +2490,7 @@ bgp_reconfigure (struct ovsdb_idl *idl)
     bgp_apply_bgp_neighbor_changes(idl);
 
     /* Scan active route transaction list and handle completions */
-    bgp_txn_complete_processing();
+    bgp_process_outstanding_txns();
 
     /* update the seq. number */
     idl_seqno = new_idl_seqno;
@@ -2400,6 +2549,7 @@ bovs_cb (struct thread *thread)
         return -1;
     }
 
+    bgp_ovs_commit();
     bgp_ovs_clear_fds();
     bgp_ovs_run();
     bgp_ovs_wait();

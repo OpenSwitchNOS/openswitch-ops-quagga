@@ -11828,6 +11828,7 @@ bgp_distance_apply (struct prefix *p, struct bgp_info *rinfo, struct bgp *bgp)
 {
   struct bgp_node *rn;
   struct prefix_ipv4 q;
+  struct prefix_ipv6 q6;
   struct peer *peer;
   struct bgp_distance *bdistance;
   struct access_list *alist;
@@ -11845,14 +11846,22 @@ bgp_distance_apply (struct prefix *p, struct bgp_info *rinfo, struct bgp *bgp)
 
   peer = rinfo->peer;
 
-  if (peer->su.sa.sa_family != AF_INET)
-    return 0;
-
-  memset (&q, 0, sizeof (struct prefix_ipv4));
-  q.family = AF_INET;
-  q.prefix = peer->su.sin.sin_addr;
-  q.prefixlen = IPV4_MAX_BITLEN;
-
+  if (peer->su.sa.sa_family == AF_INET)
+    {
+      memset (&q, 0, sizeof (struct prefix_ipv4));
+      q.family = AF_INET;
+      q.prefix = peer->su.sin.sin_addr;
+      q.prefixlen = IPV4_MAX_BITLEN;
+    }
+  else if (peer->su.sa.sa_family == AF_INET6)
+    {
+      memset (&q, 0, sizeof (struct prefix_ipv6));
+      q6.family = AF_INET6;
+      q6.prefix = peer->su.sin6.sin6_addr;
+      q6.prefixlen = IPV6_MAX_BITLEN;
+    }
+   else
+      return 0;
   /* Check source address. */
   rn = bgp_node_match (bgp_distance_table, (struct prefix *) &q);
   if (rn)
@@ -11862,7 +11871,10 @@ bgp_distance_apply (struct prefix *p, struct bgp_info *rinfo, struct bgp *bgp)
 
       if (bdistance->access_list)
 	{
-	  alist = access_list_lookup (AFI_IP, bdistance->access_list);
+          if (p->family == AF_INET)
+	    alist = access_list_lookup (AFI_IP, bdistance->access_list);
+          else if (p->family == AF_INET6)
+            alist = access_list_lookup (AFI_IP6, bdistance->access_list);
 	  if (alist && access_list_apply (alist, p) == FILTER_PERMIT)
 	    return bdistance->distance;
 	}
@@ -11871,7 +11883,10 @@ bgp_distance_apply (struct prefix *p, struct bgp_info *rinfo, struct bgp *bgp)
     }
 
   /* Backdoor check. */
-  rn = bgp_node_lookup (bgp->route[AFI_IP][SAFI_UNICAST], p);
+  if (p->family == AF_INET)
+    rn = bgp_node_lookup (bgp->route[AFI_IP][SAFI_UNICAST], p);
+  else if (p->family == AF_INET6)
+    rn = bgp_node_lookup (bgp->route[AFI_IP6][SAFI_UNICAST], p);
   if (rn)
     {
       bgp_static = rn->info;
@@ -11885,7 +11900,6 @@ bgp_distance_apply (struct prefix *p, struct bgp_info *rinfo, struct bgp *bgp)
 	    return ZEBRA_IBGP_DISTANCE_DEFAULT;
 	}
     }
-
   if (peer->sort == BGP_PEER_EBGP)
     {
       if (bgp->distance_ebgp)

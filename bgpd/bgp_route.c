@@ -1598,9 +1598,6 @@ bgp_process_main (struct work_queue *wq, void *data)
           }
           UNSET_FLAG (old_select->flags, BGP_INFO_MULTIPATH_CHG);
           UNSET_FLAG (rn->flags, BGP_NODE_PROCESS_SCHEDULED);
-#ifdef ENABLE_OVSDB
-          bgp_ovsdb_update_local_rib_entry_attributes (p, old_select, bgp, safi);
-#endif
           return WQ_SUCCESS;
         }
     }
@@ -1640,9 +1637,6 @@ bgp_process_main (struct work_queue *wq, void *data)
 	}
     }
 #ifdef ENABLE_OVSDB
-  if (old_select) {
-      bgp_ovsdb_update_local_rib_entry_attributes (p, old_select, bgp, safi);
-  }
   if (new_select) {
       bgp_ovsdb_update_local_rib_entry_attributes (p, new_select, bgp, safi);
   }

@@ -55,6 +55,11 @@
 #include "bgpd/bgp_ovsdb_if.h"
 #include "bgpd/bgp_table.h"
 #include "bgpd/bgp_route.h"
+#include "bgpd/bgp_community.h"
+#include "bgpd/bgp_ecommunity.h"
+#include "bgpd/bgp_nexthop.h"
+#include "bgpd/bgp_aspath.h"
+#include "bgpd/bgp_advertise.h"
 #include "linklist.h"
 #include "dynamic-string.h"
 #include "sockunion.h"
@@ -482,6 +487,150 @@ ovsdb_init (const char *db_path)
     unixctl_command_register("bgpd/diag", "buffer size", 1, 1, bgp_diag_buff_set, NULL);
 }
 
+/* Show BGP memory usage information */
+static void
+bgp_dump_memory (struct ds *ds)
+{
+    char memstrbuf[MTYPE_MEMSTR_LEN];
+    unsigned long count;
+
+    if(!ds) {
+        VLOG_ERR("Invalid Entry\n");
+        return;
+    }
+
+    /* RIB related usage stats */
+    count = mtype_stats_alloc (MTYPE_BGP_NODE);
+    ds_put_format (ds, "%ld RIB nodes, using %s of memory\n", count,
+                   mtype_memstr (memstrbuf, sizeof (memstrbuf),
+                                 count * sizeof (struct bgp_node)));
+
+    count = mtype_stats_alloc (MTYPE_BGP_ROUTE);
+    ds_put_format (ds, "%ld BGP routes, using %s of memory\n", count,
+                   mtype_memstr (memstrbuf, sizeof (memstrbuf),
+                                 count * sizeof (struct bgp_info)));
+
+    count = mtype_stats_alloc (MTYPE_BGP_ROUTE_EXTRA);
+    if (count > 0)
+        ds_put_format (ds, "%ld BGP route ancillaries, using %s of memory\n",
+                       count,
+                       mtype_memstr (memstrbuf, sizeof (memstrbuf),
+                                     count * sizeof (struct bgp_info_extra)));
+
+    count = mtype_stats_alloc (MTYPE_BGP_STATIC);
+    if (count > 0)
+        ds_put_format (ds, "%ld Static routes, using %s of memory\n",
+                       count,
+                       mtype_memstr (memstrbuf, sizeof (memstrbuf),
+                                     count * sizeof (struct bgp_static)));
+
+    /* Adj-In/Out */
+    count = mtype_stats_alloc (MTYPE_BGP_ADJ_IN);
+    if (count > 0)
+        ds_put_format (ds, "%ld Adj-In entries, using %s of memory\n",
+                       count,
+                       mtype_memstr (memstrbuf, sizeof (memstrbuf),
+                                     count * sizeof (struct bgp_adj_in)));
+
+    count = mtype_stats_alloc (MTYPE_BGP_ADJ_OUT);
+    if (count > 0)
+        ds_put_format (ds, "%ld Adj-Out entries, using %s of memory\n",
+                       count,
+                       mtype_memstr (memstrbuf, sizeof (memstrbuf),
+                                     count * sizeof (struct bgp_adj_out)));
+
+    count = mtype_stats_alloc (MTYPE_BGP_NEXTHOP_CACHE);
+    if (count > 0)
+        ds_put_format (ds, "%ld Nexthop cache entries, using %s of memory\n",
+                       count,
+                       mtype_memstr (memstrbuf, sizeof (memstrbuf),
+                                     count * sizeof (struct bgp_nexthop_cache)));
+
+    /* Attributes */
+    count = attr_count();
+    if (count > 0)
+        ds_put_format (ds, "%ld BGP attributes, using %s of memory\n",
+                       count,
+                       mtype_memstr (memstrbuf, sizeof (memstrbuf),
+                                     count * sizeof(struct attr)));
+    count = mtype_stats_alloc (MTYPE_ATTR_EXTRA);
+    if (count > 0)
+        ds_put_format (ds, "%ld BGP extra attributes, using %s of memory\n",
+                       count,
+                       mtype_memstr (memstrbuf, sizeof (memstrbuf),
+                                     count * sizeof(struct attr_extra)));
+
+    count = attr_unknown_count();
+    if (count > 0)
+        ds_put_format (ds, "%ld unknown attributes\n", count);
+
+    /* AS_PATH attributes */
+    count = aspath_count ();
+    if (count > 0)
+        ds_put_format (ds, "%ld BGP AS-PATH entries, using %s of memory\n",
+                       count,
+                       mtype_memstr (memstrbuf, sizeof (memstrbuf),
+                                     count * sizeof (struct aspath)));
+
+    count = mtype_stats_alloc (MTYPE_AS_SEG);
+    if (count > 0)
+        ds_put_format (ds, "%ld BGP AS-PATH segments, using %s of memory\n",
+                       count,
+                       mtype_memstr (memstrbuf, sizeof (memstrbuf),
+                                     count * sizeof (struct assegment)));
+
+    /* Other attributes */
+    count = community_count ();
+    if (count > 0)
+        ds_put_format (ds, "%ld BGP community entries, using %s of memory\n",
+                       count,
+                       mtype_memstr (memstrbuf, sizeof (memstrbuf),
+                                     count * sizeof (struct community)));
+    count = mtype_stats_alloc (MTYPE_ECOMMUNITY);
+    if (count > 0)
+        ds_put_format (ds,
+                       "%ld BGP ecommunity entries, using %s of memory\n",
+                       count,
+                       mtype_memstr (memstrbuf, sizeof (memstrbuf),
+                                     count * sizeof (struct ecommunity)));
+
+    count = mtype_stats_alloc (MTYPE_CLUSTER);
+    if (count > 0)
+        ds_put_format (ds,
+                       "%ld Cluster lists, using %s of memory%s",
+                       count,
+                       mtype_memstr (memstrbuf, sizeof (memstrbuf),
+                                     count * sizeof (struct cluster_list)));
+
+    /* Peer related usage */
+    count = mtype_stats_alloc (MTYPE_BGP_PEER);
+    ds_put_format (ds, "%ld peers, using %s of memory\n", count,
+                   mtype_memstr (memstrbuf, sizeof (memstrbuf),
+                   count * sizeof (struct peer)));
+
+    count = mtype_stats_alloc (MTYPE_PEER_GROUP);
+    if (count > 0)
+        ds_put_format (ds, "%ld peer groups, using %s of memory\n",
+                       count,
+                       mtype_memstr (memstrbuf, sizeof (memstrbuf),
+                                     count * sizeof (struct peer_group)));
+
+    /* Other */
+    count = mtype_stats_alloc (MTYPE_HASH);
+    if (count > 0)
+        ds_put_format (ds, "%ld hash tables, using %s of memory\n",
+                       count,
+                       mtype_memstr (memstrbuf, sizeof (memstrbuf),
+                                     count * sizeof (struct bgp_mem_hash)));
+    count = mtype_stats_alloc (MTYPE_HASH_BACKET);
+    if (count > 0)
+        ds_put_format (ds, "%ld hash buckets, using %s of memory\n",
+                       count,
+                       mtype_memstr (memstrbuf, sizeof (memstrbuf),
+                                     count * sizeof (struct bgp_mem_hash_backet)));
+    ds_put_format (ds, "\n");
+}
+
 /* Show BGP peer's summary information. */
 static void
 bgp_dump_summary (struct ds *ds, struct bgp *bgp, int afi, int safi)
@@ -713,6 +862,7 @@ bgpd_dump(char *buf, int buf_size)
     bgp = bgp_get_default ();
 
     if (bgp) {
+        bgp_dump_memory(&ds);
         bgp_dump_summary(&ds, bgp, AFI_IP, SAFI_UNICAST);
         for (ALL_LIST_ELEMENTS (bgp->peer, node, nnode, peer))
         {

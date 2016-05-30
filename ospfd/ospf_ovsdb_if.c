@@ -2997,12 +2997,6 @@ ovsdb_area_set_interface(int instance,struct in_addr area_id,
        VLOG_DBG ("No associated Interface exist");
        return;
     }
-    intf_txn = ovsdb_idl_txn_create(idl);
-    if (!intf_txn)
-    {
-        VLOG_DBG ("Transaction create failed");
-        return;
-    }
 
    /* OPS_TODO : Handle loopback/NBMA interfaces */
     if (OSPF_IFTYPE_VIRTUALLINK != oi->type &&
@@ -3013,7 +3007,6 @@ ovsdb_area_set_interface(int instance,struct in_addr area_id,
        if (!ovs_port)
        {
           VLOG_DBG ("No associated port exist for %s",oi->ifp->name);
-          ovsdb_idl_txn_abort(intf_txn);
           return;
        }
     }
@@ -3023,15 +3016,20 @@ ovsdb_area_set_interface(int instance,struct in_addr area_id,
        if (!ovs_vl)
        {
           VLOG_DBG ("No associated VLINK exist for %s",oi->ifp->name);
-          ovsdb_idl_txn_abort(intf_txn);
           return;
        }
     }
     else {
        VLOG_DBG ("Invalid OSPF interface type");
-       ovsdb_idl_txn_abort(intf_txn);
+       return;
     }
 
+    intf_txn = ovsdb_idl_txn_create(idl);
+    if (!intf_txn)
+    {
+        VLOG_DBG ("Transaction create failed");
+        return;
+    }
     interface_row = ovsrec_ospf_interface_insert(intf_txn);
     if (!interface_row)
     {
@@ -5105,6 +5103,11 @@ ospf_apply_route_changes (struct ovsdb_idl *idl)
    bool def_route_found = false;
 
    route_first = ovsrec_route_first(idl);
+   if(!route_first)
+   {
+        VLOG_DBG("No Route present");
+        return 0;
+   }
    /*
     * Check if any table changes present.
     * If no change just return from here
@@ -6392,6 +6395,12 @@ ospf_interface_add_from_ovsdb (struct ovsdb_idl *idl, const struct ovsrec_vrf *o
   if_set_value_from_ovsdb (idl, ovs_port, ifp);
 
   ospf_interface_state_update_from_ovsdb (idl, ovs_port, ovs_interface, ifp);
+
+  if (!OSPF_IF_PARAM_CONFIGURED (IF_DEF_PARAMS (ifp), type))
+    {
+      SET_IF_PARAM (IF_DEF_PARAMS (ifp), type);
+      IF_DEF_PARAMS (ifp)->type = ospf_default_iftype(ifp);
+    }
 
   for (i = 0 ; i < ovs_vrf->n_ospf_routers; i++) {
     ovs_ospf_router = ovs_vrf->value_ospf_routers[i];

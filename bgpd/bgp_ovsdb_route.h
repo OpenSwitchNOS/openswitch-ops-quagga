@@ -38,31 +38,23 @@
 #define ROUTE_TABLE         "Route"
 #define PREFIX_MAXLEN            50
 #define MAX_KEY_LEN              60
+/* The batch size for bgp batching is selected after testing with
+ * different batch sizes (10, 20, 30....64).
+ * For 8k routes to be seen in Route table, it took the least time for
+ * batch size 20. Hence, BATCH_SIZE is 20.
+ */
+#define BATCH_SIZE               20
+
 
 struct bgp_info;
 struct prefix;
 struct bgp;
 
-struct ovsdb_idl_txn {
+struct txn_element {
     struct hmap_node hmap_node;
-    struct json *request_id;
-    struct ovsdb_idl *idl;
-    struct hmap txn_rows;
-    enum ovsdb_idl_txn_status status;
-    char *error;
-    bool dry_run;
-    struct ds comment;
-
-    /* Increments. */
-    const char *inc_table;
-    const char *inc_column;
-    struct uuid inc_row;
-    unsigned int inc_index;
-    int64_t inc_new_value;
-
-    /* Inserted rows. */
-    struct hmap inserted_rows;  /* Contains "struct ovsdb_idl_txn_insert"s. */
+    struct ovsdb_idl_txn *txn;
 };
+
 
 enum transaction_state {
     IN_FLIGHT,         /* transaction is being processed, not yet successful */
@@ -185,5 +177,5 @@ extern int
 bgp_ovsdb_republish_route(const struct ovsrec_bgp_router *bgp_first, int asn);
 
 extern void
-bgp_txn_complete_processing(void);
+bgp_txn_complete_processing(struct ovsdb_idl_txn *, bool *);
 #endif /* BGP_OVSDB_RIB_H */

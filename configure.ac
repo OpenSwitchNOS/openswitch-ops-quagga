@@ -188,6 +188,9 @@ AC_GNU_SOURCE
 dnl -------
 dnl libtool
 dnl -------
+if test "${enable_ovsdb}" = "yes"; then
+  LT_INIT([disable-static])
+fi
 AC_PROG_LIBTOOL
 
 dnl ----------------------
@@ -341,6 +344,15 @@ if test "${enable_ovsdb}" = "yes"; then
        LIBS="$LIBS $OVSDB_LIBS"
     ], [
        AC_MSG_ERROR([unable to find libovsdb])
+    ])
+fi
+
+if test "${enable_ovsdb}" = "yes"; then
+  PKG_CHECK_MODULES([OPSCLI], [ops-cli], [
+       AC_SUBST(Cflags)
+       AC_SUBST(Libs)
+    ], [
+       AC_MSG_ERROR([unable to find ops-cli package])
     ])
 fi
 
@@ -1583,7 +1595,7 @@ AC_CONFIG_FILES([Makefile lib/Makefile zebra/Makefile ripd/Makefile
 	  doc/defines.texi
 	  isisd/topology/Makefile
 	  pkgsrc/bgpd.sh pkgsrc/ospf6d.sh pkgsrc/ospfd.sh
-	  pkgsrc/ripd.sh pkgsrc/ripngd.sh pkgsrc/zebra.sh])
+	  pkgsrc/ripd.sh pkgsrc/ripngd.sh pkgsrc/zebra.sh zebra/cli/Makefile])
 AC_CONFIG_FILES([solaris/Makefile])
 
 AC_CONFIG_FILES([vtysh/extract.pl],[chmod +x vtysh/extract.pl])

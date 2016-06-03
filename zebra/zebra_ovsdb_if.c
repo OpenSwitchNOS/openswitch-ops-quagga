@@ -2857,6 +2857,10 @@ ovsdb_init (const char *db_path)
   ovsdb_idl_add_column(idl, &ovsrec_vrf_col_name);
   ovsdb_idl_add_column(idl, &ovsrec_vrf_col_ports);
 
+  /* Register for Active Router-ID column in the VRF table */
+  ovsdb_idl_add_column(idl, &ovsrec_vrf_col_active_router_id);
+  ovsdb_idl_omit_alert(idl, &ovsrec_vrf_col_active_router_id);
+
   /*
    * Intialize the local L3 port hash.
    */
@@ -3975,6 +3979,112 @@ zebra_handle_interface_admin_state_changes (void)
 }
 
 /*
+ * Function to identify IPv4 router-id from the available port list.
+ * Loopback interfaces gets more priority than configured L3 interfaces.
+ */
+static char *
+zebra_ovsdb_get_router_id(struct shash* zebra_cached_l3_ports)
+{
+  struct shash_node *node, *next;
+  struct shash_node *sec_addr_node, *sec_addr_next;
+  struct zebra_l3_port* l3_port = NULL;
+  char *int_ip_addr = NULL;
+  char *router_id = NULL;
+
+  if (!shash_count(zebra_cached_l3_ports)){
+      VLOG_DBG("The L3 port hash table is empty. Can not get the router id");
+      return NULL;
+  }
+
+  /* Get the first available interface from the port list */
+  SHASH_FOR_EACH_SAFE (node, next, zebra_cached_l3_ports){
+      if (!node){
+          VLOG_DBG("No node found in the L3 port hash\n");
+          continue;
+      }
+
+      if (!(node->data)){
+          VLOG_DBG("No node data found\n");
+          continue;
+      }
+
+      l3_port = (struct zebra_l3_port*)node->data;
+
+      if(strstr(l3_port->port_name, "lo"))
+          break;
+      else if ((l3_port->ip4_address != NULL) ||
+               !shash_count(&(l3_port->ip4_address_secondary)))
+          break;
+  }
+
+  /* Get the IPv4 address or secondary IPv4 address from the selected interface */
+  if (l3_port != NULL){
+      VLOG_DBG("L3 port selected for router ID is %s ipaddr = \n",
+                        l3_port->port_name, l3_port->ip4_address);
+      if(l3_port->ip4_address != NULL)
+          int_ip_addr = l3_port->ip4_address;
+      else{
+          SHASH_FOR_EACH_SAFE (sec_addr_node, sec_addr_next,
+                                &(l3_port->ip4_address_secondary)){
+              if (!(sec_addr_node->data)) {
+                  VLOG_DBG("No node data found\n");
+                  continue;
+              }
+              int_ip_addr = (char*)sec_addr_node->data;
+              break;
+            }
+        }
+    }
+  /* Form the router-id */
+  if (int_ip_addr != NULL)
+      router_id = strtok(int_ip_addr , "/");
+
+  VLOG_DBG("Identified router ID is %s\n", router_id);
+  return router_id;
+}
+
+/*
+ * Update System table router_id in OVSDB
+ */
+static void
+zebra_ovsdb_update_active_router_id(char *router_id)
+{
+  const struct ovsrec_vrf *ovs_vrf = NULL;
+
+  VLOG_DBG("Received Router ID as : %s", router_id);
+  if (router_id != NULL){
+      /* Update router id for each VRF */
+      OVSREC_VRF_FOR_EACH(ovs_vrf, idl) {
+          /*
+           * TODO: For each VRF check for user configured router-id,
+           *       if it is already present then do not use ZEBRA identified router-id,
+           *       instead update the user configured router-id as active_router_id.
+           *       Routing deamons will pick the active_router_id and use it as
+           *       the protocol specific router-id.
+           *       Below is the sample code which need to be added once user configurable
+           *       router-id support is available.
+           *
+           *       if (!ovs_vrf->router_id &&
+           *           strcmp(ovs_vrf->router_id, ovs_vrf->active_router_id) != 0){
+           *          ovsrec_vrf_set_active_router_id(ovs_vrf, ovs_vrf->router_id);
+           *       }
+           */
+          /* Set the active router id if not set already */
+          if(ovs_vrf->active_router_id == NULL ||
+                  strcmp(ovs_vrf->active_router_id, router_id) != 0){
+              VLOG_DBG("Zebra identified active_router_id = %s", router_id);
+              ovsrec_vrf_set_active_router_id(ovs_vrf, router_id);
+              VLOG_DBG("Zebra identified active_router_id = %s", router_id);
+              zebra_txn_updates = true;
+          }
+      }
+  }
+  else {
+      VLOG_DBG("Router ID can not be NULL");
+  }
+}
+
+/*
  * This function handles the port add/delete events. THis function
  * eventually deletes the next-hops or routes if the resolving
  * interface is deleted or chnaged to L2.
@@ -3983,6 +4093,7 @@ static void
 zebra_handle_port_add_delete_changes (void)
 {
   const struct ovsrec_port *first_port_row = NULL;
+  char *router_id = NULL;
 
   first_port_row = ovsrec_port_first(idl);
   if (!first_port_row)
@@ -4062,6 +4173,9 @@ zebra_handle_port_add_delete_changes (void)
   list_free(zebra_route_del_list);
 
   zebra_cleanup_if_port_updated_or_changed();
+
+  router_id = zebra_ovsdb_get_router_id(&zebra_cached_l3_ports);
+  zebra_ovsdb_update_active_router_id(router_id);
 }
 
 /* Check if any changes are there to the idl and update

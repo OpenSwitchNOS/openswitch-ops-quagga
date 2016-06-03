@@ -1266,6 +1266,7 @@ rib_install_kernel (struct route_node *rn, struct rib *rib)
   struct nexthop *nexthop, *tnexthop;
   rib_table_info_t *info = rn->table->info;
   int recursing;
+  char ping_cmd[255];
 
   if (info->safi != SAFI_UNICAST)
     {
@@ -1282,10 +1283,27 @@ rib_install_kernel (struct route_node *rn, struct rib *rib)
   switch (PREFIX_FAMILY (&rn->p))
     {
     case AF_INET:
+      // ping next hops to resolve them
+      for (ALL_NEXTHOPS_RO(rib->nexthop, nexthop, tnexthop, recursing))
+      {
+        if(snprintf(ping_cmd, 255, "ping -c1 %s",
+                    inet_ntoa(nexthop->gate.ipv4)) < 255)
+        {
+          system(ping_cmd);
+        }
+      }
       ret = kernel_add_ipv4 (&rn->p, rib);
       break;
 #ifdef HAVE_IPV6
     case AF_INET6:
+      for (ALL_NEXTHOPS_RO(rib->nexthop, nexthop, tnexthop, recursing))
+      {
+        if(snprintf(ping_cmd, 255, "ping6 -c1 %s",
+                    inet6_ntoa(nexthop->gate.ipv6)) < 255)
+        {
+          system(ping_cmd);
+        }
+      }
       ret = kernel_add_ipv6 (&rn->p, rib);
       break;
 #endif /* HAVE_IPV6 */

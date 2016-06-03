@@ -1266,6 +1266,11 @@ rib_install_kernel (struct route_node *rn, struct rib *rib)
   struct nexthop *nexthop, *tnexthop;
   rib_table_info_t *info = rn->table->info;
   int recursing;
+#ifdef ENABLE_OVSDB
+  char ping_cmd[MAX_PING_CMD_LEN];
+  int  ping_attempts = 0;
+  int  rc = 0;
+#endif /* ENABLE_OVSDB */
 
   if (info->safi != SAFI_UNICAST)
     {
@@ -1282,10 +1287,52 @@ rib_install_kernel (struct route_node *rn, struct rib *rib)
   switch (PREFIX_FAMILY (&rn->p))
     {
     case AF_INET:
+#ifdef ENABLE_OVSDB
+      /* ping next hops to resolve them */
+      for (ALL_NEXTHOPS_RO(rib->nexthop, nexthop, tnexthop, recursing))
+        {
+          if(snprintf(ping_cmd, MAX_PING_CMD_LEN, "ping -c1 %s",
+                    inet_ntoa(nexthop->gate.ipv4)) < MAX_PING_CMD_LEN)
+            {
+              while((rc = system(ping_cmd)) < 0 &&
+                  ping_attempts < MAX_PING_ATTEMPTS)
+                {
+                  ping_attempts++;
+                }
+              if (ping_attempts >= MAX_PING_ATTEMPTS)
+                {
+                  VLOG_DBG("Nexthop %s failed (%d) to resolve while"
+                           "installing in kernel",
+                           inet_ntoa(nexthop->gate.ipv4), rc);
+                }
+            }
+        }
+#endif /* ENABLE_OVSDB */
       ret = kernel_add_ipv4 (&rn->p, rib);
       break;
 #ifdef HAVE_IPV6
     case AF_INET6:
+#ifdef ENABLE_OVSDB
+      /* ping next hops to resolve them */
+      for (ALL_NEXTHOPS_RO(rib->nexthop, nexthop, tnexthop, recursing))
+        {
+          if(snprintf(ping_cmd, MAX_PING_CMD_LEN, "ping6 -c1 %s",
+                      inet6_ntoa(nexthop->gate.ipv6)) < MAX_PING_CMD_LEN)
+            {
+              while((rc = system(ping_cmd)) < 0 &&
+                    ping_attempts < MAX_PING_ATTEMPTS)
+                {
+                  ping_attempts++;
+                }
+              if (ping_attempts >= MAX_PING_ATTEMPTS)
+                {
+                  VLOG_DBG("Nexthop %s failed (%d) to resolve while"
+                           "installing in kernel",
+                           inet6_ntoa(nexthop->gate.ipv6), rc);
+                }
+            }
+        }
+#endif /* ENABLE_OVSDB */
       ret = kernel_add_ipv6 (&rn->p, rib);
       break;
 #endif /* HAVE_IPV6 */

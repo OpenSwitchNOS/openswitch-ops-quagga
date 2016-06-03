@@ -30,6 +30,11 @@
 
 #define DISTANCE_INFINITY  255
 
+#ifdef ENABLE_OVSDB
+#define MAX_PING_CMD_LEN   255
+#define MAX_PING_ATTEMPTS  3
+#endif /* ENABLE_OVSDB */
+
 /* Routing information base. */
 
 union g_addr {

@@ -45,7 +45,6 @@
  */
 #define BATCH_SIZE               20
 
-
 struct bgp_info;
 struct prefix;
 struct bgp;

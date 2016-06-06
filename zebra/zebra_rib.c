@@ -47,6 +47,7 @@
 #include "coverage.h"
 #include "openvswitch/vlog.h"
 #include "zebra/zebra_ovsdb_if.h"
+#include "zebra/zebra_diagnostics.h"
 #endif
 
 /* Default rtm_table for all clients */
@@ -1544,12 +1545,12 @@ static bool if_rib_entry_and_kernel_entry_are_same_for_nexthops
   /*
    * Dump the route next-hop learned from kernel after zerba restart
    */
-  zebra_dump_internal_rib_entry(prefix_kernel, kernel);
+  zebra_dump_internal_rib_entry(NULL, prefix_kernel, kernel);
 
   /*
    * Dump the route next-hop learned from zebra after zerba restart
    */
-  zebra_dump_internal_rib_entry(prefix_current, current);
+  zebra_dump_internal_rib_entry(NULL, prefix_current, current);
 
   if (!kernel && !current)
     {

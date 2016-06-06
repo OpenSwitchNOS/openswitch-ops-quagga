@@ -35,7 +35,8 @@ AM_LDFLAGS = $(PILDFLAGS)
 if ENABLE_OVSDB
 zebra_ovsdb_if_LDADD = libzebra_ovsdb_if.a
 noinst_LIBRARIES = libzebra_ovsdb_if.a
-libzebra_ovsdb_if_a_SOURCES = zebra_ovsdb_if.c zebra_ovsdb_if.h
+libzebra_ovsdb_if_a_SOURCES = zebra_ovsdb_if.c zebra_ovsdb_if.h \
+  zebra_diagnostics.c zebra_diagnostics.h
 libzebra_ovsdb_if_a_CFLAGS = $(AM_CFLAGS) -Werror
 endif
 

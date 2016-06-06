@@ -22,6 +22,9 @@
 #ifndef ZEBRA_OVSDB_IF_H
 #define ZEBRA_OVSDB_IF_H 1
 
+#include "uuid.h"
+#include "shash.h"
+
 #define ZEBRA_RT_UNINSTALL  0
 #define ZEBRA_RT_INSTALL    1
 
@@ -61,6 +64,56 @@ struct zebra_route_del_data
   struct nexthop *nexthop;
 };
 
+/*
+ * Type of port actions. The action done on the port is stored in the
+ * cached L3 port node.
+ */
+enum zebra_l3_port_cache_actions
+{
+  ZEBRA_L3_PORT_NO_CHANGE,
+  ZEBRA_L3_PORT_ADD,
+  ZEBRA_L3_PORT_L3_CHANGED_TO_L2,
+  ZEBRA_L3_PORT_DELETE,
+  ZEBRA_L3_PORT_UPADTE_IP_ADDR
+};
+
+/*
+ * Options under which we need to walk the zebra's route table and
+ * decode which nexthop ports/addresses we need to withdraw from kernel
+ * and remove or mark unselected in the OVSDB tables.
+ */
+enum zebra_handle_port_op_options
+{
+  ZEBRA_L3_PORT_DELETE_UPDATE_OPTION,
+  ZEBRA_L3_PORT_ACTIVE_STATE_CHN_OPTION
+};
+
+/*
+ * The L3 port structure. This structure is used to store the
+ * L3 ovsrec_port data. We need to cache this data in order to
+ * handle triggers like "no routing" on a port where the port
+ * entry in the port table loses all the IP/IPv6 addresses. We
+ * use the cached IP addresses to clean up the kernel and the
+ * update the OVSDB tables appropriately.
+ */
+struct zebra_l3_port
+{
+  char *port_name;                       /* name of the port */
+  char *ip4_address;                     /* Primary IP address on port */
+  char *ip6_address;                     /* Primary IPv6 address on port */
+  struct shash ip4_address_secondary;    /* Hash for the secondary
+                                            IP addresses */
+  struct shash ip6_address_secondary;    /* Hash for the secondary
+                                            IPv6 addresses */
+  struct uuid ovsrec_port_uuid;          /* UUID to the OVSDB port entry */
+  enum zebra_l3_port_cache_actions port_action;   /* Action performed on the
+                                                     port */
+  bool if_active;                        /* If the port is still active in
+                                            event of shut/un-shut triggers
+                                            on the resolving interfaces.*/
+};
+
+
 /* Setup zebra to connect with ovsdb and daemonize. This daemonize is used
  * over the daemonize in the main function to keep the behavior consistent
  * with the other daemons in the OpenSwitch system
@@ -91,10 +144,7 @@ void zebra_update_selected_route_nexthops_to_db (
                                             struct route_node *rn,
                                             struct rib *route,
                                             int action);
-void zebra_dump_internal_nexthop (struct prefix *p, struct nexthop* nexthop);
-void zebra_dump_internal_rib_entry (struct prefix *p, struct rib* rib);
-void zebra_dump_internal_route_node (struct route_node *rn);
-void zebra_dump_internal_route_table (struct route_table *table);
+
 void cleanup_kernel_routes_after_restart();
 extern int zebra_create_txn (void);
 extern int zebra_finish_txn (bool);

@@ -371,7 +371,6 @@ bgp_ovsdb_tables_init (struct ovsdb_idl *idl)
     ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_networks);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_maximum_paths);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_timers);
-    ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_redistribute);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_always_compare_med);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_deterministic_med);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_router_col_gr_stale_timer);
@@ -1190,89 +1189,6 @@ delete_bgp_router_config (struct ovsdb_idl *idl)
 }
 
 void
-delete_redistribute_config(struct ovsdb_idl *idl,
-                           const struct ovsrec_bgp_router *bgp_mod_row,
-                           struct bgp *bgp)
-{
-    const struct ovsrec_bgp_router *ovs_first;
-    int i,j,type;
-    int ret;
-    bool match_found = false;
-    for (j = 0; j < ZEBRA_ROUTE_MAX; j++) {
-        match_found = false;
-        ret = 0;
-        if (bgp->redist[AFI_IP][j] && j != ZEBRA_ROUTE_BGP) {
-            OVSREC_BGP_ROUTER_FOR_EACH(bgp_mod_row, idl) {
-                for (i=0; i< bgp_mod_row->n_redistribute; i++) {
-                    if (strcmp(bgp_mod_row->key_redistribute[i],
-                               zebra_route_string(j)) ==0 ) {
-                        match_found = true;
-                        break;
-                    }
-                }
-                if (match_found == true) {
-                    break;
-                }
-            }
-            if ( match_found == false ) {
-                    ret = bgp_redistribute_unset (bgp, AFI_IP, j);
-                    if (!ret) {
-                        VLOG_DBG("Deleted redistribute %s",
-                                  zebra_route_string(j));
-                    }
-            }
-        }
-    }
-    return;
-}
-
-void
-modify_bgp_redistribute_config(struct ovsdb_idl *idl,struct bgp *bgp_cfg,
-    const struct ovsrec_bgp_router *bgp_mod_row)
-{
-    int i=0;
-    int type;
-    int rmap;
-    int ret_status = -1;
-
-    /* Handle redistribute deletions. */
-    delete_redistribute_config(idl,bgp_mod_row, bgp_cfg);
-
-    VLOG_DBG("Setting  BGP Redistribute protocol configuration");
-    OVSREC_BGP_ROUTER_FOR_EACH(bgp_mod_row, idl) {
-        for (i = 0; i<bgp_mod_row->n_redistribute; i++) {
-            if (strlen(bgp_mod_row->value_redistribute[i]->name) == 0) {
-                type = proto_redistnum (AFI_IP, bgp_mod_row->
-                                        key_redistribute[i]);
-                if (type < 0 || type == ZEBRA_ROUTE_BGP) {
-                    VLOG_DBG("Invalid route type");
-                }
-                ret_status = bgp_redistribute_set(bgp_cfg, AFI_IP, type);
-                if (!ret_status) {
-                    VLOG_DBG("redistribute %s is set",bgp_mod_row->
-                             key_redistribute[i]);
-                }
-            } else {
-                type = proto_redistnum (AFI_IP, bgp_mod_row->
-                                        key_redistribute[i]);
-                if (type < 0 || type == ZEBRA_ROUTE_BGP) {
-                    VLOG_DBG("Invalid route type");
-                }
-
-                rmap=bgp_redistribute_rmap_set (bgp_cfg, AFI_IP, type,
-                                      bgp_mod_row->value_redistribute[i]->name);
-                ret_status = bgp_redistribute_set(bgp_cfg, AFI_IP, type);
-                if (!rmap && !ret_status) {
-                    VLOG_DBG("redistribute %s route-map %s is set",
-                              bgp_mod_row->key_redistribute[i],
-                              bgp_mod_row->value_redistribute[i]->name);
-                }
-            }
-        }
-    }
-}
-
-void
 insert_bgp_router_config (struct ovsdb_idl *idl,
     const struct ovsrec_bgp_router *bgp_first, int64_t asn)
 {
@@ -1372,11 +1288,6 @@ modify_bgp_router_config (struct ovsdb_idl *idl,
         modify_bgp_log_neighbor_changes_config(bgp_cfg, bgp_mod_row);
     }
 
-    /* Check redistribute configuration is modified*/
-    if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_bgp_router_col_redistribute, idl_seqno)) {
-        VLOG_DBG("Redistribute configuration  modified");
-        modify_bgp_redistribute_config(idl, bgp_cfg, bgp_mod_row);
-    }
 }
 
 

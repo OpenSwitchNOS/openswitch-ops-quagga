@@ -2354,7 +2354,7 @@ policy_prefix_list_read_ovsdb_apply_changes(struct ovsdb_idl *idl)
             seqnum = ovs_plist->key_prefix_list_entries[i];
             argcseq =1 ;
 
-            temp_prefix = (char *)malloc(sizeof(ovs_entry->prefix));
+            temp_prefix = (char *)malloc(strlen(ovs_entry->prefix)+1);
 
             strcpy(temp_prefix,ovs_entry->prefix);
             strtok(temp_prefix,"/");

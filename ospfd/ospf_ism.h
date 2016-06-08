@@ -98,6 +98,14 @@
       } \
   } while (0)
 
+#ifdef ENABLE_OVSDB
+/* Macro for OSPF HELLO timer turn off.
+   User's reponsibility to do NULL check */
+#define OSPF_HELLO_TIMER_OFF(O) \
+   OSPF_ISM_TIMER_OFF ((O)->t_hello);
+#endif
+
+
 /* Macro for OSPF schedule event. */
 #define OSPF_ISM_EVENT_SCHEDULE(I,E) \
       thread_add_event (master, ospf_ism_event, (I), (E))

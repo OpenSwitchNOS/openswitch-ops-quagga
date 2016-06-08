@@ -56,7 +56,11 @@
 static void nsm_clear_adj (struct ospf_neighbor *);
 
 /* OSPF NSM Timer functions. */
+#ifndef ENABLE_OVSDB
 static int
+#else
+int
+#endif
 ospf_inactivity_timer (struct thread *thread)
 {
   struct ospf_neighbor *nbr;

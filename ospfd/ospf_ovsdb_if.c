@@ -78,6 +78,10 @@ ospf_area_type_set (struct ospf_area *area, int type);
 extern void
 ospf_external_info_free (struct external_info *ei);
 
+extern int
+ospf_inactivity_timer (struct thread *thread);
+
+
 /*
  * Static Function Prototypes
  */
@@ -4285,6 +4289,10 @@ ospf_nbr_timer_update (struct ospf_interface *oi)
 {
   struct route_node *rn;
   struct ospf_neighbor *nbr;
+  struct timeval ovsdb_dead;
+  long dead_due_at = 0;
+
+   memset (&ovsdb_dead,0,sizeof (ovsdb_dead));
 
   for (rn = route_top (oi->nbrs); rn; rn = route_next (rn))
     if ((nbr = rn->info))
@@ -4293,6 +4301,20 @@ ospf_nbr_timer_update (struct ospf_interface *oi)
        nbr->v_db_desc = OSPF_IF_PARAM (oi, retransmit_interval);
        nbr->v_ls_req = OSPF_IF_PARAM (oi, retransmit_interval);
        nbr->v_ls_upd = OSPF_IF_PARAM (oi, retransmit_interval);
+
+       if (oi->nbr_self != nbr)
+       {
+           /* Start or Restart Inactivity Timer. */
+           OSPF_NSM_TIMER_OFF (nbr->t_inactivity);
+
+           OSPF_NSM_TIMER_ON (nbr->t_inactivity, ospf_inactivity_timer,
+                          nbr->v_inactivity);
+           quagga_gettime (QUAGGA_CLK_MONOTONIC,&ovsdb_dead);
+           ovsdb_dead.tv_sec += nbr->v_inactivity;
+           dead_due_at = (1000000 * ovsdb_dead.tv_sec + ovsdb_dead.tv_usec)/1000;
+           ovsdb_ospf_set_dead_time_intervals (nbr->oi->ifp->name,
+                            OSPF_TIME_INTERVAL_DEAD_DUE,dead_due_at,nbr->src);
+       }
     }
 }
 
@@ -4303,14 +4325,15 @@ modify_ospf_interface (struct ovsdb_idl *idl,
 {
     const struct ovsdb_idl_column *column = NULL;
     struct interface* ifp = NULL;
+    struct ospf* ospf = NULL;
     struct ospf_if_params *params = NULL;
-    struct ospf_interface *oi;
     struct route_node *rn = NULL;
     struct crypt_key *ck = NULL;
     struct crypt_key *lookup_ck = NULL;
     struct listnode *node;
+    struct prefix oi_prefix;
     unsigned char key_id;
-    u_int32_t seconds = 0;
+    u_int32_t seconds = 0, tmp = 0;
     u_int32_t val = 0;
     int ret_status = -1;
     int i =0;
@@ -4328,6 +4351,7 @@ modify_ospf_interface (struct ovsdb_idl *idl,
          return;
     }
     params = IF_DEF_PARAMS (ifp);
+    ospf = ospf_lookup_by_instance(OSPF_DEFAULT_INSTANCE);
     /* Check if ospf intervals are modified */
     if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_port_col_ospf_intervals, idl_seqno)) {
         /*!!!!Change the sorted enum list if new key value pair is added */
@@ -4339,13 +4363,26 @@ modify_ospf_interface (struct ovsdb_idl *idl,
                 VLOG_DBG("Hello Interval is invalid");
             else {
                 SET_IF_PARAM (params, v_hello);
+                tmp = params->v_hello;
                 params->v_hello = seconds;
+                if (ospf && (params->v_hello < tmp)) {
+                    struct ospf_interface *oi = NULL;
+                    if (ovs_port->ip4_address &&
+                       str2prefix(ovs_port->ip4_address,&oi_prefix)) {
+                         oi = ospf_if_table_lookup(ifp,&oi_prefix);
+                         if (oi) {
+                            OSPF_HELLO_TIMER_OFF(oi);
+                            OSPF_HELLO_TIMER_ON(oi);
+                         }
+                    }
+                }
             }
 
             seconds = ovs_port->value_ospf_intervals [OVS_OSPF_DEAD_INTERVAL_SORTED];
             if (seconds < OSPF_MIN_INTERVAL || seconds > OSPF_MAX_INTERVAL)
                 VLOG_DBG("Dead Interval is invalid");
             else {
+                struct ospf_interface *oi = NULL;
                 SET_IF_PARAM (params, v_wait);
                 params->v_wait = seconds;
                 for (rn = route_top (IF_OIFS (ifp)); rn; rn = route_next (rn))

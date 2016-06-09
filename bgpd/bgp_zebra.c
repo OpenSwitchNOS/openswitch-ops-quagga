@@ -46,6 +46,7 @@ struct in_addr router_id_zebra;
 /* Growable buffer for nexthops sent to zebra */
 struct stream *bgp_nexthop_buf = NULL;
 
+#ifndef ENABLE_OVSDB
 /* Router-id update message from zebra. */
 static int
 bgp_router_id_update (int command, struct zclient *zclient, zebra_size_t length)
@@ -71,15 +72,12 @@ bgp_router_id_update (int command, struct zclient *zclient, zebra_size_t length)
         bgp_router_id_set (bgp, &router_id.u.prefix4);
        /* Update router_id_zebra in the database, if there is no router-id
         * configured in the database */
-#ifdef ENABLE_OVSDB
-        update_bgp_router_id_in_ovsdb((int64_t)bgp->as,
-                                       inet_ntoa(router_id_zebra));
-#endif
       }
     }
 
   return 0;
 }
+#endif
 
 /* Inteface addition message from zebra. */
 static int
@@ -1098,7 +1096,11 @@ bgp_zebra_init (void)
   /* Set default values. */
   zclient = zclient_new ();
   zclient_init (zclient, ZEBRA_ROUTE_BGP);
+#ifndef ENABLE_OVSDB
   zclient->router_id_update = bgp_router_id_update;
+#else
+  zclient->router_id_update = NULL;
+#endif
   zclient->interface_add = bgp_interface_add;
   zclient->interface_delete = bgp_interface_delete;
   zclient->interface_address_add = bgp_interface_address_add;

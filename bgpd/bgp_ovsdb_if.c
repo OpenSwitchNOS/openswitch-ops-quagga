@@ -156,6 +156,7 @@ static char *appctl_path = NULL;
 static struct unixctl_server *appctl;
 static int system_configured = false;
 static int diag_buffer_len = BUF_LEN;
+static struct bgp_master *bgpmaster;
 /*
  * Global System ECMP status affects maxpath config
  * Keep a local ECMP status to update when needed
@@ -167,6 +168,8 @@ static int bgp_ovspoll_enqueue (bgp_ovsdb_t *bovs_g);
 static int bovs_cb (struct thread *thread);
 static void bgpd_dump(char *buf, int len);
 static void bgpd_diag_dump_basic_cb(const char *feature , char **buf);
+
+extern struct in_addr router_id_zebra;
 /*
  * ovs appctl dump function for this daemon
  * This is useful for debugging
@@ -214,52 +217,34 @@ void commit_idl_txn(void){
          END_DB_TXN(txn, "Clear counters end db");
     }
 }
+
 /*
- * From vrf row in db to get bgp router with a specific asn
+ * If BGP Router ID is not configured then this function updates
+ * the BGP router id from VRF table active_router_id column.
  */
-static const struct ovsrec_bgp_router *
-get_bgp_router_with_asn ( char *vrf_name, int64_t asn)
+static void
+bgp_update_active_router_id (const struct ovsrec_bgp_router *bgp_router_row,
+                             char *active_router_id)
 {
-    int i;
-    const struct ovsrec_vrf *ovs_vrf;
-    OVSREC_VRF_FOR_EACH(ovs_vrf, idl) {
-        if (!strcmp(ovs_vrf->name, vrf_name)) {
-            for (i = 0; i < ovs_vrf->n_bgp_routers; i++) {
-                if (ovs_vrf->key_bgp_routers[i] == asn) {
-                    return ovs_vrf->value_bgp_routers[i];
-                }
-            }
+    struct ovsdb_idl_txn *bgp_router_txn=NULL;
+    enum ovsdb_idl_txn_status status;
+    struct prefix active_router_id_prefix;
+    struct listnode *node, *nnode;
+    struct bgp *bgp = NULL;
+
+    VLOG_DBG("BGP received active_router_id update: %s, \
+            Current value of BGP router_id: %s",
+            active_router_id, bgp_router_row->router_id);
+    str2prefix(active_router_id, &active_router_id_prefix);
+    router_id_zebra = active_router_id_prefix.u.prefix4;
+
+    for (ALL_LIST_ELEMENTS (bgpmaster->bgp, node, nnode, bgp)){
+        if (bgp->router_id_static.s_addr == 0){
+            bgp_router_id_set (bgp, &active_router_id_prefix.u.prefix4);
+            VLOG_INFO("Setting active_router_id for BGP ASN: %d", bgp->as);
+            break;
         }
     }
-    return NULL;
-}
-
-/*
- * Update the bgp router id in the router_id column of
- * bgp router table in db
- */
-void
-update_bgp_router_id_in_ovsdb (int64_t asn, char *router_id)
-{
-    const struct ovsrec_bgp_router *bgp_router_row;
-    const struct ovsrec_vrf *vrf_row;
-    struct ovsdb_idl_txn *bgp_router_txn=NULL;
-    commit_idl_txn();
-    bgp_router_txn = ovsdb_idl_txn_create(idl);
-    if (bgp_router_txn == NULL) {
-        return;
-    }
-
-    bgp_router_row =
-        get_bgp_router_with_asn(DEFAULT_VRF_NAME, asn);
-    if (bgp_router_row == NULL) {
-        VLOG_ERR("No BGP Router found in OVSDB");
-    } else {
-        ovsrec_bgp_router_set_router_id(bgp_router_row,
-                                      router_id);
-    }
-    ovsdb_idl_txn_commit(bgp_router_txn);
-    ovsdb_idl_txn_destroy(bgp_router_txn);
 }
 
 /*
@@ -369,6 +354,7 @@ bgp_ovsdb_tables_init (struct ovsdb_idl *idl)
     ovsdb_idl_add_table(idl, &ovsrec_table_vrf);
     ovsdb_idl_add_column(idl, &ovsrec_vrf_col_name);
     ovsdb_idl_add_column(idl, &ovsrec_vrf_col_bgp_routers);
+    ovsdb_idl_add_column(idl, &ovsrec_vrf_col_active_router_id);
 
     /* BGP router table */
     ovsdb_idl_add_table(idl, &ovsrec_table_bgp_router);
@@ -1271,6 +1257,30 @@ apply_bgp_neighbor_aspath_filter_changes(const struct ovsrec_bgp_neighbor *ovs_b
 }
 
 static void
+bgp_update_router_id_from_active_router_id(void)
+{
+    const struct ovsrec_vrf *ovs_vrf;
+    const struct ovsrec_bgp_router *ovs_bgp;
+    char *router_id = NULL;
+    int i;
+
+    OVSREC_VRF_FOR_EACH(ovs_vrf, idl) {
+        if (!strcmp(ovs_vrf->name, DEFAULT_VRF_NAME)) {
+            for (i = 0; i < ovs_vrf->n_bgp_routers; i++) {
+                ovs_bgp = ovs_vrf->value_bgp_routers[i];
+                if (ovs_bgp != NULL){
+                    router_id = ovs_vrf->active_router_id;
+                    VLOG_DBG("Setting BGP router_id to %s from active_router_id", router_id);
+
+                    if (router_id != NULL)
+                        bgp_update_active_router_id(ovs_bgp, router_id);
+                }
+            }
+        }
+    }
+}
+
+static void
 bgp_apply_global_changes (void)
 {
     const struct ovsrec_system *sys;
@@ -1860,7 +1870,8 @@ bgp_apply_bgp_router_changes (struct ovsdb_idl *idl)
      */
     if (bgp_first && !OVSREC_IDL_ANY_TABLE_ROWS_INSERTED(bgp_first, idl_seqno)
         && !OVSREC_IDL_ANY_TABLE_ROWS_DELETED(bgp_first, idl_seqno)
-        && !OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED(bgp_first, idl_seqno)) {
+        && !OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED(bgp_first, idl_seqno)
+        && !OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_vrf_col_active_router_id, idl_seqno)) {
         VLOG_DBG("No BGP_Router changes");
         return;
     }
@@ -1878,6 +1889,11 @@ bgp_apply_bgp_router_changes (struct ovsdb_idl *idl)
     /* Check if any row deletion */
     if (OVSREC_IDL_ANY_TABLE_ROWS_DELETED(bgp_first, idl_seqno)) {
         delete_bgp_router_config(idl);
+    }
+
+    if (NULL == bgp_first->router_id
+        || OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_vrf_col_active_router_id, idl_seqno)){
+         bgp_update_router_id_from_active_router_id();
     }
 
     /* insert and modify cases */
@@ -2044,6 +2060,7 @@ bgp_daemon_ovsdb_neighbor_statistics_update (bool start_new_db_txn,
     char *keywords[MAX_BGP_NEIGHBOR_STATS];
     int64_t values [MAX_BGP_NEIGHBOR_STATS];
     int count;
+    enum ovsdb_idl_txn_status status;
 
 #define ADD_BGPN_STAT(key, value) \
     keywords[count] = key; \
@@ -2093,8 +2110,10 @@ bgp_daemon_ovsdb_neighbor_statistics_update (bool start_new_db_txn,
 	keywords, values, count);
 
     if (start_new_db_txn) {
-	ovsdb_idl_txn_commit(db_txn);
-	ovsdb_idl_txn_destroy(db_txn);
+        status = ovsdb_idl_txn_commit(db_txn);
+        ovsdb_idl_txn_destroy(db_txn);
+        VLOG_DBG("%s OVSDB Neighbour statistics update transaction status is %s",
+                __FUNCTION__, ovsdb_idl_txn_status_to_string(status));
     }
 }
 
@@ -2166,8 +2185,9 @@ void bgp_daemon_ovsdb_neighbor_update (struct peer *peer,
     }
 
     status = ovsdb_idl_txn_commit(db_txn);
+    VLOG_DBG("%s OVSDB Neighbour update status is %s", __FUNCTION__,
+                    ovsdb_idl_txn_status_to_string(status));
     ovsdb_idl_txn_destroy(db_txn);
-    VLOG_DBG("txn result: %s\n", ovsdb_idl_txn_status_to_string(status));
 }
 
 static int
@@ -2699,7 +2719,7 @@ bgp_nbr_read_ovsdb_apply_changes (struct ovsdb_idl *idl)
     char peer[80];
     int i, j;
     struct bgp *bgp_instance;
-    struct ovsdb_idl_txn *confirm_txn = NULL;
+    static struct ovsdb_idl_txn *confirm_txn = NULL;
     enum ovsdb_idl_txn_status status;
     int req_cnt_in, perf_cnt_in, req_cnt_out, perf_cnt_out;
 
@@ -3119,6 +3139,7 @@ void bgp_ovsdb_init_poll_loop (struct bgp_master *bm)
         VLOG_ERR("OVS not enabled for bgp. Return\n");
         return;
     }
+    bgpmaster  = bm;
     glob_bgp_ovs.master = bm->master;
 
     bgp_ovs_clear_fds();

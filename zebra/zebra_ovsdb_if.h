@@ -22,11 +22,33 @@
 #ifndef ZEBRA_OVSDB_IF_H
 #define ZEBRA_OVSDB_IF_H 1
 
-#define ZEBRA_RT_UNINSTALL  0
-#define ZEBRA_RT_INSTALL    1
+/*
+ * Zebra route install and un-install codes
+ */
+#define ZEBRA_RT_UNINSTALL             0
+#define ZEBRA_RT_INSTALL               1
 
-#define ZEBRA_NH_UNINSTALL  ZEBRA_RT_UNINSTALL
-#define ZEBRA_NH_INSTALL    ZEBRA_RT_INSTALL
+/*
+ * Zebra next-hop install and un-install codes
+ */
+#define ZEBRA_NH_UNINSTALL             ZEBRA_RT_UNINSTALL
+#define ZEBRA_NH_INSTALL               ZEBRA_RT_INSTALL
+
+/*
+ * Max IPv4 and IPv6 mask length
+ */
+#define ZEBRA_MAX_IPV4_MASKLEN         32
+#define ZEBRA_MAX_IPV6_MASKLEN         128
+
+/*
+ * Connected route administration distance
+ */
+#define ZEBRA_CONNECTED_ROUTE_DISTANCE 0
+
+/*
+ * Zebra max string length
+ */
+#define ZEBRA_MAX_STRING_LEN           256
 
 /*
  * TODO: Remove this macro once the macro is available through OVSDB IDL
@@ -91,6 +113,9 @@ void zebra_update_selected_route_nexthops_to_db (
                                             struct route_node *rn,
                                             struct rib *route,
                                             int action);
+int
+zebra_ovs_update_selected_route (const struct ovsrec_route *ovs_route,
+                                 bool *selected);
 void zebra_dump_internal_nexthop (struct prefix *p, struct nexthop* nexthop);
 void zebra_dump_internal_rib_entry (struct prefix *p, struct rib* rib);
 void zebra_dump_internal_route_node (struct route_node *rn);

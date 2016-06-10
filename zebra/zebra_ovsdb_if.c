@@ -447,6 +447,28 @@ zebra_dump_internal_route_table (struct route_table *table)
  ********************************************************************
  */
 /*
+ * This function returns the UUID of a some entry in OVSDB in string
+ * format.
+ */
+static inline char*
+zebra_dump_ovsdb_uuid (struct uuid* uuid)
+{
+  static char uuid_to_string[ZEBRA_MAX_STRING_LEN];
+
+  memset(uuid_to_string, 0, ZEBRA_MAX_STRING_LEN);
+
+  if (!uuid)
+    snprintf(uuid_to_string, ZEBRA_MAX_STRING_LEN,
+             "The UUID is NULL");
+  else
+    snprintf(uuid_to_string, ZEBRA_MAX_STRING_LEN, "%u-%u-%u-%u",
+             uuid->parts[0], uuid->parts[1], uuid->parts[2],
+             uuid->parts[3]);
+
+  return(uuid_to_string);
+}
+
+/*
  * This function dumps the details of the next-hops for a given route row in
  * OVSDB route table.
  */
@@ -488,6 +510,7 @@ static void
 zebra_dump_ovsdb_route_entry (const struct ovsrec_route *route_row)
 {
   int next_hop_index;
+  struct uuid route_uuid;
 
   if (!route_row)
     {
@@ -495,15 +518,18 @@ zebra_dump_ovsdb_route_entry (const struct ovsrec_route *route_row)
       return;
     }
 
+  route_uuid = OVSREC_IDL_GET_TABLE_ROW_UUID(route_row);
+
   /*
    * Printing the route row details.
    */
-  VLOG_DBG("Route = %s AF = %s protocol = %s vrf = %s\n %s%s",
+  VLOG_DBG("Route = %s AF = %s protocol = %s vrf = %s\n uuid = %s %s%s",
            route_row->prefix ? route_row->prefix : "NULL",
            route_row->address_family ? route_row->address_family : "NULL",
            route_row->from ? route_row->from : "NULL",
            route_row->vrf ? (route_row->vrf->name ? route_row->vrf->name :
                              "NULL") : "NULL",
+           zebra_dump_ovsdb_uuid(&route_uuid),
            OVSREC_IDL_IS_ROW_INSERTED(route_row, idl_seqno) ? "(I)":"",
            OVSREC_IDL_IS_ROW_MODIFIED(route_row, idl_seqno) ? "(M)":"");
 
@@ -606,12 +632,31 @@ struct zebra_l3_port
   char *ip4_address;                     /* Primary IP address on port */
   char *ip6_address;                     /* Primary IPv6 address on port */
   struct shash ip4_address_secondary;    /* Hash for the secondary
-                                            IP addresses */
+                                            IP addresses. The key is the
+                                            IP address in string format and
+                                            value is IP address in string
+                                            format */
+  struct shash ip4_connected_routes_uuid;/* Hash for the UUIDs for the
+                                            connected routes programmed by
+                                            zebra for the IP addresses on the
+                                            port. The key is connected route
+                                            prefix string and the value is
+                                            OVSDB connected route UUID. */
   struct shash ip6_address_secondary;    /* Hash for the secondary
-                                            IPv6 addresses */
+                                            IPv6 addresses. The key is the
+                                            IPv6 address in string format and
+                                            value is IPv6 address in string
+                                            format */
+  struct shash ip6_connected_routes_uuid;/* Hash for the UUIDs for the
+                                            connected routes programmed by
+                                            zebra for the IPv6 addresses on the
+                                            port. The key is connected route
+                                            prefix string and the value is
+                                            OVSDB connected route UUID.*/
   struct uuid ovsrec_port_uuid;          /* UUID to the OVSDB port entry */
-  enum zebra_l3_port_cache_actions port_action;   /* Action performed on the
-                                                     port */
+  enum zebra_l3_port_cache_actions port_action;
+                                         /* Action performed on the
+                                            port */
   bool if_active;                        /* If the port is still active in
                                             event of shut/un-shut triggers
                                             on the resolving interfaces.*/
@@ -627,6 +672,14 @@ struct shash zebra_cached_l3_ports;
  * changed to L2 ports by configuration.
  */
 struct shash zebra_updated_or_changed_l3_ports;
+
+/*
+ * This hash table stores the connected routes were programmed
+ * by the zebra process in the previous incarnation. This hash table
+ * uses the connected route prefix as the key to store the UUID of the
+ * route in the OVSDB route table.
+ */
+struct shash connected_routes_hash_after_restart;
 
 /*
  * This bool variable keeps track if in given iteration of
@@ -981,6 +1034,24 @@ zebra_get_port_active_state (
               continue;
             }
 
+          /*
+           * If the interface type in loopback, then loopback port
+           * should be placed in admin UP. We cannot shutdown the
+           * loopback interface currently.
+           */
+          if (interface->type && !strcmp(interface->type,
+                                         OVSREC_INTERFACE_TYPE_LOOPBACK))
+            {
+              VLOG_DBG("Loopback interface %s. This is by default admin UP "
+                       "and cannot be admin down", interface->name);
+              active_state = true;
+              break;
+            }
+
+          /*
+           * If the interface state is admin UP, then set the active
+           * state of the port as rtue.
+           */
           if (interface->admin_state &&
               (strcmp(interface->admin_state,
                       OVSREC_INTERFACE_ADMIN_STATE_UP) == 0))
@@ -1027,16 +1098,14 @@ zebra_l3_port_node_create (const struct ovsrec_port* ovsrec_port)
   l3_port->port_name = xstrdup(ovsrec_port->name);
 
   /*
-   * Copy the IPv4 address if the IPv4 address is present on the port.
+   * Set the L3 port node IPv4 address to NULL.
    */
-  if (ovsrec_port->ip4_address)
-    l3_port->ip4_address = xstrdup(ovsrec_port->ip4_address);
+  l3_port->ip4_address = NULL;
 
   /*
-   * Copy the IPv6 address if the IPv6 address is present on the port.
+   * Set the L3 port node IPv6 address to NULL.
    */
-  if (ovsrec_port->ip6_address)
-    l3_port->ip6_address = xstrdup(ovsrec_port->ip6_address);
+  l3_port->ip6_address = NULL;
 
   /*
    * Copy the uuid of the ovsrec_port row for future references.
@@ -1051,58 +1120,24 @@ zebra_l3_port_node_create (const struct ovsrec_port* ovsrec_port)
   l3_port->port_action = ZEBRA_L3_PORT_ADD;
 
   /*
-   * Walk the secondary IPv4 addresses array and add the secondary addresses
-   * into the IPv4 secondary addresses hash.
+   * Initialize the hash for secondary IPv4 addresses
    */
   shash_init(&(l3_port->ip4_address_secondary));
-  for (secondary_addr_index = 0;
-       secondary_addr_index < ovsrec_port->n_ip4_address_secondary;
-       ++ secondary_addr_index)
-    {
-
-      if (!shash_add(
-             &(l3_port->ip4_address_secondary),
-             ovsrec_port->ip4_address_secondary[secondary_addr_index],
-             xstrdup(ovsrec_port->ip4_address_secondary[secondary_addr_index])))
-        {
-          VLOG_ERR("Unable to add the secondary IP address %s to "
-                   "L3 port hash table",
-                   ovsrec_port->ip4_address_secondary[secondary_addr_index]);
-        }
-      else
-        {
-          VLOG_DBG("Added the secondary IP address %s to "
-                    "L3 port hash table",
-                    ovsrec_port->ip4_address_secondary[secondary_addr_index]);
-        }
-    }
 
   /*
-   * Walk the secondary IPv6 addresses array and add the secondary addresses
-   * into the IPv6 secondary addresses hash.
+   * Initialized the hash which will store the UUIDs for the IPv4 connected routes.
+   */
+  shash_init(&(l3_port->ip4_connected_routes_uuid));
+
+  /*
+   * Initialize the hash for secondary IPv6 addresses
    */
   shash_init(&(l3_port->ip6_address_secondary));
-  for (secondary_addr_index = 0;
-       secondary_addr_index < ovsrec_port->n_ip6_address_secondary;
-       ++ secondary_addr_index)
-    {
 
-      if (!shash_add(
-            &(l3_port->ip6_address_secondary),
-            ovsrec_port->ip6_address_secondary[secondary_addr_index],
-            xstrdup(ovsrec_port->ip6_address_secondary[secondary_addr_index])))
-        {
-          VLOG_ERR("Unable to add the secondary IPv6 address %s to "
-                   "L3 port hash table",
-                   ovsrec_port->ip6_address_secondary[secondary_addr_index]);
-        }
-      else
-        {
-          VLOG_DBG("Added the secondary IPv6 address %s to "
-                    "L3 port hash table",
-                    ovsrec_port->ip6_address_secondary[secondary_addr_index]);
-        }
-    }
+  /*
+   * Initialized the hash which will store the UUIDs for the IPv6 connected routes.
+   */
+  shash_init(&(l3_port->ip6_connected_routes_uuid));
 
   /*
    * Set 'if_active' for the port to record if the interface resolving this
@@ -1125,6 +1160,7 @@ zebra_l3_port_node_free (struct zebra_l3_port* l3_port)
 {
   struct shash_node *node, *next;
   char* ip_secondary_address;
+  void* route_uuid;
   int secondary_address_count;
 
   if (!l3_port)
@@ -1177,6 +1213,35 @@ zebra_l3_port_node_free (struct zebra_l3_port* l3_port)
   shash_destroy(&(l3_port->ip4_address_secondary));
 
   /*
+   * Walk the IPv4 connected routes UUID hash table and free the connected route
+   * UUID for secondary IPv4 address.
+   */
+  if (shash_count(&(l3_port->ip4_connected_routes_uuid)))
+    {
+      SHASH_FOR_EACH_SAFE (node, next, &(l3_port->ip4_connected_routes_uuid))
+        {
+          if (!node)
+            {
+              VLOG_ERR("No node found in the L3 port hash\n");
+              continue;
+            }
+
+          if (!(node->data))
+            {
+              VLOG_ERR("No node data found\n");
+              continue;
+            }
+
+          route_uuid = node->data;
+
+          shash_delete(&(l3_port->ip4_connected_routes_uuid), node);
+          free(route_uuid);
+        }
+    }
+
+  shash_destroy(&(l3_port->ip4_connected_routes_uuid));
+
+  /*
    * Walk the IPv6 seocndary hash table, Free the secondary IPv4 address.
    */
   if (shash_count(&(l3_port->ip6_address_secondary)))
@@ -1204,6 +1269,35 @@ zebra_l3_port_node_free (struct zebra_l3_port* l3_port)
 
   shash_destroy(&(l3_port->ip6_address_secondary));
 
+  /*
+   * Walk the IPv6 connected routes UUID hash table and free the connected route
+   * UUID for secondary IPv6 address.
+   */
+  if (shash_count(&(l3_port->ip6_connected_routes_uuid)))
+    {
+      SHASH_FOR_EACH_SAFE (node, next, &(l3_port->ip6_connected_routes_uuid))
+        {
+          if (!node)
+            {
+              VLOG_ERR("No node found in the L3 port hash\n");
+              continue;
+            }
+
+          if (!(node->data))
+            {
+              VLOG_ERR("No node data found\n");
+              continue;
+            }
+
+          route_uuid = node->data;
+
+          shash_delete(&(l3_port->ip6_connected_routes_uuid), node);
+          free(route_uuid);
+        }
+    }
+
+  shash_destroy(&(l3_port->ip6_connected_routes_uuid));
+
   free(l3_port);
 }
 
@@ -1216,7 +1310,8 @@ zebra_l3_port_node_print (struct zebra_l3_port* l3_port)
 {
   struct shash_node *node, *next;
   char* ip_secondary_address;
-  int secondary_address_count;
+  struct uuid* connected_route_uuid;
+  int secondary_address_count, route_uuid_count;
 
   if (!l3_port)
     {
@@ -1234,11 +1329,8 @@ zebra_l3_port_node_print (struct zebra_l3_port* l3_port)
                                                   l3_port->ip6_address :
                                                   "NULL");
 
-  VLOG_DBG("     OVSDB port UUID is: %u-%u-%u-%u",
-           l3_port->ovsrec_port_uuid.parts[0],
-           l3_port->ovsrec_port_uuid.parts[1],
-           l3_port->ovsrec_port_uuid.parts[2],
-           l3_port->ovsrec_port_uuid.parts[3]);
+  VLOG_DBG("     OVSDB port UUID is: %s",
+           zebra_dump_ovsdb_uuid((struct uuid*)&(l3_port->ovsrec_port_uuid)));
 
   VLOG_DBG("     Port action is: %s", zebra_l3_port_cache_actions_str[
                                                      l3_port->port_action]);
@@ -1274,6 +1366,36 @@ zebra_l3_port_node_print (struct zebra_l3_port* l3_port)
         }
     }
 
+  VLOG_DBG("     Printing the IPv4 connected route UUIDs in the port");
+  if (!shash_count(&(l3_port->ip4_connected_routes_uuid)))
+    VLOG_DBG("         No IPv4 connected route UUIDs in the port");
+  else
+    {
+      route_uuid_count = 0;
+      SHASH_FOR_EACH_SAFE (node, next, &(l3_port->ip4_connected_routes_uuid))
+        {
+          if (!node)
+            {
+              VLOG_DBG("No node found in the L3 port hash\n");
+              continue;
+            }
+
+          if (!(node->data))
+            {
+              VLOG_DBG("No node data found\n");
+              continue;
+            }
+
+          connected_route_uuid = (struct uuid*)node->data;
+          ++route_uuid_count;
+
+          VLOG_DBG("         %d. IPv4 connected route UUID %s",
+                   route_uuid_count,
+                   zebra_dump_ovsdb_uuid(connected_route_uuid));
+
+        }
+    }
+
   VLOG_DBG("     Printing the IPv6 seconary address in the port");
   if (!shash_count(&(l3_port->ip6_address_secondary)))
     VLOG_DBG("         No IPv6 seconary address in the port");
@@ -1299,6 +1421,36 @@ zebra_l3_port_node_print (struct zebra_l3_port* l3_port)
 
           VLOG_DBG("         %d. Address %s", secondary_address_count,
                     ip_secondary_address);
+
+        }
+    }
+
+  VLOG_DBG("     Printing the IPv6 connected route UUIDs in the port");
+  if (!shash_count(&(l3_port->ip6_connected_routes_uuid)))
+    VLOG_DBG("         No IPv6 connected route UUIDs in the port");
+  else
+    {
+      route_uuid_count = 0;
+      SHASH_FOR_EACH_SAFE (node, next, &(l3_port->ip6_connected_routes_uuid))
+        {
+          if (!node)
+            {
+              VLOG_DBG("No node found in the L3 port hash\n");
+              continue;
+            }
+
+          if (!(node->data))
+            {
+              VLOG_DBG("No node data found\n");
+              continue;
+            }
+
+          connected_route_uuid = (struct uuid*)node->data;
+          ++route_uuid_count;
+
+          VLOG_DBG("         %d. IPv6 connected route UUID %s",
+                   route_uuid_count,
+                   zebra_dump_ovsdb_uuid(connected_route_uuid));
 
         }
     }
@@ -1484,6 +1636,1486 @@ zebra_cleanup_if_port_updated_or_changed (void)
 }
 
 /*
+ * This function converts an IP/IPv6 address to prefix format. The caller is
+ * responsible for freeing up the memory allocated in this function. This
+ * conversion to prefix format is a 3 step process:
+ * - Convert the IP address string to prefix format.
+ * - Apply the mask i.e. A.B.C.D/24 to A.B.C.0/24
+ * - Convert it back to string to write to DB
+ * - Return the pointer to the converted prefix string.
+ */
+char*
+zebra_convert_ip_addr_to_prefic_format (const char* ip_address, bool is_ipv4)
+{
+  struct prefix_ipv4 v4_prefix;
+  struct prefix_ipv6 v6_prefix;
+  char buf_v4[INET_ADDRSTRLEN];
+  char buf_v6[INET6_ADDRSTRLEN];
+  char* prefix_str;
+  int retval;
+
+  /*
+   * If the IP address in NULL, then return NULL.
+   */
+  if (!ip_address)
+    {
+      VLOG_DBG("The %s address to convert to prefix format is NULL",
+               is_ipv4 ? "IPv4":"IPv6");
+      return(NULL);
+    }
+
+  VLOG_DBG("The %s address to convert to prefix format is %s",
+           is_ipv4 ? "IPv4":"IPv6", ip_address);
+
+  /*
+   * Allocate a string for the converted prefix.
+   */
+  prefix_str = xmalloc(ZEBRA_MAX_STRING_LEN);
+
+  memset(prefix_str, 0, ZEBRA_MAX_STRING_LEN);
+
+  if (is_ipv4)
+    {
+      /*
+       * Split address/subnet string into address and string
+       */
+      memset(&v4_prefix, 0, sizeof(struct prefix_ipv4));
+      retval = str2prefix(ip_address, (struct prefix *)&v4_prefix);
+      if (!retval)
+        {
+          VLOG_ERR("Error converting DB string to prefix: %s",
+                   ip_address);
+          free(prefix_str);
+          return(NULL);
+        }
+
+      /*
+       * Apply the mask to the prefix to convert to IP subnet format.
+       */
+      apply_mask_ipv4(&v4_prefix);
+
+      inet_ntop(AF_INET, &(v4_prefix.prefix), buf_v4, INET_ADDRSTRLEN);
+
+      /*
+       * Convert the IP subnet and masklen to subnet/masklen format
+       */
+      snprintf(prefix_str, ZEBRA_MAX_STRING_LEN-1, "%s/%d", buf_v4,
+               v4_prefix.prefixlen);
+    }
+  else
+    {
+      /*
+       * Split address/subnet string into address and string
+       */
+      memset(&v6_prefix, 0, sizeof(struct prefix_ipv6));
+      retval = str2prefix(ip_address, (struct prefix *)&v6_prefix);
+      if (!retval)
+        {
+          VLOG_ERR("Error converting DB string to prefix: %s",
+                   ip_address);
+          free(prefix_str);
+          return(NULL);
+        }
+
+      /*
+       * Apply the mask to the prefix to convert to IPv6 subnet format.
+       */
+      apply_mask_ipv6(&v6_prefix);
+
+      inet_ntop(AF_INET6, &(v6_prefix.prefix), buf_v6, INET6_ADDRSTRLEN);
+
+      /*
+       * Convert the IPv6 subnet and masklen to subnet/masklen format
+       */
+      snprintf(prefix_str, ZEBRA_MAX_STRING_LEN-1,
+              "%s/%d", buf_v6, v6_prefix.prefixlen);
+    }
+
+  /*
+   * Return the convert prefix format.
+   */
+  return(prefix_str);
+}
+
+
+/*
+ * This function returns the corresponding ovsrec_vrf row for a given port name.
+ */
+const struct ovsrec_vrf* zebra_get_ovsrec_vrf_row_for_port_name (const char *port_name)
+{
+  int iter, count;
+  const struct ovsrec_vrf *row_vrf = NULL;
+  uint32_t string_len;
+
+  /*
+   * If port_name is NULL, then return NULL
+   */
+  if (!port_name)
+    {
+      return(NULL);
+    }
+
+  string_len = strlen(port_name);
+
+  /*
+   * Walk all vrfs in the IDL and find if the port is part of some vrf
+   */
+  OVSREC_VRF_FOR_EACH (row_vrf, idl)
+    {
+      count = row_vrf->n_ports;
+
+      /*
+       * Walk all ports in the vrf and see if the given port occurs
+       * in this vrf.
+       */
+      for (iter = 0; iter < count; iter++)
+        {
+          if (0 == strncmp(port_name, row_vrf->ports[iter]->name,
+                           string_len))
+            return row_vrf;
+        }
+
+    }
+
+  return row_vrf;
+}
+
+/*
+ * This function takes an IPv4/IPv6 address string and adds a connected routes for
+ * this string in OVSDB. The boolean flag 'is_v4' signals if this function needs to
+ * add an IPv4 route or an IPv6 route. After creating a connected route, this function
+ * then adds the temporary route UUID into the L3 port node for future references.
+ * This temporary UUID will updated later once the connected route add
+ * acknowledgement comes from OVSDB.
+ */
+static void
+zebra_add_connected_route_into_ovsdb_route_table (
+                                    char* ip_address,
+                                    bool is_v4,
+                                    struct zebra_l3_port* l3_port)
+{
+  struct uuid* ovsrec_route_uuid = NULL;
+  const struct ovsrec_route *row = NULL;
+  const struct ovsrec_vrf *row_vrf = NULL;
+  const struct ovsrec_port* ovs_port = NULL;
+  struct ovsrec_nexthop *row_nh = NULL;
+  struct shash* route_uuid_hash;
+  bool selected;
+  char* prefix_str;
+  int64_t distance = ZEBRA_CONNECTED_ROUTE_DISTANCE;
+  int retval;
+
+  /*
+   * If IP address is NULL, then there is no connected route to program
+   */
+  if (!ip_address)
+    return;
+
+  /*
+   * If the L3 port node is NULL, then the connected route UUID cannot
+   * be cached.
+   */
+  if (!l3_port)
+    return;
+
+  /*
+   * If zebra is middle of a restart, then we do not add routes in OVSDB.
+   * We should wait until at the end of restart time.
+   */
+  if (zebra_first_run_after_restart)
+    {
+      VLOG_DBG("Do not program the connected routes during the first run"
+                "after restart");
+      return;
+    }
+
+  ovs_port = ovsrec_port_get_for_uuid(idl,
+                     (const struct uuid *)&(l3_port->ovsrec_port_uuid));
+
+  /*
+   * If the OVSDB port node is NULL, then the connected route cannot have
+   * a valid next-hop.
+   */
+  if (!ovs_port)
+    {
+      VLOG_DBG("The next-hop port for the connected route is NULL");
+      return;
+    }
+
+  VLOG_DBG("Adding a connected %s route for %s address on port %s",
+           is_v4 ? "IPv4":"IPv6", ip_address,
+           ip_address, l3_port->port_name);
+
+  prefix_str = zebra_convert_ip_addr_to_prefic_format(ip_address, is_v4);
+
+  if (!prefix_str)
+    {
+      VLOG_DBG("Unable to convert %s address %s into prefix format",
+                is_v4 ? "IPv4":"IPv6", ip_address);
+      return;
+    }
+
+  /*
+   * Get the OVSDB vrf for the next-hop port.
+   */
+  row_vrf= zebra_get_ovsrec_vrf_row_for_port_name(ovs_port->name);
+
+  /*
+   * Populate the route row
+   */
+  row = ovsrec_route_insert(zebra_txn);
+
+  /*
+   * Set the vrf for this connected route.
+   */
+  ovsrec_route_set_vrf(row, row_vrf);
+
+  /*
+   * Set the route prefix for this connected route.
+   */
+  ovsrec_route_set_prefix(row, (const char *)prefix_str);
+
+  if (is_v4)
+    {
+      /*
+       * Set the IPv4 address family for this connected route.
+       */
+      ovsrec_route_set_address_family(row,
+                                      OVSREC_ROUTE_ADDRESS_FAMILY_IPV4);
+    }
+  else
+    {
+      /*
+       * Set the IPv6 address family for this connected route.
+       */
+      ovsrec_route_set_address_family(row,
+                                      OVSREC_ROUTE_ADDRESS_FAMILY_IPV6);
+    }
+
+  /*
+   * Set the sub-address family for the OVSDB route
+   */
+  ovsrec_route_set_sub_address_family(row,
+                                      OVSREC_ROUTE_SUB_ADDRESS_FAMILY_UNICAST);
+
+  /*
+   * Set the route type for the OVSDB route
+   */
+  ovsrec_route_set_from(row, OVSREC_ROUTE_FROM_CONNECTED);
+
+  /*
+   * Connected routes have a distance of 0
+   */
+  ovsrec_route_set_distance(row, &distance, 1);
+
+  /*
+   * Set the selected bit to true for the route entry. The selected bit should
+   * be inherited from the L3 port node
+   */
+  selected = l3_port->if_active;
+
+  /*
+   * Set the selected bit on the route.
+   */
+  ovsrec_route_set_selected(row, (const bool*)&selected, 1);
+
+  /*
+   * Populate the nexthop row
+   */
+  row_nh = ovsrec_nexthop_insert(zebra_txn);
+
+  /*
+   * Set the ovs_port as the next-hop for the connected route
+   */
+  ovsrec_nexthop_set_ports(row_nh, (struct ovsrec_port **)&ovs_port,
+                           row_nh->n_ports + 1);
+
+  /*
+   * Update the route entry with the new nexthop
+   */
+  ovsrec_route_set_nexthops(row, &row_nh, row->n_nexthops + 1);
+
+  /*
+   * Set the slected bit on the route's next-hop
+   */
+  ovsrec_nexthop_set_selected(row_nh, &selected, 1);
+
+  /*
+   * Cache the temporary UUID of the created connected route in OVSDB.
+   */
+  ovsrec_route_uuid = (struct uuid*)xmalloc(sizeof(struct uuid));
+
+  memcpy(ovsrec_route_uuid, &OVSREC_IDL_GET_TABLE_ROW_UUID(row),
+         sizeof(struct uuid));
+
+  if (is_v4)
+    route_uuid_hash = &(l3_port->ip4_connected_routes_uuid);
+  else
+    route_uuid_hash = &(l3_port->ip6_connected_routes_uuid);
+
+  /*
+   * Add the temporary connected route UUID into the L3 cache
+   */
+  if (!shash_add(route_uuid_hash, prefix_str, ovsrec_route_uuid))
+    {
+      VLOG_ERR("Unable to add the temporary route UUID for %s "
+               "address %s to hash", is_v4 ? "IPv4":"IPv6",
+               prefix_str);
+      assert(0);
+      free(ovsrec_route_uuid);
+    }
+  else
+    {
+      VLOG_DBG("Successfully added the temporary route UUID for %s "
+               "address %s to hash", is_v4 ? "IPv4":"IPv6",
+               prefix_str);
+    }
+
+  /*
+   * Publish this route update to OVSDB
+   */
+  zebra_txn_updates = true;
+  free(prefix_str);
+}
+
+/*
+ * This function takes an IPv4/IPv6 address string and deletes the corresponding
+ * connected routes for this string from OVSDB. The boolean flag 'is_v4' signals
+ * if this function needs to delete an IPv4 route or an IPv6 route. After deleting
+ * the connected route, this function then deletes the route UUID from the L3 port
+ * node.
+ */
+static void
+zebra_delete_connected_route_from_ovsdb_route_table (
+                                    char* ip_address,
+                                    bool is_v4,
+                                    struct zebra_l3_port* l3_port)
+{
+  char* prefix_str;
+  struct shash* route_uuid_hash;
+  struct uuid* route_uuid;
+  struct ovsrec_route *route_row = NULL;
+
+  /*
+   * If IP address is NULL, then there is no connected route to delete
+   */
+  if (!ip_address)
+    return;
+
+  /*
+   * If the L3 port node is NULL, then the connected route UUID cannot
+   * be deleted from cache.
+   */
+  if (!l3_port)
+    return;
+
+  /*
+   * If zebra is middle of a restart, then we do not delete routes in OVSDB.
+   * We should wait until at the end of restart time.
+   */
+  if (zebra_first_run_after_restart)
+    {
+      VLOG_DBG("Do not delete the connected routes during the first run"
+               "after restart");
+      return;
+    }
+
+  VLOG_DBG("Deleting the connected %s route for %s address on port %s",
+           is_v4 ? "IPv4":"IPv6", ip_address,
+           l3_port->port_name);
+
+  /*
+   * Convert the IP/IPv6 address into prefix format
+   */
+  prefix_str = zebra_convert_ip_addr_to_prefic_format(ip_address, is_v4);
+
+  if (!prefix_str)
+    {
+      VLOG_DBG("Unable to convert %s address %s into prefix format",
+               is_v4 ? "IPv4":"IPv6", ip_address);
+      return;
+    }
+
+  if (is_v4)
+    route_uuid_hash = &(l3_port->ip4_connected_routes_uuid);
+  else
+    route_uuid_hash = &(l3_port->ip6_connected_routes_uuid);
+
+  /*
+   * Look up the route UUID from the connected routes hash in the L3
+   * port node.
+   */
+  route_uuid = (struct uuid*)shash_find_and_delete(route_uuid_hash,
+                                                   prefix_str);
+
+  /*
+   * If the roue UUID is not found in the L3 port node, then do not
+   * delete the route and return from this function
+   */
+  if (!route_uuid)
+    {
+      VLOG_DBG("Could not find the UUID for the OVSDB route "
+               "for connected route %s", prefix_str);
+      free(prefix_str);
+      return;
+    }
+
+  /*
+   * Look up the route row in OVSDB using the route UUID
+   */
+  route_row = (struct ovsrec_route*)ovsrec_route_get_for_uuid(idl, route_uuid);
+
+  if (!route_row)
+    {
+      VLOG_DBG("Route not found using UUID");
+      free(prefix_str);
+      free(route_uuid);
+      return;
+    }
+
+  /*
+   * Found the route row. Delete the route and its nexthop
+   */
+  if (route_row->n_nexthops)
+    ovsrec_nexthop_delete(route_row->nexthops[0]);
+  ovsrec_route_delete(route_row);
+  zebra_txn_updates = true;
+
+  /*
+   * Free the prefix and route uuid.
+   */
+  free(prefix_str);
+  free(route_uuid);
+}
+
+/*
+ * This function finds if the primary IPv4/IPv6 addresses got changed in OVSDB
+ * port able w.r.t to the L3 port node. In case of a change, we take the folloiwng
+ * two actions:-
+ *
+ * 1. Update the L3 port cache.
+ * 2. Add/Delete the connected routes in OVSDB.
+ *
+ * The bool flag 'is_v4' should be set 'true' for IPv4 and 'false' for IPv6.
+ */
+static void
+zebra_reconfigure_primary_addresses (
+                            bool is_v4,
+                            const struct ovsrec_port* ovsrec_port,
+                            struct zebra_l3_port* l3_port)
+{
+  char* ovsrec_port_primary_address;
+  char** l3_port_primary_address;
+
+  /*
+   * Sanity check on OVSDB port node
+   */
+  if (!ovsrec_port)
+    return;
+
+  /*
+   * Sanity check on cached L3 port node
+   */
+  if (!l3_port)
+    return;
+
+  /*
+   * Check which address family primary address needs to checked for change.
+   */
+  if (is_v4)
+    {
+      ovsrec_port_primary_address = ovsrec_port->ip4_address;
+      l3_port_primary_address = &(l3_port->ip4_address);
+    }
+  else
+    {
+      ovsrec_port_primary_address = ovsrec_port->ip6_address;
+      l3_port_primary_address = &(l3_port->ip6_address);
+    }
+
+  if (ovsrec_port_primary_address)
+    {
+      if (!(*l3_port_primary_address))
+        {
+           /*
+            * If the L3 port primary address is NULL and the OVSDB port
+            * primary address is not NULL, then add the primary address
+            * into L3 port node and add a connected route in OVSDB.
+            */
+           *l3_port_primary_address = xstrdup(ovsrec_port_primary_address);
+
+           zebra_add_connected_route_into_ovsdb_route_table(
+                                               *l3_port_primary_address,
+                                               is_v4,
+                                               l3_port);
+        }
+      else if (strcmp(ovsrec_port_primary_address, *l3_port_primary_address))
+        {
+          /*
+           * If the L3 port node primary address is not same as the OVSDB
+           * port node IP address, then delete the previous connected route for
+           * the old primary address and update the internal L3 port node.
+           */
+          zebra_delete_connected_route_from_ovsdb_route_table(
+                                              *l3_port_primary_address,
+                                              is_v4,
+                                              l3_port);
+
+          /*
+           * Free the old primary address
+           */
+          free(*l3_port_primary_address);
+
+          /*
+           * Allocate the new primary address.
+           */
+          *l3_port_primary_address = xstrdup(ovsrec_port_primary_address);
+
+          /*
+           * Create a new connected route for the primary interface
+           * address on the OVSDB port
+           */
+          zebra_add_connected_route_into_ovsdb_route_table(
+                                              *l3_port_primary_address,
+                                              is_v4,
+                                              l3_port);
+        }
+
+      /*
+       * If the there is no change OVSDB port primary address and the L3
+       * port node, then do nothing.
+       */
+    }
+  else
+    {
+      /*
+       * If the primary IP address for the OVSDB port node goes away,
+       * then delete the connected route and update the L3 port node.
+       */
+      if (*l3_port_primary_address)
+        {
+          /*
+           * Delete the previous connected route for the old primary
+           * address.
+           */
+          zebra_delete_connected_route_from_ovsdb_route_table(
+                                              *l3_port_primary_address,
+                                              is_v4,
+                                              l3_port);
+
+          /*
+           * Free the old primary address
+           */
+          free(*l3_port_primary_address);
+
+          *l3_port_primary_address = NULL;
+        }
+    }
+}
+
+/*
+ * This function finds if the secondary IPv4/IPv6 addresses got changed in OVSDB
+ * port able w.r.t to the L3 port node. In case of a change, we take the folloiwng
+ * two actions:-
+ *
+ * 1. Update the L3 port cache.
+ * 2. Add/Delete the connected routes in OVSDB.
+ *
+ * The bool flag 'is_v4' should be set 'true' for IPv4 and 'false' for IPv6.
+ */
+static void
+zebra_reconfigure_secondary_addresses (
+                            bool is_v4,
+                            const struct ovsrec_port* ovsrec_port,
+                            struct zebra_l3_port* l3_port)
+{
+  struct shash_node *node, *next;
+  char* secondary_address;
+  char** secondary_address_array;
+  struct shash ovsrec_secondary_addr_hash;
+  struct shash* l3_port_secondary_addr_hash;
+  int secondary_addr_index, max_secondary_addr_index;
+
+  /*
+   * Sanity check on OVSDB port node
+   */
+  if (!ovsrec_port)
+    return;
+
+  /*
+   * Sanity check on cached L3 port node
+   */
+  if (!l3_port)
+    return;
+
+  /*
+   * Check which address family secondary addresses needs to checked for change.
+   */
+  max_secondary_addr_index = is_v4 ? ovsrec_port->n_ip4_address_secondary :
+                                     ovsrec_port->n_ip6_address_secondary;
+
+  secondary_address_array = is_v4 ? ovsrec_port->ip4_address_secondary :
+                                    ovsrec_port->ip6_address_secondary;
+
+  l3_port_secondary_addr_hash = is_v4 ? &(l3_port->ip4_address_secondary) :
+                                        &(l3_port->ip6_address_secondary);
+
+
+  shash_init(&ovsrec_secondary_addr_hash);
+
+  /*
+   * Map the new secondary addresses into a hash map
+   */
+  for (secondary_addr_index = 0;
+       secondary_addr_index < max_secondary_addr_index;
+       ++secondary_addr_index)
+    {
+
+      if (!shash_add(&ovsrec_secondary_addr_hash,
+                     secondary_address_array[secondary_addr_index],
+                     xstrdup(secondary_address_array[secondary_addr_index])))
+        {
+          VLOG_ERR("Unable to add the OVSDB port secondary address %s "
+                   "into temporary hash",
+                   secondary_address_array[secondary_addr_index]);
+        }
+    }
+
+  /*
+   * Walk the current list of cached secondary addresses and take the following
+   * two actions, in case these are not found in the new IPv4 secondary address
+   * hash map.
+   *
+   * 1. Delete the corresponding connected roue from OVSDB
+   * 2. Delete the secondary address from the L3 port cache
+   */
+  SHASH_FOR_EACH_SAFE (node, next, l3_port_secondary_addr_hash)
+    {
+      if (!node)
+        {
+          VLOG_DBG("No node found in the L3 port hash\n");
+          continue;
+        }
+
+      if (!(node->data))
+        {
+          VLOG_DBG("No node data found\n");
+          continue;
+        }
+
+      secondary_address = (char*)node->data;
+
+      /*
+       * If we cannot find the existing secondary address into the new
+       * secondary address list, then un-configure the connected route and remove
+       * the secondary address from the L3 port hash
+       */
+      if (!shash_find(&ovsrec_secondary_addr_hash, secondary_address))
+        {
+
+          VLOG_DBG("Secondary address %s not found in the new "
+                   "secondary address list. Delete the connected route",
+                   secondary_address);
+
+          /*
+           * Delete the connected route for the stale secondary
+           * address
+           */
+          zebra_delete_connected_route_from_ovsdb_route_table(
+                                              secondary_address,
+                                              is_v4,
+                                              l3_port);
+
+          secondary_address = shash_find_and_delete(
+                                       l3_port_secondary_addr_hash,
+                                       secondary_address);
+          free(secondary_address);
+        }
+    }
+
+  /*
+   * For the new secondary addresses, take the following two actions:-
+   * 1. Add the corresponding connected route into OVSDB
+   * 2. Add the secondary address into the L3 port cache
+   */
+  SHASH_FOR_EACH_SAFE (node, next, &ovsrec_secondary_addr_hash)
+    {
+      if (!node)
+        {
+          VLOG_DBG("No node found in the L3 port hash\n");
+          continue;
+        }
+
+      if (!(node->data))
+        {
+          VLOG_DBG("No node data found\n");
+          continue;
+        }
+
+      secondary_address = (char*)node->data;
+
+      /*
+       * If we cannot find the new secondary address into the existing
+       * secondary address list, then configure the connected route and add
+       * the secondary address into the L3 port hash
+       */
+      if (!shash_find(l3_port_secondary_addr_hash, secondary_address))
+        {
+
+          VLOG_DBG("Secondary address %s not found in the existing "
+                   "secondary address list. Add the connected route",
+                   secondary_address);
+
+          if (!shash_add(l3_port_secondary_addr_hash,
+                         secondary_address, xstrdup(secondary_address)))
+            {
+              VLOG_ERR("Unable to add secondary address %s into L3 "
+                       "port cache", secondary_address);
+              continue;
+            }
+          else
+            {
+              VLOG_DBG("Added IPv4 secondary address %s into L3 "
+                       "port cache", secondary_address);
+            }
+
+          /*
+           * Add a connected route for the new secondary IP/IPv6
+           * address
+           */
+          zebra_add_connected_route_into_ovsdb_route_table(
+                                              secondary_address,
+                                              is_v4,
+                                              l3_port);
+
+        }
+
+      secondary_address = shash_find_and_delete(
+                                     &ovsrec_secondary_addr_hash,
+                                     secondary_address);
+      free(secondary_address);
+    }
+}
+
+/*
+ * This function takes a OVSDB port structure and a L3 port node and compares
+ * them to see what changed in the OVSDB port configuration and adds/delete the
+ * IP/IPv6 addresses and cleans-up or updates the correspnding connected in OVSDB.
+ */
+static void
+zebra_update_l3_port_cache_and_connected_routes (const struct ovsrec_port* ovsrec_port,
+                                                 struct zebra_l3_port** l3_port,
+                                                 bool if_config_change)
+{
+  struct shash_node *node, *next;
+  char* ip_secondary_address;
+
+  /*
+   * If OVSDB port row is NULL, return.
+   */
+  if (!ovsrec_port)
+    {
+      VLOG_DBG("The OVSDB port entry is NULL.");
+      return;
+    }
+
+  /*
+   * If the port name in the OVSDB port is NULL, then return
+   */
+  if (!ovsrec_port->name)
+    {
+      VLOG_DBG("The OVSDB port name is NULL.");
+      return;
+    }
+
+  /*
+   * If L3 port node is NULL, then we have no structure to modify
+   */
+  if (!l3_port)
+    return;
+
+  /*
+   * If the L3 port node name is not same as OVSDB port node name,
+   * then we should not modify the L3 port node.
+   */
+  if (l3_port && *l3_port && (*l3_port)->port_name
+      && strcmp((*l3_port)->port_name, ovsrec_port->name))
+    {
+      VLOG_DBG("Mismatch between the OVSDB port name %s and "
+               "cached L3 port name %s", ovsrec_port->name,
+               (*l3_port)->port_name);
+      return;
+    }
+
+  /*
+   * If L3 port node has not been allocated, then this is the first time when
+   * OVSDB L3 port notification has come. So create an L3 port node.
+   */
+  if (!(*l3_port) && (ovsrec_port))
+    {
+      VLOG_DBG("New OVSDB port add. Create a new L3 node and add "
+               "connected routes");
+
+      *l3_port = zebra_l3_port_node_create(ovsrec_port);
+
+      /*
+       * If we are unable to alloate the L3 port node, then return.
+       *
+       */
+      if (!(*l3_port))
+        {
+          VLOG_DBG("Unable to create L3 node");
+          return;
+        }
+    }
+
+  /*
+   * Add/delete IPv4 and IPv6 primary, secondary addresses in the L3 cache in
+   * case of L3 port config change.
+   */
+  if (if_config_change)
+    {
+      if (!OVSREC_IDL_IS_ROW_MODIFIED(ovsrec_port, idl_seqno))
+        {
+          VLOG_DBG("No change in OVSDB port node %s", ovsrec_port->name);
+          return;
+        }
+
+      /*
+       * Check if the primary IPv4 address changed in the port table
+       */
+      if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_port_col_ip4_address, idl_seqno))
+        zebra_reconfigure_primary_addresses(true, ovsrec_port, *l3_port);
+
+      /*
+       * Check if the primary IPv6 address changed in the port table
+       */
+      if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_port_col_ip6_address, idl_seqno))
+        zebra_reconfigure_primary_addresses(false, ovsrec_port, *l3_port);
+
+      /*
+       * Check if the secondary IPv4 address changed in the port table
+       */
+      if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_port_col_ip4_address_secondary,
+                                        idl_seqno))
+        zebra_reconfigure_secondary_addresses(true, ovsrec_port, *l3_port);
+
+      /*
+       * Check if the secondary IPv6 address changed in the port table
+       */
+      if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_port_col_ip6_address_secondary,
+                                        idl_seqno))
+        zebra_reconfigure_secondary_addresses(false, ovsrec_port, *l3_port);
+    }
+  else
+    {
+      /*
+       * Clean-up IPv4 and IPv6 primary, secondary addresses and their
+       * corresponding connected routes.
+       */
+      zebra_reconfigure_primary_addresses(true, ovsrec_port, *l3_port);
+      zebra_reconfigure_primary_addresses(false, ovsrec_port, *l3_port);
+      zebra_reconfigure_secondary_addresses(true, ovsrec_port, *l3_port);
+      zebra_reconfigure_secondary_addresses(false, ovsrec_port, *l3_port);
+    }
+}
+
+/*
+ * This function updates the selected bit on the connected routes
+ * corresponding to the IPv4 and IPv6 addresses in the L3 port.
+ * If the 'selected' variable is true then the connected route and its
+ * next-hop port's selected bit are set to true. Otherwise, the selected
+ * bit is set to false.
+ */
+static void
+zebra_update_selected_status_connected_routes_in_l3_port (
+                                            struct zebra_l3_port* l3_port,
+                                            bool selected)
+{
+  struct shash_node *node, *next;
+  struct uuid* connected_route_uuid;
+  struct ovsrec_route *route_row = NULL;
+
+  /*
+   * If the L3 port node is NULL, then return from this function.
+   */
+  if (!l3_port)
+    return;
+
+  VLOG_DBG("Setting the selected bit on the connected routes in L3 port %s"
+           " to %s", l3_port->port_name, selected ? "true":"false");
+
+  if (!shash_count(&(l3_port->ip4_connected_routes_uuid)))
+    VLOG_DBG("      No IPv4 connected route UUIDs in the port");
+  else
+    {
+      /*
+       * Walk the IPv4 connected routes UUID hash to update the selected bit
+       * on the connected routes corresponding to all the IP addresses present
+       * in this L3 port cache.
+       */
+      SHASH_FOR_EACH_SAFE (node, next, &(l3_port->ip4_connected_routes_uuid))
+        {
+          if (!node)
+            {
+              VLOG_DBG("No node found in the L3 port hash\n");
+              continue;
+            }
+
+          if (!(node->data))
+            {
+              VLOG_DBG("No node data found\n");
+              continue;
+            }
+
+          connected_route_uuid = (struct uuid*)node->data;
+
+          /*
+           * Look-up the route row using the cached route UUID
+           */
+          route_row = (struct ovsrec_route*)
+                                    ovsrec_route_get_for_uuid(idl,
+                                                    connected_route_uuid);
+
+          /*
+           * If we cannot find the route row, then we should not update
+           * the connected route's selected bit.
+           */
+          if (!route_row)
+            {
+              VLOG_DBG("Route not found using UUID");
+              continue;
+            }
+
+          /*
+           * If there no next-hops or more than one next-hops, then also
+           * we should not update the selected bit on the connected route.
+           */
+          if (!(route_row->n_nexthops) || (route_row->n_nexthops > 1))
+            {
+              VLOG_DBG("No valid next-hops for the connected route");
+              continue;
+            }
+
+          /*
+           * Toggle the selected bit on the connected route and its
+           * next-hop
+           */
+          VLOG_DBG("Setting the selected bit on the route %s and "
+                   "next-hop %s to %s", route_row->prefix,
+                   route_row->nexthops[0]->ports[0]->name,
+                   selected ? "true":"false");
+
+          ovsrec_nexthop_set_selected(route_row->nexthops[0], &selected, 1);
+          zebra_ovs_update_selected_route(route_row, &selected);
+        }
+    }
+
+  if (!shash_count(&(l3_port->ip6_connected_routes_uuid)))
+    VLOG_DBG("         No IPv6 connected route UUIDs in the port");
+  else
+    {
+      /*
+       * Walk the IPv6 connected routes UUID hash to update the selected bit
+       * on the connected routes corresponding to all the IPv6 addresses present
+       * in this L3 port cache.
+       */
+      SHASH_FOR_EACH_SAFE (node, next, &(l3_port->ip6_connected_routes_uuid))
+        {
+          if (!node)
+            {
+              VLOG_DBG("No node found in the L3 port hash\n");
+              continue;
+            }
+
+          if (!(node->data))
+            {
+              VLOG_DBG("No node data found\n");
+              continue;
+            }
+
+          connected_route_uuid = (struct uuid*)node->data;
+
+          /*
+           * Look-up the route row using the cached route UUID
+           */
+          route_row = (struct ovsrec_route*)
+                                    ovsrec_route_get_for_uuid(idl,
+                                                    connected_route_uuid);
+
+          /*
+           * If we cannot find the route row, then we should not update
+           * the connected route's selected bit.
+           */
+          if (!route_row)
+            {
+              VLOG_DBG("Route not found using UUID");
+              continue;
+            }
+
+          /*
+           * If there no next-hops or more than one next-hops, then also
+           * we should not update the selected bit on the connected route.
+           */
+          if (!(route_row->n_nexthops) || (route_row->n_nexthops > 1))
+            {
+              VLOG_DBG("No valid next-hops for the connected route");
+              continue;
+            }
+
+          /*
+           * Toggle the selected bit on the connected route and its
+           * next-hop
+           */
+          VLOG_DBG("Setting the selected bit on the route %s and "
+                   "next-hop %s to %s", route_row->prefix,
+                   route_row->nexthops[0]->ports[0]->name,
+                   selected ? "true":"false");
+
+          ovsrec_nexthop_set_selected(route_row->nexthops[0], &selected, 1);
+          zebra_ovs_update_selected_route(route_row, &selected);
+        }
+    }
+}
+
+/*
+ * This function does the following two actions:-
+ * 1. Program the connected routes for the new IP addresses
+ *    which got added while zebra process was not running.
+ * 2. Update the selected bit on the connected route if the
+ *    interface state of the connected route is toggled while
+ *    the zebra process is down.
+ *
+ * The bool flag 'is_v4' signals that if the IP address string is
+ * IPv4 or IPv6.
+ */
+static void
+zebra_update_or_program_connected_route_after_zebra_restart (
+                                                    char* ip_address,
+                                                    struct zebra_l3_port* l3_port,
+                                                    bool is_v4)
+{
+  struct uuid* route_uuid;
+  char* prefix_str;
+  struct ovsrec_route *route_row = NULL;
+  struct shash* route_uuid_hash;
+  bool selected;
+  bool nexthop_selected;
+
+  /*
+   * Sanity check on the IP address
+   */
+  if (!ip_address)
+    return;
+
+  /*
+   * Sanity check on L3 port node
+   */
+  if (!l3_port)
+    return;
+
+  /*
+   * If zebra is middle of a restart, then we should not perform the cleanup
+   * and adding of routes in OVSDB. We should wait until at the end of
+   * restart time.
+   */
+  if (zebra_first_run_after_restart)
+    {
+      VLOG_DBG("Zebra in middle of a restart. Do not restore connected "
+                "routes yet");
+      return;
+    }
+
+  VLOG_DBG("Checking if %s address %s needs to be cleaned-up or programmed "
+           "into OVSDB", is_v4?"IPv4":"IPv6", ip_address);
+
+  /*
+   * Convery the IP/IPv6 address into prefix format
+   */
+  prefix_str = zebra_convert_ip_addr_to_prefic_format(ip_address, is_v4);
+
+  if (!prefix_str)
+    {
+      VLOG_DBG("%s address to prefix conversion failed for %s",
+               is_v4 ? "IPv4":"IPv6", ip_address);
+      return;
+    }
+
+  /*
+   * Look at the route UUID using the prefix string in the connected
+   * routes hash which is populated after zebra restart.
+   */
+  route_uuid = (struct uuid*)shash_find_and_delete(
+                                     &connected_routes_hash_after_restart,
+                                     prefix_str);
+
+  /*
+   * There does not exist a connected route after zebra restart, so
+   * add a connected route in OVSDB for this address.
+   */
+  if (!route_uuid)
+    zebra_add_connected_route_into_ovsdb_route_table(ip_address, is_v4,
+                                                     l3_port);
+  else
+    {
+      /*
+       * If the connected route already exists in OVSDB, then copy the
+       * UUID of the route in the L3-port for future reference
+       */
+      if (is_v4)
+        route_uuid_hash = &(l3_port->ip4_connected_routes_uuid);
+      else
+        route_uuid_hash = &(l3_port->ip6_connected_routes_uuid);
+
+      /*
+       * Add the connected route UUID into the L3 cache
+       */
+      if (!shash_add(route_uuid_hash, prefix_str, route_uuid))
+        {
+          VLOG_ERR("Unable to add the permanent route UUID for %s "
+                   "route %s to hash after zebra restart",
+                   is_v4 ? "IPv4":"IPv6", prefix_str);
+          free(route_uuid);
+          free(prefix_str);
+          return;
+        }
+      else
+        {
+          VLOG_DBG("Successfully added the permanent route UUID for %s "
+                   "route %s to hash after zebra restart",
+                   is_v4 ? "IPv4":"IPv6", prefix_str);
+        }
+
+      /*
+       * Check if we need to update the selected bit on the connected
+       * route and its next-hop.
+       */
+      route_row = (struct ovsrec_route*)ovsrec_route_get_for_uuid(idl, route_uuid);
+
+      if (!route_row)
+        {
+          VLOG_DBG("Could not find the OVSDB route entry for route %s",
+                   prefix_str);
+          free(route_uuid);
+          free(prefix_str);
+          return;
+        }
+
+      /*
+       * Check if the selected bit for the connected route is different
+       * from the L3 port state.
+       */
+      selected = l3_port->if_active;
+      nexthop_selected = route_row->nexthops[0]->selected[0];
+
+      if (nexthop_selected != selected)
+        {
+          VLOG_DBG("Updating the slected bit on next-hop port %s to %s",
+                   route_row->nexthops[0]->ports[0]->name,
+                   selected?"True":"False");
+          ovsrec_nexthop_set_selected(route_row->nexthops[0], &selected, 1);
+        }
+
+      VLOG_DBG("Updating the selected bit on the connected route %s",
+               " to %s", route_row->prefix, selected ? "True":"False");
+
+      zebra_ovs_update_selected_route(route_row, &selected);
+    }
+
+  free(prefix_str);
+}
+
+/*
+ * This function walks all the L3 port nodes after restart and
+ * compares the connected routes in OVSDB and takes the following
+ * actions:-
+ *
+ * 1. Cleanup the connected routes for whom the IP interface
+ *    addresses have been cleaned-up.
+ * 2. Program the connected routes for the new IP addresses
+ *    which got added while zebra process was not running.
+ * 3. Update the selected bit on the connected route if the
+ *    interface state of the connected route is toggled while
+ *    the zebra process is down.
+ */
+static void
+zebra_walk_l3_cache_and_restore_connected_routes_after_zebra_restart ()
+{
+  struct shash_node *node, *next;
+  struct shash_node *sec_node, *sec_next;
+  struct zebra_l3_port* l3_port;
+  struct uuid* route_uuid;
+  char* ip_secondary_address;
+  struct ovsrec_route *route_row = NULL;
+
+  /*
+   * If zebra is middle of a restart, then we should not perform the cleanup
+   * and adding of routes in OVSDB. We should wait until at the end of
+   * restart time.
+   */
+  if (zebra_first_run_after_restart)
+    {
+      VLOG_DBG("Do not cleanup/program the connected routes during the "
+               "first run after restart");
+      return;
+    }
+
+  /*
+   * Create a transaction to publish the connected route updates
+   * into OVSDB
+   */
+  zebra_create_txn();
+
+  /*
+   * Iterate over all the L3 port nodes in L3 cache
+   */
+  SHASH_FOR_EACH_SAFE (node, next, &zebra_cached_l3_ports)
+    {
+      if (!node)
+        {
+          VLOG_DBG("No node found in the L3 port hash\n");
+          continue;
+        }
+
+      if (!(node->data))
+        {
+          VLOG_DBG("No node data found\n");
+          continue;
+        }
+
+      l3_port = (struct zebra_l3_port*)node->data;
+
+      /*
+       * Check if the primary IP address has a corresponding route
+       * in OVSDB.
+       */
+      if (l3_port->ip4_address)
+        zebra_update_or_program_connected_route_after_zebra_restart(
+                                               l3_port->ip4_address,
+                                               l3_port, true);
+
+      /*
+       * Walk the secondary IPv4 address hash and check if the secondary IPv4
+       * address has a corresponding route in OVSDB.
+       */
+      SHASH_FOR_EACH_SAFE (sec_node, sec_next, &(l3_port->ip4_address_secondary))
+        {
+          if (!sec_node)
+            {
+              VLOG_DBG("No node found in the L3 port hash\n");
+              continue;
+            }
+
+          if (!(sec_node->data))
+            {
+              VLOG_DBG("No node data found\n");
+              continue;
+            }
+
+          ip_secondary_address = (char*)sec_node->data;
+
+          zebra_update_or_program_connected_route_after_zebra_restart(
+                                               ip_secondary_address, l3_port,
+                                               true);
+        }
+
+      /*
+       * Check if the primary IPv6 address has a corresponding route
+       * in OVSDB.
+       */
+      if (l3_port->ip6_address)
+        zebra_update_or_program_connected_route_after_zebra_restart(
+                                               l3_port->ip6_address, l3_port,
+                                               false);
+
+      /*
+       * Walk the secondary IPv6 address hash and check if the secondary IPv6
+       * address has a corresponding route in OVSDB.
+       */
+      SHASH_FOR_EACH_SAFE (sec_node, sec_next, &(l3_port->ip6_address_secondary))
+        {
+          if (!sec_node)
+            {
+              VLOG_DBG("No node found in the L3 port hash\n");
+              continue;
+            }
+
+          if (!(sec_node->data))
+            {
+              VLOG_DBG("No node data found\n");
+              continue;
+            }
+
+          ip_secondary_address = (char*)sec_node->data;
+
+          zebra_update_or_program_connected_route_after_zebra_restart(
+                                               ip_secondary_address, l3_port, false);
+        }
+
+      /*
+       * Commit the transaction if the number of route updates in the transaction
+       * exceed a given number
+       */
+      zebra_finish_txn(false);
+    }
+
+  /*
+   * Publish all remaining transaction to OVSDB for the connected route updates
+   */
+  zebra_finish_txn(true);
+
+  /*
+   * Create a transaction to publish the connected route updates
+   * into OVSDB
+   */
+  zebra_create_txn();
+
+  /*
+   * At this point, if there are any route entries left in the connected routes
+   * hash, then these connected routes need to be deleted.
+   */
+  SHASH_FOR_EACH_SAFE (node, next, &connected_routes_hash_after_restart)
+    {
+      if (!node)
+        {
+          VLOG_DBG("No node found in the L3 port hash\n");
+          continue;
+        }
+
+      if (!(node->data))
+        {
+          VLOG_DBG("No node data found\n");
+          continue;
+        }
+
+      route_uuid = (struct uuid*)node->data;
+
+      /*
+       * Found the route row. Delete the route and its nexthop
+       */
+      route_row = (struct ovsrec_route*)ovsrec_route_get_for_uuid(idl, route_uuid);
+
+      if (!route_row)
+        {
+          VLOG_DBG("Null route row");
+          continue;
+        }
+
+      VLOG_DBG("Deleting the connected route %s as the corresponding "
+               "address does not exist", route_row->prefix);
+
+      if (route_row->n_nexthops)
+        ovsrec_nexthop_delete(route_row->nexthops[0]);
+      ovsrec_route_delete(route_row);
+      zebra_txn_updates = true;
+
+      /*
+       * Cleanup this entry from the connected route hash
+       */
+      shash_delete(&connected_routes_hash_after_restart, node);
+      free(route_uuid);
+
+      /*
+       * Commit the transaction if the number of route updates in the transaction
+       * exceed a given number
+       */
+      zebra_finish_txn(false);
+    }
+
+  /*
+   * Publish all remaining transaction to OVSDB for the connected route updates
+   */
+  zebra_finish_txn(true);
+}
+
+/*
+ * This function walks all the ports in deleted L3 port hash and deletes all
+ * the connected routes programmed by zebra.
+ */
+static void
+zebra_delete_connected_routes_from_deleted_l3_port_cache ()
+{
+  struct shash_node *node, *next;
+  struct zebra_l3_port* l3_port;
+  struct ovsrec_port* ovsrec_port;
+
+  /*
+   * If L3 port hash having deleted L3 port nodes does not have any node,
+   * then return from this function
+   */
+  if (!shash_count(&zebra_updated_or_changed_l3_ports))
+    {
+      VLOG_DBG("The port delete hash table is empty. No connected routes to "
+               "delete");
+      return;
+    }
+
+  /*
+   * Allocate empty OVSDB port node as a dummy ovsrec_port node
+   * for clean-up of connected routes.
+   */
+  ovsrec_port = xzalloc(sizeof(struct ovsrec_port));
+
+  /*
+   * Create a transaction so send deleted connected routes update
+   * to OVSDB
+   */
+  zebra_create_txn();
+
+  /*
+   * Walk all the L3 nodes in the hash and delete all connected routes
+   * in this hash
+   */
+  SHASH_FOR_EACH_SAFE (node, next, &zebra_updated_or_changed_l3_ports)
+    {
+      if (!node)
+        {
+          VLOG_DBG("No node found in the L3 port hash\n");
+          continue;
+        }
+
+      if (!(node->data))
+        {
+          VLOG_DBG("No node data found\n");
+          continue;
+        }
+
+      l3_port = (struct zebra_l3_port*)node->data;
+
+      free(ovsrec_port->name);
+
+      /*
+       * Add the L3 port name to the OVSDB port node
+       */
+      ovsrec_port->name = xstrdup(l3_port->port_name);
+
+      /*
+       * Call the function to cleanup with L3 port node and connected
+       * routes
+       */
+      zebra_update_l3_port_cache_and_connected_routes(ovsrec_port, &l3_port,
+                                                      false);
+
+      /*
+       * If the number of route updates exceed the current batch size,
+       * then attempt to publish this to OVSDB
+       */
+      zebra_finish_txn(false);
+    }
+
+  /*
+   * Commit any last pending connected route updates for OVSDB.
+   */
+  zebra_finish_txn(true);
+
+  /*
+   * Free the allocated OVSDB port node
+   */
+  free(ovsrec_port->name);
+  free(ovsrec_port);
+}
+
+/*
  * This function takes an OVSDB port entry and updates the L3 port cache if
  * it needs to.
  */
@@ -1538,7 +3170,8 @@ zebra_add_or_update_cached_l3_ports_hash (const struct ovsrec_port* ovsrec_port)
        * Create a new structure of type zebra_l3_port and add into the
        * hash table.
        */
-      l3_port = zebra_l3_port_node_create(ovsrec_port);
+      zebra_update_l3_port_cache_and_connected_routes(ovsrec_port, &l3_port,
+                                                      true);
 
       /*
        * If we are not able to allocate the structure for the L3 interface,
@@ -1588,42 +3221,10 @@ zebra_add_or_update_cached_l3_ports_hash (const struct ovsrec_port* ovsrec_port)
                     EV_KV("port_name", "%s", ovsrec_port->name));
 
           /*
-           * If the OVSDB port is L2 now, then remove the cached port from
-           * the L3 port cache.
-           */
-          l3_port = (struct zebra_l3_port *)shash_find_and_delete(
-                                                      &zebra_cached_l3_ports,
-                                                      ovsrec_port->name);
-
-          /*
-           * Add the convertered L2 port to hash table
-           * 'zebra_updated_or_changed_l3_port' for clean up of
-           * :static routes.
+           * If the OVSDB port is L2 now, then update the L3 port with the
+           * appropriate flag.
            */
           l3_port->port_action = ZEBRA_L3_PORT_L3_CHANGED_TO_L2;
-
-          /*
-           * If addition of the L3 port into the hash table
-           * zebra_updated_or_changed_l3_ports fails, then free the
-           * node and return..
-           */
-          if (!shash_add(&zebra_updated_or_changed_l3_ports,
-                         l3_port->port_name,
-                         l3_port))
-            {
-              VLOG_ERR("Unable to add L3 port to the temp hash");
-              zebra_l3_port_node_free(l3_port);
-            }
-          else
-            {
-              /*
-               * If the addition to the hash table is successful,
-               * then set a bool suggesting that we need to walk the
-               * zebra route table.
-               */
-              VLOG_DBG("Added L3 port to the hash successfully");
-              zebra_set_if_port_updated_or_changed();
-            }
         }
       else if (zebra_if_cached_port_and_ovsrec_port_ip4_addr_change
                                                  (ovsrec_port, l3_port) ||
@@ -1634,63 +3235,21 @@ zebra_add_or_update_cached_l3_ports_hash (const struct ovsrec_port* ovsrec_port)
            * If the IP/IPv6 addresses on the port changes, then update the
            * L3 ports cache.
            */
-          VLOG_DBG("Port IPv4 changed. Update the port %s IP address in "
+          VLOG_DBG("Port IPv4/IPv6 changed. Update the port %s IP address in "
                     " the hash and add a node in the temp hash\n",
                     ovsrec_port->name);
 
           log_event("ZEBRA_PORT", EV_KV("port_msg", "%s",
                     "Port IPv4/v6 Updated"),
                     EV_KV("port_name", "%s", ovsrec_port->name));
-          /*
-           * Delete the current L3 port node from the L3 port cache.
-           */
-          l3_port = (struct zebra_l3_port *)shash_find_and_delete(
-                                                      &zebra_cached_l3_ports,
-                                                      ovsrec_port->name);
 
           /*
-           * Free the cached port node.
+           * Update the L3 port action with new IP/IPv6 address.
            */
-          zebra_l3_port_node_free(l3_port);
-
-          /*
-           * Add an updated sanpshot of overec_port structure into the
-           * &zebra_cached_l3_ports
-           *
-           * Create a new structure of type zebra_l3_port and add into the
-           * hash table.
-           */
-          new_l3_port = zebra_l3_port_node_create(ovsrec_port);
-          new_l3_port->port_action =
-                  ZEBRA_L3_PORT_UPADTE_IP_ADDR;
-
-          if (!new_l3_port)
-          {
-            VLOG_ERR("Unable to add L3 port to the hash");
-            return;
-          }
-
-          /*
-           * If the addition to L3 cache is not successful, then free the
-           * newly allocated L3 node.
-           */
-          if (!shash_add(&zebra_cached_l3_ports, ovsrec_port->name,
-                                  new_l3_port))
-            {
-              VLOG_ERR("Unable to add L3 port to the hash");
-              zebra_l3_port_node_free(new_l3_port);
-            }
-          else
-            {
-
-              /*
-               * If the addition to the hash table is successful,
-               * then set a bool suggesting that we need to walk the
-               * zebra route table.
-               */
-              VLOG_DBG("Added L3 port to the hash successfully");
-              zebra_set_if_port_updated_or_changed();
-            }
+          zebra_update_l3_port_cache_and_connected_routes(ovsrec_port, &l3_port,
+                                                          true);
+          l3_port->port_action = ZEBRA_L3_PORT_UPADTE_IP_ADDR;
+          zebra_set_if_port_updated_or_changed();
         }
       else
         {
@@ -1740,7 +3299,9 @@ zebra_remove_deleted_cached_l3_ports_hash (void)
        * If the port was marked for deletion, then move the port to
        * the hash table zebra_updated_or_changed_l3_ports for cleanup.
        */
-      if (l3_port->port_action == ZEBRA_L3_PORT_DELETE)
+      if ((l3_port->port_action == ZEBRA_L3_PORT_DELETE) ||
+          (l3_port->port_action == ZEBRA_L3_PORT_L3_CHANGED_TO_L2))
+
         {
           l3_port = (struct zebra_l3_port *)shash_find_and_delete(
                                                     &zebra_cached_l3_ports,
@@ -2366,12 +3927,30 @@ zebra_update_port_active_state (const struct ovsrec_interface *interface)
                l3_port->port_name,
                l3_port->if_active ? "Active" : "Inactive",
                new_active_state ? "Active" : "Inactive");
+
       log_event("ZEBRA_PORT_STATE",
                 EV_KV("port_name", "%s", l3_port->port_name),
                 EV_KV("port_old_state", "%s",l3_port->if_active ?
                 "Active" : "Inactive"), EV_KV("port_new_state", "%s",
                 new_active_state ? "Active" : "Inactive"));
+
+      /*
+       * Update the selected bit on all the connected routes corresponding
+       * to the interface addresses in this L3 port.
+       */
+      zebra_update_selected_status_connected_routes_in_l3_port(l3_port,
+                                                         new_active_state);
+
+
+      /*
+       * Update the L3 port state in the local cache.
+       */
       l3_port->if_active = new_active_state;
+
+      /*
+       * Signal updation of OVSDB route table due to change in interface
+       * admin state.
+       */
       zebra_set_if_port_active_state_changed();
     }
 }
@@ -2419,6 +3998,12 @@ zebra_find_routes_with_deleted_ports (
            (option == ZEBRA_L3_PORT_ACTIVE_STATE_CHN_OPTION) ?
            "interface state/address change": "interface delete");
 
+  /*
+   * Create a transaction for any IDL route updates to OVSDB from
+   * the zebra main thread.
+   */
+  zebra_create_txn();
+
   for (rn = route_top (table); rn; rn = route_next (rn))
     {
       if (!rn)
@@ -2432,12 +4017,6 @@ zebra_find_routes_with_deleted_ports (
       prefix2str(p, prefix_str, sizeof(prefix_str));
 
       VLOG_DBG("Prefix %s Family %d\n",prefix_str, PREFIX_FAMILY(p));
-
-      /*
-       * Create a transaction for any IDL route updates to OVSDB from
-       * the zebra main thread.
-       */
-      zebra_create_txn();
 
       RNODE_FOREACH_RIB (rn, rib)
         {
@@ -2793,8 +4372,6 @@ ovsdb_init (const char *db_path)
   ovsdb_idl_set_lock(idl, "ops_zebra");
   #endif
 
-  ovsdb_idl_verify_write_only(idl);
-
   /* Cache OpenVSwitch table */
   ovsdb_idl_add_table(idl, &ovsrec_table_system);
 
@@ -2810,9 +4387,7 @@ ovsdb_init (const char *db_path)
   ovsdb_idl_add_column(idl, &ovsrec_route_col_metric);
   ovsdb_idl_add_column(idl, &ovsrec_route_col_from);
   ovsdb_idl_add_column(idl, &ovsrec_route_col_sub_address_family);
-  #ifdef VRF_ENABLE
   ovsdb_idl_add_column(idl, &ovsrec_route_col_vrf);
-  #endif
   ovsdb_idl_add_column(idl, &ovsrec_route_col_nexthops);
   ovsdb_idl_omit_alert(idl, &ovsrec_route_col_nexthops);
 
@@ -2853,7 +4428,7 @@ ovsdb_init (const char *db_path)
   ovsdb_idl_add_column(idl, &ovsrec_interface_col_admin_state);
   ovsdb_idl_add_column(idl, &ovsrec_interface_col_type);
 
-  /* Register for the vrf table to find the if the port is L2/L# */
+  /* Register for the vrf table to find the if the port is L2/L3 */
   ovsdb_idl_add_table(idl, &ovsrec_table_vrf);
   ovsdb_idl_add_column(idl, &ovsrec_vrf_col_name);
   ovsdb_idl_add_column(idl, &ovsrec_vrf_col_ports);
@@ -2866,6 +4441,7 @@ ovsdb_init (const char *db_path)
    * Intialize the local L3 port hash.
    */
   zebra_init_cached_l3_ports_hash();
+
   /* Register ovs-appctl commands for this daemon. */
   unixctl_command_register("zebra/dump", "", 0, 0, zebra_unixctl_dump, NULL);
   unixctl_command_register("zebra/debug", "event|packet|send|recv|detail|kernel"
@@ -3081,6 +4657,7 @@ is_rib_nh_rows_deleted (const struct ovsrec_route *route)
 
 static void
 print_key (struct zebra_route_key *rkey)
+
 {
   VLOG_DBG("prefix=0x%x", rkey->prefix.u.ipv4_addr.s_addr);
   VLOG_DBG("prefix len=%d", rkey->prefix_len);
@@ -3758,6 +5335,179 @@ zebra_handle_proto_route_change (const struct ovsrec_route *route,
 }
 
 /*
+ * This function handles the connected route notifications from OVSDB.
+ * For the connected routes, we take one of the two actions:-
+ *
+ * 1. If we get a connected route add notification when zebra had not
+ *    restarted, then zebra records the route's UUID in the
+ *    corresponding L3 port node in the port cache.
+ * 2. If the connected add notification during zebra restart, then
+ *    we add the connected route's UUID in a hash table for post
+ *    restart clean-up and updation of connected routes.
+ */
+static void
+zebra_handle_connected_route_change (const struct ovsrec_route* route)
+{
+  struct ovsrec_port* ovsrec_port;
+  struct zebra_l3_port* l3_port;
+  struct uuid* route_old_uuid;
+  struct shash* route_uuid_hash;
+  struct uuid* ovsrec_route_uuid = NULL;
+  bool is_v4;
+
+  /*
+   * If the connected route pointer is NULL, then return from this
+   * function.
+   */
+  if (!route)
+    return;
+
+  /*
+   * If this route is not a connected route, then return from this
+   * function.
+   */
+  if (!(route->from) ||
+      ovsdb_proto_to_zebra_proto(route->from) != ZEBRA_ROUTE_CONNECT)
+    {
+      VLOG_DBG("This is not a connected route");
+      return;
+    }
+
+  /*
+   * If the route does not have a valid next-hop or if the number
+   * of next-hops are greater than 1, then this is not a valid
+   * connected route.
+   */
+  if (!(route->n_nexthops) || (route->n_nexthops > 1))
+    {
+      VLOG_DBG("No valid next-hops for the connected route");
+      return;
+    }
+
+  /*
+   * If the next-hop port is not avlid, then return from this function.
+   */
+  if (!(route->nexthops[0]->n_ports))
+    {
+      VLOG_DBG("No valid port next-hop for the connected route");
+      return;
+    }
+
+  VLOG_DBG("Looking up the L3 cache for connected route's %s next-hop %s",
+           route->prefix, route->nexthops[0]->ports[0]->name);
+
+  /*
+   * Look up the L3 port node using the next-hop's port name
+   */
+  l3_port = zebra_search_port_name_in_l3_ports_hash(
+                                &zebra_cached_l3_ports,
+                                route->nexthops[0]->ports[0]->name);
+
+  /*
+   * If we do not find a valid L3 port node, then return from this
+   * function.
+   */
+  if (!l3_port)
+    {
+      VLOG_DBG("Port %s not found in the hash",
+               route->nexthops[0]->ports[0]->name);
+      return;
+    }
+
+  /*
+   * Find the IPv4 or IPv6 route UUID hash table.
+   */
+  if (!strcmp(route->address_family, OVSREC_ROUTE_ADDRESS_FAMILY_IPV4))
+    {
+      route_uuid_hash = &(l3_port->ip4_connected_routes_uuid);
+      is_v4 = true;
+    }
+  else
+    {
+      route_uuid_hash = &(l3_port->ip6_connected_routes_uuid);
+      is_v4 = false;
+    }
+
+  /*
+   * Find the connected route's uuid from the hash table.
+   */
+  route_old_uuid = (struct uuid*)shash_find_data(route_uuid_hash,
+                                                 route->prefix);
+
+  /*
+   * In case of non-restart case, update connected route's UUID with the new
+   * UUID gotten from OVSDB.
+   */
+  if (!zebra_first_run_after_restart)
+    {
+      /*
+       * This is an error condition when the route's temporrary UUID is not
+       * found in the L3 port node.
+       */
+      if (!route_old_uuid)
+        {
+          VLOG_DBG("The connected route UUID does not exist in the L3 cache");
+          return;
+        }
+
+      VLOG_DBG("         Old connected route UUID %s",
+              zebra_dump_ovsdb_uuid(route_old_uuid));
+
+      VLOG_DBG("         New connected route UUID %s",
+               zebra_dump_ovsdb_uuid(
+                (struct uuid*)&(OVSREC_IDL_GET_TABLE_ROW_UUID(route))));
+
+      /*
+       * If the cached connected route's UUID is same as the connected route's
+       * UUID in OVSDB, then there is no need to update the UUID.
+       */
+      if (!memcmp(route_old_uuid, &OVSREC_IDL_GET_TABLE_ROW_UUID(route),
+                  sizeof(struct uuid)))
+        {
+          VLOG_DBG("The route's old UUID is same as the route's new UUID");
+          return;
+        }
+
+      /*
+       * Copy the uuid of the connected route in OVSDB for future references.
+       */
+      memcpy(route_old_uuid, &OVSREC_IDL_GET_TABLE_ROW_UUID(route),
+             sizeof(struct uuid));
+    }
+  else
+    {
+      /*
+       * In case this is a connected route notification after restart,
+       * store the UUID in a hash that will be used for cleaning up
+       * stale connected routes from OVCDB and program the new connected
+       * routes.
+       */
+      ovsrec_route_uuid = (struct uuid*)xmalloc(sizeof(struct uuid));
+
+      memcpy(ovsrec_route_uuid, &OVSREC_IDL_GET_TABLE_ROW_UUID(route),
+             sizeof(struct uuid));
+
+      /*
+       * Add the connected route UUID into the clean-up cache
+       */
+      if (!shash_add(&connected_routes_hash_after_restart,
+                     route->prefix, ovsrec_route_uuid))
+        {
+          VLOG_ERR("Unable to add the route UUID for "
+                   "route %s to connected route hash after restart",
+                   route->prefix);
+          free(ovsrec_route_uuid);
+        }
+      else
+        {
+          VLOG_DBG("Successfully added the route UUID for "
+                   "route %s to connected route hash after restart",
+                   route->prefix);
+        }
+    }
+}
+
+/*
  * A route has been modified or added. Update the local RIB structures
  * accordingly.
  */
@@ -3773,12 +5523,13 @@ zebra_handle_route_change (const struct ovsrec_route *route)
   switch (from_protocol)
     {
     case ZEBRA_ROUTE_CONNECT:
-      VLOG_DBG("Adding a connected route for prefix %s\n",route->prefix);
+      VLOG_DBG("Processing a connected route for prefix %s\n",route->prefix);
       log_event("ZEBRA_ROUTE_ADD", EV_KV("prefix", "%s", route->prefix),
                 EV_KV("protocol", "%s", route->from));
       /* This is a directly connected route */
-      /* TODO: Might have to delete this case */
+      zebra_handle_connected_route_change(route);
       break;
+
     case ZEBRA_ROUTE_STATIC:
       VLOG_DBG("Adding a static route for prefix %s\n",route->prefix);
       log_event("ZEBRA_ROUTE_ADD", EV_KV("prefix", "%s", route->prefix),
@@ -3786,6 +5537,7 @@ zebra_handle_route_change (const struct ovsrec_route *route)
       /* This is a static route */
       zebra_handle_static_route_change(route);
       break;
+
     case ZEBRA_ROUTE_BGP:
       VLOG_DBG("Adding a Protocol route for prefix %s protocol %s\n",
                 route->prefix, route->from);
@@ -3794,6 +5546,7 @@ zebra_handle_route_change (const struct ovsrec_route *route)
       /* This is a protocol route */
       zebra_handle_proto_route_change(route, from_protocol);
       break;
+
    case ZEBRA_ROUTE_OSPF:
       VLOG_DBG("Adding a Protocol route for prefix %s protocol %s\n",
                 route->prefix, route->from);
@@ -3801,10 +5554,10 @@ zebra_handle_route_change (const struct ovsrec_route *route)
                 EV_KV("protocol", "%s",route->from));
       /* This is a protocol route */
       zebra_handle_proto_route_change(route, from_protocol);
+
     case ZEBRA_ROUTE_MAX:
     default:
       VLOG_ERR("Unknown protocol");
-      return;
     }
 }
 
@@ -3937,6 +5690,13 @@ zebra_handle_interface_admin_state_changes (void)
   if (OVSREC_IDL_IS_COLUMN_MODIFIED(
              ovsrec_interface_col_admin_state, idl_seqno))
     {
+      /*
+       * Create a transaction for any IDL route updates to OVSDB
+       * from the zebra main thread for updating the selected bit
+       * pn the connected routes.
+       */
+      zebra_create_txn();
+
       OVSREC_INTERFACE_FOR_EACH (interface_row, idl)
         {
           /*
@@ -3958,7 +5718,22 @@ zebra_handle_interface_admin_state_changes (void)
                */
               zebra_update_port_active_state(interface_row);
             }
+
+          /*
+           * Since there are further routes to process for the
+           * main thread, we should try to see if there are
+           * MAX_ZEBRA_TXN_COUNT route updates to OVSDB at this time.
+           * In this case we should publish the route updates to OVSDB.
+           */
+          zebra_finish_txn(false);
         }
+
+      /*
+       * Since there are no further routes to process for the main thread,
+       * we should submit all the outstanding route updates to OVSDB at this
+       * time.
+       */
+      zebra_finish_txn(true);
     }
 
   /*
@@ -4281,11 +6056,18 @@ zebra_handle_port_add_delete_changes (void)
                                       zebra_route_list_free_data;
 
   /*
+   * Create a transaction for any IDL route updates to OVSDB from
+   * the zebra main thread for the connected routes.
+   */
+  zebra_create_txn();
+
+  /*
    * Walk through all the port in the IDL and update the L3 port
    * hash.
    */
   OVSREC_PORT_FOR_EACH (first_port_row, idl)
     {
+
       if (first_port_row)
         {
           VLOG_DBG("Got a port name %s (%s)(%s) (%s)\n",
@@ -4303,7 +6085,22 @@ zebra_handle_port_add_delete_changes (void)
            */
           zebra_add_or_update_cached_l3_ports_hash(first_port_row);
         }
+
+      /*
+       * Since there are further routes to process for the
+       * main thread, we should try to see if there are
+       * MAX_ZEBRA_TXN_COUNT route updates to OVSDB at this time.
+       * In this case we should publish the route updates to OVSDB.
+       */
+      zebra_finish_txn(false);
     }
+
+  /*
+   * Since there are no further routes to process for the main thread,
+   * we should submit all the outstanding route updates to OVSDB at this
+   * time.
+   */
+  zebra_finish_txn(true);
 
   /*
    * Find out which ports got deleted from the L3 port hash.
@@ -4323,6 +6120,7 @@ zebra_handle_port_add_delete_changes (void)
 
   /* Update Active Router-ID */
   zebra_ovsdb_update_active_router_id();
+
   /*
    * Walk the zebra route table and find which nexthops need to be
    * deleted from the kernel and OVSDB.
@@ -4339,8 +6137,52 @@ zebra_handle_port_add_delete_changes (void)
   zebra_route_del_process();
   list_free(zebra_route_del_list);
 
-  zebra_cleanup_if_port_updated_or_changed();
+  /*
+   * Clean-up all the connected routes from the L3 cache containing
+   * the deleted L3 port ports.
+   */
+  zebra_delete_connected_routes_from_deleted_l3_port_cache();
 
+  /*
+   * Walk and delete all L3 port nodes which not not L3 anymore
+   */
+  zebra_cleanup_if_port_updated_or_changed();
+}
+
+/*
+ * This function does pre-restart intialization when zebra process
+ * comes up from a shutdown state.
+ */
+static void
+zebra_pre_restart_setup()
+{
+  /*
+   * Intialize the hash table for storing the connected routes
+   * and their UUIds immediately after zebra restarts.
+   */
+  shash_init(&connected_routes_hash_after_restart);
+}
+
+/*
+ * This function does post-restart clean-up when zebra process
+ * comes up from a shutdown state.
+ */
+static void
+zebra_post_restart_cleanup()
+{
+  /*
+   * After reading all configuration set this flag to false for
+   * clean-up of the connected routes in the OVSDB dues to zebra
+   * restart.
+   */
+  zebra_first_run_after_restart = false;
+
+  /*
+   * Call the function which does the actual connected routes
+   * cleanup, updation and insertion into OVSDB after zebra
+   * restart.
+   */
+  zebra_walk_l3_cache_and_restore_connected_routes_after_zebra_restart();
 }
 
 /* Check if any changes are there to the idl and update
@@ -4375,10 +6217,11 @@ zebra_reconfigure (struct ovsdb_idl *idl)
                      vrf_shadow_table(AFI_IP6, SAFI_UNICAST, 0));
         }
 
+      zebra_pre_restart_setup();
       zebra_handle_port_add_delete_changes();
       zebra_handle_interface_admin_state_changes();
       zebra_apply_route_changes();
-      zebra_first_run_after_restart = false;
+      zebra_post_restart_cleanup();
     }
   else
     {
@@ -4838,7 +6681,7 @@ void zebra_delete_route_nexthop_port_from_db (struct rib *route,
 
 /* Update the selected column in the route row in OVSDB
  */
-static int
+int
 zebra_ovs_update_selected_route (const struct ovsrec_route *ovs_route,
                                  bool *selected)
 {
@@ -4859,8 +6702,8 @@ zebra_ovs_update_selected_route (const struct ovsrec_route *ovs_route,
         }
 
       log_event("ZEBRA_ROUTE", EV_KV("routemsg", "%s",
-                "Route selected"), EV_KV("prefix", "%s",
-                ovs_route->prefix));
+                *selected ? "Route selected":"Route unselected"),
+                EV_KV("prefix", "%s", ovs_route->prefix));
       /*
        * Update the selected bit, and mark it to commit into DB.
        */

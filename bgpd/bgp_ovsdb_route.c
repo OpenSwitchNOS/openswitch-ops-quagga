@@ -66,9 +66,6 @@
 #define MAX_ARGC         10
 #define MAX_ARG_LEN     256
 
-int txn_count = 0;
-
-
 extern unsigned int idl_seqno;
 extern const char *bgp_origin_str[];
 extern const char *bgp_origin_long_str[];
@@ -76,10 +73,6 @@ static struct hmap global_hmap = HMAP_INITIALIZER(&global_hmap);
 
 VLOG_DEFINE_THIS_MODULE(bgp_ovsdb_route);
 
-
-extern bool bgp_txn_started;
-extern struct hmap hmap_outstanding_txns;
-extern bool end_db_success;
 /* Structure definition for path attributes data (psd) column in the
  * OVSDB BGP_Route table. These fields are owned by bgpd and shared
  * with CLI daemon.
@@ -177,39 +170,20 @@ txn_command_result(enum ovsdb_idl_txn_status status, char *msg, char *pr)
 #define START_DB_TXN(txn, msg, req, p, info, asn, safi)                 \
     do {                                                                \
         enum ovsdb_idl_txn_status status;                               \
-        txn = get_idl_txn(idl);                                         \
-        if(txn == NULL){                                                \
-            txn = ovsdb_idl_txn_create(idl);                            \
-            if (txn == NULL) {                                          \
-                VLOG_ERR("%s: %s\n",                                    \
-                         __FUNCTION__, msg);                            \
-                return -1;                                              \
-            }                                                           \
+        txn = ovsdb_idl_txn_create(idl);                                \
+        if (txn == NULL) {                                              \
+            VLOG_ERR("%s: %s\n",                                        \
+                     __FUNCTION__, msg);                                \
+            return -1;                                                  \
         }                                                               \
-        bgp_txn_started = true;                                         \
-        end_db_success = false;                                         \
         HASH_DB_TXN(txn, req, p, info, asn, safi);                      \
     } while (0)
 
-#define END_DB_TXN(txn, msg, pr)                                        \
-    do {                                                                \
-        struct txn_element *elem;                                       \
-        static int end_db_count = 1;                                    \
-        uint32_t txn_hash;                                              \
-        time_t cur_time;                                                \
-        enum ovsdb_idl_txn_status status;                               \
-        elem = malloc(sizeof(struct txn_element));                      \
-        if (elem == NULL) {                                             \
-            return -1;                                                  \
-        }                                                               \
-        cur_time = time (NULL);                                         \
-        txn_hash = (uint32_t) cur_time;                                 \
-        elem->txn = txn;                                                \
-        hmap_insert(&hmap_outstanding_txns, &elem->hmap_node,           \
-                    txn_hash);                                          \
-        status = ovsdb_idl_txn_commit(txn);                             \
-        end_db_success = true;                                          \
-        return txn_command_result(status, msg, pr);                     \
+#define END_DB_TXN(txn, msg, pr)                          \
+    do {                                                  \
+        enum ovsdb_idl_txn_status status;                 \
+        status = ovsdb_idl_txn_commit(txn);               \
+        return txn_command_result(status, msg, pr);       \
     } while (0)
 
 
@@ -753,13 +727,7 @@ bgp_ovsdb_withdraw_rib_entry(struct prefix *p,
     hmap_entry->state = IN_FLIGHT;
     hmap_entry->op_type = DELETE;
 
-    txn_count++;
-
-    if (txn_count == BATCH_SIZE) {
-        txn_count = 0;
-        END_DB_TXN(txn, "withdraw route", pr);
-    }
-
+    END_DB_TXN(txn, "withdraw route", pr);
 }
 
 /*
@@ -820,13 +788,7 @@ bgp_ovsdb_delete_local_rib_entry(struct prefix *p,
     hmap_entry->state = IN_FLIGHT;
     hmap_entry->op_type = DELETE;
 
-    txn_count++;
-
-    if (txn_count == BATCH_SIZE) {
-      txn_count = 0;
-      END_DB_TXN(txn, "delete route", pr);
-    }
-
+    END_DB_TXN(txn, "delete route", pr);
 }
 
 /*
@@ -952,12 +914,7 @@ bgp_ovsdb_announce_rib_entry(struct prefix *p,
         }
     }
 
-    txn_count++;
-
-    if (txn_count == BATCH_SIZE) {
-      txn_count = 0;
-      END_DB_TXN(txn, "announced route", pr);
-    }
+    END_DB_TXN(txn, "announced route", pr);
 }
 
 
@@ -1062,13 +1019,7 @@ bgp_ovsdb_add_local_rib_entry(struct prefix *p,
     strcpy(global_hmap_node->prefix, pr);
     hmap_insert(&global_hmap, &global_hmap_node->node, lookup_hash);
 
-    txn_count++;
-
-    if (txn_count == BATCH_SIZE) {
-      txn_count = 0;
-      END_DB_TXN(txn, "add route", pr);
-    }
-
+    END_DB_TXN(txn, "added route to local RIB, prefix:", pr);
 }
 
 /* Function updates flags for a route in local RIB */
@@ -1125,13 +1076,7 @@ bgp_ovsdb_update_local_rib_entry_attributes(struct prefix *p,
     hmap_entry->state = IN_FLIGHT;
     hmap_entry->op_type = UPDATE;
 
-    txn_count++;
-
-    if (txn_count == BATCH_SIZE) {
-      txn_count = 0;
-      END_DB_TXN(txn, "update route", pr);
-    }
-
+    END_DB_TXN(txn, "update route", pr);
 }
 
 static struct hmap bgp_ovsdb_txn_hmap =
@@ -1231,6 +1176,7 @@ bgp_info_found(struct bgp *bgp, struct bgp_ovsdb_txn *txn)
 static void
 bgp_txn_free(struct bgp_ovsdb_txn *txn)
 {
+    ovsdb_idl_txn_destroy(txn->txn);
     bgp_txn_remove (&txn->hmap_node);
     free(txn);
 }
@@ -1284,32 +1230,21 @@ bgp_txn_log(struct bgp_ovsdb_txn *txn, int status)
 
 static int skip_txn=0;
 void
-bgp_txn_complete_processing(struct ovsdb_idl_txn *txn_commit, bool *pendingTxn)
+bgp_txn_complete_processing(void)
 {
     struct bgp_ovsdb_txn *txn;
     struct bgp *bgp;
-    enum   ovsdb_idl_txn_status status = TXN_SUCCESS;
+    enum   ovsdb_idl_txn_status status;
     char prefix_str[PREFIX_MAXLEN];
     struct lookup_hmap_element *hmap_entry = NULL;
     uint32_t lookup_hash;
     bgp_table_type_t table_type;
     int needs_review;
     enum txn_op_type op_type;
-    bool pending_txn = true;
-
 
     HMAP_FOR_EACH (txn, hmap_node, &bgp_ovsdb_txn_hmap) {
-    /* PLEASE READ
-     * VERY IMPORTANT: This is important to ensure that all bgp txns are
-     * processed specific to each idl txn.
-     */
-        if (txn->txn != txn_commit) {
-            continue;
-        }
-
-        pending_txn = false;
-
         /* Get commit status for transaction */
+        status = ovsdb_idl_txn_commit(txn->txn);
         prefix2str(&txn->prefix, prefix_str, sizeof(prefix_str));
 
         /* log transaction */
@@ -1359,13 +1294,6 @@ bgp_txn_complete_processing(struct ovsdb_idl_txn *txn_commit, bool *pendingTxn)
                             const struct uuid *db_uuid =
                                 ovsdb_idl_txn_get_insert_uuid(txn->txn,
                                                              &(hmap_entry->uuid));
-                            if ((txn->request == TXN_BGP_ADD) &&
-                                 (db_uuid == NULL)) {
-                                pending_txn = true;
-                                *pendingTxn = true;
-                                break;
-                            }
-
                             if(db_uuid != NULL) {
                                 hmap_entry->uuid = *(db_uuid);
                             }
@@ -1377,10 +1305,6 @@ bgp_txn_complete_processing(struct ovsdb_idl_txn *txn_commit, bool *pendingTxn)
                     }
                 }
             }
-           if (pending_txn == true) {
-               continue;
-           }
-
             bgp_txn_free(txn);
             continue;
         }

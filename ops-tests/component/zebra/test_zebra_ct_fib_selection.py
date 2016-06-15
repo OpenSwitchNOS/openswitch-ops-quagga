@@ -18,6 +18,12 @@
 # 02111-1307, USA.
 
 
+from helpers_routing import (
+    ZEBRA_TEST_SLEEP_TIME,
+)
+from time import sleep
+
+
 TOPOLOGY = """
 # +-------+      +-------+
 # |  sw1  <------>  sw2  |
@@ -80,6 +86,8 @@ def test_zebra_ct_fib_selection(topology, step):
     sw1("set interface 2 user_config:admin=up", shell='vsctl')
     sw2("set interface 1 user_config:admin=up", shell='vsctl')
     sw2("set interface 2 user_config:admin=up", shell='vsctl')
+
+    sleep(ZEBRA_TEST_SLEEP_TIME)
 
     step('2-Verify static routes are selected for fib')
 

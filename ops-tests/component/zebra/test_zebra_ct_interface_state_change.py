@@ -21,6 +21,7 @@
 
 
 from helpers_routing import (
+    ZEBRA_TEST_SLEEP_TIME,
     verify_show_ip_route,
     verify_show_ipv6_route,
     verify_show_rib
@@ -258,7 +259,7 @@ def configure_static_routes(sw1, sw2, step):
     # route 3234:3234::1/128 and its next-hops.
     route_ipv6_static_route3 = rib_ipv6_static_route3
 
-    sleep(15)
+    sleep(ZEBRA_TEST_SLEEP_TIME)
 
     step("Verifying the IPv4 static routes onswitch 1")
 
@@ -506,7 +507,7 @@ def interface_shut_trigger_static_routes(sw1, sw2, step):
     rib_ipv6_static_route4['4']['Metric'] = '0'
     rib_ipv6_static_route4['4']['RouteType'] = 'static'
 
-    sleep(15)
+    sleep(ZEBRA_TEST_SLEEP_TIME)
 
     step("Verifying the IPv4 static routes on"
          "switch 1 after interface shut triggers")
@@ -720,7 +721,7 @@ def interface_no_shut_trigger_static_routes(sw1, sw2, step):
     # 2 and 4 should now be present in the FIB.
     route_ipv6_static_route4 = rib_ipv6_static_route4
 
-    sleep(15)
+    sleep(ZEBRA_TEST_SLEEP_TIME)
 
     step("Verifying the IPv4 static routes on"
          "switch 1 after interface shut triggers")
@@ -937,7 +938,7 @@ def interface_unconfiguring_addresses_trigger_static_routes(sw1, sw2, step):
     # addresses interfaces 1 and 4  should be withdrawn from FIB.
     route_ipv6_static_route3 = rib_ipv6_static_route3
 
-    sleep(15)
+    sleep(ZEBRA_TEST_SLEEP_TIME)
 
     step("Verifying the IPv4 static routes onswitch 1")
 
@@ -1129,7 +1130,7 @@ def interface_configuring_addresses_trigger_static_routes(sw1, sw2, step):
     # addresses interfaces 1 and 4  should be reprogrammed into FIB.
     route_ipv6_static_route3 = rib_ipv6_static_route3
 
-    sleep(15)
+    sleep(ZEBRA_TEST_SLEEP_TIME)
 
     step("Verifying the IPv4 static routes onswitch 1")
 
@@ -1345,7 +1346,7 @@ def interface_changing_addresses_trigger_static_routes(sw1, sw2, step):
     # and 4, should be withdrawn from FIB.
     route_ipv6_static_route3 = rib_ipv6_static_route3
 
-    sleep(15)
+    sleep(ZEBRA_TEST_SLEEP_TIME)
 
     step("Verifying the IPv4 static routes onswitch 1 after changing"
          " interface addresses triggers")
@@ -1548,7 +1549,7 @@ def interface_changing_back_addresses_trigger_static_routes(sw1, sw2, step):
     # should be reprogrammed in FIB.
     route_ipv6_static_route3 = rib_ipv6_static_route3
 
-    sleep(15)
+    sleep(ZEBRA_TEST_SLEEP_TIME)
 
     step("Verifying the IPv4 static routes onswitch 1 after changing back"
          " interface addresses triggers")
@@ -1662,7 +1663,7 @@ def add_inactive_nexthop_to_static_routes(sw1, sw2, step):
     route_ipv6_static_route['2']['Metric'] = '0'
     route_ipv6_static_route['2']['RouteType'] = 'static'
 
-    sleep(15)
+    sleep(ZEBRA_TEST_SLEEP_TIME)
 
     # Verify route 163.0.0.1/32 and next-hops in RIB and FIB
     aux_route = route_ipv4_static_route["Route"]
@@ -1724,7 +1725,7 @@ def remove_active_nexthop_from_static_routes(sw1, sw2, step):
     route_ipv6_static_route = dict()
     route_ipv6_static_route['Route'] = '3234:3234::1' + '/' + '128'
 
-    sleep(15)
+    sleep(ZEBRA_TEST_SLEEP_TIME)
 
     # Verify route 163.0.0.1/32 and next-hops in RIB and FIB
     aux_route = route_ipv4_static_route["Route"]

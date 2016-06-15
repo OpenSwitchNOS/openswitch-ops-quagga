@@ -18,6 +18,7 @@
 # 02111-1307, USA.
 
 from helpers_routing import (
+    ZEBRA_TEST_SLEEP_TIME,
     route_and_nexthop_in_show_running_config,
     verify_show_ip_route,
     verify_show_ipv6_route,
@@ -258,7 +259,7 @@ def add_static_routes(sw1, sw2, step):
     # route 3234:3234::1/128 and its next-hops.
     route_ipv6_static_route3 = rib_ipv6_static_route3
 
-    sleep(15)
+    sleep(ZEBRA_TEST_SLEEP_TIME)
 
     step("Verifying the IPv4 static routes on switch 1")
 
@@ -467,7 +468,7 @@ def no_routing_trigger_static_routes(sw1, sw2, step):
     # routing via "no routed" interfaces should be removed from the FIB.
     route_ipv6_static_route3 = rib_ipv6_static_route3
 
-    sleep(15)
+    sleep(ZEBRA_TEST_SLEEP_TIME)
 
     step("Verifying the IPv4 static routes on switch 1")
     # Verify route 123.0.0.1/32 and next-hops in RIB, FIB and
@@ -678,7 +679,7 @@ def routing_trigger_static_routes(sw1, sw2, step):
     # interfaces should not add any next-hops to the RIB.
     route_ipv6_static_route3 = rib_ipv6_static_route3
 
-    sleep(15)
+    sleep(ZEBRA_TEST_SLEEP_TIME)
 
     step("Verifying the IPv4 static routes on switch 1")
 

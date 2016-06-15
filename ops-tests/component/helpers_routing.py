@@ -28,6 +28,7 @@ IPV6_STATIC_ROUTE = "ipv6_static_route"
 IPV4_ROUTE = "ip route"
 IPV6_ROUTE = "ipv6 route"
 RIB = "rib"
+ZEBRA_TEST_SLEEP_TIME = 15
 
 
 def route_exists(switch=None, next_hop=None, bgp_network=None):

@@ -19,6 +19,7 @@
 
 
 from helpers_routing import (
+    ZEBRA_TEST_SLEEP_TIME,
     verify_show_ip_route,
     verify_show_rib
 )
@@ -288,7 +289,7 @@ def add_static_bgp_routes(sw1, sw2, step):
     route_ipv4_bgp_route2 = dict()
     route_ipv4_bgp_route2['Route'] = '143.0.0.1/32'
 
-    sleep(15)
+    sleep(ZEBRA_TEST_SLEEP_TIME)
 
     step("Verifying the IPv4 static and BGP routes on switch 1")
     aux_route = route_ipv4_static_route1['Route']
@@ -395,7 +396,9 @@ def delete_static_bgp_routes(sw1, sw2, step):
     # Populate the expected FIB ("show ip route") route dictionary for the BGP
     # route 123.0.0.1/32 and its next-hops.
     route_ipv4_bgp_route2 = rib_ipv4_bgp_route2
-    sleep(15)
+
+    sleep(ZEBRA_TEST_SLEEP_TIME)
+
     step("Verifying the IPv4 static and BGP "
          "routes on switch 1 after route deletes")
     # Verify the static/BGP routes in RIB and FIB

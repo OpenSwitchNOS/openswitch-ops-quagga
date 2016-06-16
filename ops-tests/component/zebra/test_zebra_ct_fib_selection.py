@@ -23,7 +23,6 @@ from helpers_routing import (
     ZEBRA_INIT_SLEEP_TIME
 )
 from time import sleep
-from pytest import mark
 
 
 TOPOLOGY = """
@@ -40,14 +39,6 @@ sw1:if01 -- sw2:if01
 """
 
 
-@mark.skipif(True, reason="Currently the zebra CLI files get compiled \
-                           from ops-cli and has other \
-                           specific dependencies due to which the \
-                           tests are failing. \
-                           Skipping it temporarily until the zebra \
-                           modularization gets completed and zebra CLI \
-                           related files are moved to ops-quagga/zebra \
-                           repo.")
 def test_zebra_ct_fib_selection(topology, step):
     sw1 = topology.get("sw1")
     sw2 = topology.get("sw2")

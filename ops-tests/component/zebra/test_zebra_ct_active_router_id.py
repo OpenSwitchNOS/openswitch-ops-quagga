@@ -72,10 +72,9 @@ def verify_loopback_interface(sw1, step):
     interface_addr1 = "9.0.0.1"
     masklen1 = "8"
     masklen2 = "24"
-    loopback_ip = "9.0.1.3"
-    active_router_id3 = "9.0.1.3"
-
     step("4-Verifying Loopback IP gets higher priority")
+    loopback_ip = "10.0.1.3"
+    active_router_id3 = "10.0.1.3"
     sw1("configure terminal")
     sw1("interface 1")
     sw1("shutdown")
@@ -98,7 +97,7 @@ def verify_unconfigure_loopback_interface(sw1, step):
     masklen1 = "8"
     masklen2 = "24"
     interface_addr1 = "9.0.0.1"
-    loopback_ip = "9.0.1.3"
+    loopback_ip = "10.0.1.3"
     active_router_id1 = "9.0.0.1"
 
     step("4-Verify deleting loopback interface")
@@ -122,8 +121,8 @@ def verify_unconfigure_loopback_interface(sw1, step):
 #  interface IPv4 address
 def verify_unconfigure_interface(sw1, step):
     interface_addr1 = "9.0.0.1"
-    interface_addr2 = "9.0.0.2"
-    active_router_id2 = "9.0.0.2"
+    interface_addr2 = "11.0.0.2"
+    active_router_id2 = "11.0.0.2"
     masklen = "8"
 
     step("5-Verify deleting one of the interface")
@@ -148,9 +147,9 @@ def verify_unconfigure_interface(sw1, step):
 #  instead it keep on using the same active_router_id
 def verify_no_change_for_new_added_interfaces(sw1, step):
     interface_addr1 = "9.0.0.1"
-    interface_addr2 = "9.0.0.4"
-    interface_lo_addr3 = "9.0.0.5"
-    active_router_id2 = "9.0.0.2"
+    interface_addr2 = "12.0.0.4"
+    interface_lo_addr3 = "10.0.0.5"
+    active_router_id2 = "11.0.0.2"
     masklen = "8"
     masklen2 = "24"
 
@@ -173,15 +172,6 @@ def verify_no_change_for_new_added_interfaces(sw1, step):
     output = sw1("ovsdb-client dump VRF", shell='bash')
     assert active_router_id2 in output
 
-
-@mark.skipif(True, reason="Currently the zebra CLI files get compiled \
-                           from ops-cli and has other \
-                           specific dependencies due to which the \
-                           tests are failing. \
-                           Skipping it temporarily until the zebra \
-                           modularization gets completed and zebra CLI \
-                           related files are moved to ops-quagga/zebra \
-                           repo.")
 def test_zebra_ct_active_router_id(topology, step):
     sw1 = topology.get("sw1")
     assert sw1 is not None

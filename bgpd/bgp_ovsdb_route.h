@@ -87,6 +87,7 @@ struct lookup_hmap_element {
     enum transaction_state state;
     enum txn_op_type op_type;
     char prefix[PREFIX_MAXLEN];
+    char next_hop[PREFIX_MAXLEN];
     struct hmap_node node;
     bgp_table_type_t table_type;
 };
@@ -161,25 +162,25 @@ extern const struct ovsrec_vrf*
 bgp_ovsdb_get_vrf(struct bgp *bgp);
 
 extern const struct ovsrec_route*
-bgp_ovsdb_lookup_rib_entry(struct prefix *p);
+bgp_ovsdb_lookup_rib_entry(struct prefix *p, char *next_hop_host);
 
 extern int
 bgp_ovsdb_add_local_rib_entry(struct prefix *p, struct bgp_info *info,
                         struct bgp *bgp, safi_t safi);
 extern int
 bgp_ovsdb_withdraw_rib_entry(struct prefix *p, struct bgp_info *info,
-                             struct bgp *bgp, safi_t safi);
+                             struct bgp *bgp, safi_t safi, char *next_hop_host);
 extern int
 bgp_ovsdb_announce_rib_entry(struct prefix *p, struct bgp_info *info,
                              struct bgp *bgp, safi_t safi);
 extern int
 bgp_ovsdb_delete_local_rib_entry(struct prefix *p, struct bgp_info *info,
-                                 struct bgp *bgp, safi_t safi);
+                                 struct bgp *bgp, safi_t safi, char *next_hop_host);
 extern int
 bgp_ovsdb_update_local_rib_entry_attributes(struct prefix *p, struct bgp_info *info,
                                             struct bgp *bgp, safi_t safi);
 extern const struct ovsrec_bgp_route*
-bgp_ovsdb_lookup_local_rib_entry(struct prefix *p);
+bgp_ovsdb_lookup_local_rib_entry(struct prefix *p, char *next_hop_host);
 
 extern int
 bgp_ovsdb_republish_route(const struct ovsrec_bgp_router *bgp_first, int asn);

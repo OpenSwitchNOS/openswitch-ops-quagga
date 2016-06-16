@@ -63,6 +63,8 @@ extern const char *bgp_origin_str[];
 extern const char *bgp_origin_long_str[];
 VLOG_DEFINE_THIS_MODULE(bgp_route);
 
+extern void bgp_txn_finish(void);
+
 static struct bgp_node *
 bgp_afi_node_get (struct bgp_table *table, afi_t afi, safi_t safi, struct prefix *p,
 		  struct prefix_rd *prd)
@@ -1563,6 +1565,8 @@ bgp_process_rsclient (struct work_queue *wq, void *data)
   if (old_select && CHECK_FLAG (old_select->flags, BGP_INFO_REMOVED))
       bgp_info_reap (rn, old_select, safi);
 
+  bgp_txn_finish();
+
   UNSET_FLAG (rn->flags, BGP_NODE_PROCESS_SCHEDULED);
   return WQ_SUCCESS;
 }
@@ -1599,7 +1603,10 @@ bgp_process_main (struct work_queue *wq, void *data)
           UNSET_FLAG (old_select->flags, BGP_INFO_MULTIPATH_CHG);
           UNSET_FLAG (rn->flags, BGP_NODE_PROCESS_SCHEDULED);
 #ifdef ENABLE_OVSDB
+    if (! CHECK_FLAG (old_select->flags, BGP_INFO_REMOVED)) {
           bgp_ovsdb_update_local_rib_entry_attributes (p, old_select, bgp, safi);
+          bgp_txn_finish();
+    }
 #endif
           return WQ_SUCCESS;
         }
@@ -1641,10 +1648,16 @@ bgp_process_main (struct work_queue *wq, void *data)
     }
 #ifdef ENABLE_OVSDB
   if (old_select) {
-      bgp_ovsdb_update_local_rib_entry_attributes (p, old_select, bgp, safi);
+      if (! CHECK_FLAG (old_select->flags, BGP_INFO_REMOVED)) {
+          bgp_ovsdb_update_local_rib_entry_attributes (p, old_select, bgp, safi);
+          bgp_txn_finish();
+      }
   }
   if (new_select) {
-      bgp_ovsdb_update_local_rib_entry_attributes (p, new_select, bgp, safi);
+      if (! CHECK_FLAG (new_select->flags, BGP_INFO_REMOVED)) {
+          bgp_ovsdb_update_local_rib_entry_attributes (p, new_select, bgp, safi);
+          bgp_txn_finish();
+      }
   }
 #endif
 
@@ -1652,6 +1665,8 @@ bgp_process_main (struct work_queue *wq, void *data)
   if (old_select && CHECK_FLAG (old_select->flags, BGP_INFO_REMOVED)) {
       bgp_info_reap (rn, old_select, safi);
   }
+
+  bgp_txn_finish();
 
   UNSET_FLAG (rn->flags, BGP_NODE_PROCESS_SCHEDULED);
   return WQ_SUCCESS;
@@ -2805,6 +2820,9 @@ bgp_clear_route_node (struct work_queue *wq, void *data)
           bgp_rib_remove (rn, ri, peer, afi, safi);
         break;
       }
+
+  bgp_txn_finish();
+
   return WQ_SUCCESS;
 }
 

@@ -220,7 +220,7 @@ bgp_info_reap (struct bgp_node *rn, struct bgp_info *ri, safi_t safi)
   else
     rn->info = ri->next;
 #ifdef ENABLE_OVSDB
-  bgp_ovsdb_delete_local_rib_entry(&rn->p, ri, ri->peer->bgp, safi);
+  bgp_ovsdb_delete_local_rib_entry(&rn->p, ri, ri->peer->bgp, safi, ri->peer->host);
 #endif
 
   bgp_info_mpath_dequeue (ri);

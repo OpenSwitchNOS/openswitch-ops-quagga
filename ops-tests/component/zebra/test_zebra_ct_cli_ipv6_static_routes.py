@@ -17,7 +17,6 @@
 
 from re import match
 from re import findall
-from pytest import mark
 
 TOPOLOGY = """
 #
@@ -40,14 +39,6 @@ sw2:if02
 """
 
 
-@mark.skipif(True, reason="Currently the zebra CLI files get compiled \
-                           from ops-cli and has other \
-                           specific dependencies due to which the \
-                           tests are failing. \
-                           Skipping it temporarily until the zebra \
-                           modularization gets completed and zebra CLI \
-                           related files are moved to ops-quagga/zebra \
-                           repo.")
 def test_ipv6_static_route_config(topology, step):
     '''
     This test verifies various ipv6 static route configurations by validating
@@ -145,14 +136,14 @@ def test_ipv6_static_route_config(topology, step):
     step(''' ### Verify if nexthop is not assigned locally to an interface '''
          '''as a secondary ipv6 address ###\n''')
     sw1('interface {sw1p1}'.format(**locals()))
-    sw1('ipv6 address 2000::3/120 secondary')
+    sw1('ipv6 address 3000::3/120 secondary')
     sw1('exit')
-    sw1('ipv6 route 2002::/120 2000::3')
+    sw1('ipv6 route 2002::/120 3000::3')
     ret = sw1('do show running-config')
-    assert not 'ipv6 route 2002::/120 2000::3' in ret, \
+    assert not 'ipv6 route 2002::/120 2001::3' in ret, \
             'Secondary ipv6 address check for nexthop failed'
     sw1('interface {sw1p1}'.format(**locals()))
-    sw1('no ipv6 address 2000::2/120 secondary')
+    sw1('no ipv6 address 3000::3/120 secondary')
     sw1('exit')
 
     step(''' ### Verify if multicast address cannot be assigned as a prefix'''

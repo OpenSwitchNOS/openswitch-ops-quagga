@@ -17,7 +17,6 @@
 
 from re import match
 from re import findall
-from pytest import mark
 
 TOPOLOGY = """
 #
@@ -40,14 +39,6 @@ sw2:if02
 """
 
 
-@mark.skipif(True, reason="Currently the zebra CLI files get compiled \
-                           from ops-cli and has other \
-                           specific dependencies due to which the \
-                           tests are failing. \
-                           Skipping it temporarily until the zebra \
-                           modularization gets completed and zebra CLI \
-                           related files are moved to ops-quagga/zebra \
-                           repo.")
 def test_ipv4_static_route_config(topology, step):
     '''
     This test verifies various ipv4 static route configurations by validating
@@ -146,14 +137,14 @@ def test_ipv4_static_route_config(topology, step):
     step(''' ### Verify if nexthop is not assigned locally to an '''
          '''interface as a secondary ip address ###\n''')
     sw1('interface {sw1p1}'.format(**locals()))
-    sw1('ip address 192.168.2.2/24 secondary')
+    sw1('ip address 192.168.3.2/24 secondary')
     sw1('exit')
-    sw1('ip route 192.168.3.0/24 192.168.2.2')
+    sw1('ip route 192.168.3.0/24 192.168.3.2')
     ret = sw1('do show running-config')
-    assert not 'ip route 192.168.3.0/24 192.168.2.2'in ret, \
+    assert not 'ip route 192.168.3.0/24 192.168.3.2' in ret, \
             'Secondary ip address check for nexthop failed'
     sw1('interface {sw1p1}'.format(**locals()))
-    sw1('no ip address 192.168.2.2/24 secondary')
+    sw1('no ip address 192.168.3.2/24 secondary')
     sw1('exit')
 
     step(''' ### Verify if broadcast address cannot be assigned as a prefix '''

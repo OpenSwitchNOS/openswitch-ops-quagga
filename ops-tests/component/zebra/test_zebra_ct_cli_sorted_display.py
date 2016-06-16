@@ -17,7 +17,6 @@
 
 from re import match
 from re import findall
-from pytest import mark
 
 TOPOLOGY = """
 #
@@ -76,11 +75,6 @@ def get_prefix_uuid(switch, prefix_value, step):
     assert prefix_uuid is not None
     return prefix_uuid.group(3).rstrip('\r')
 
-@mark.skipif(True, reason="This test case requires the OVSDB \
-                           enhancements patches and has few cyclic \
-                           dependencies from the ops-cli repo. Skipping\
-                           it temporarily until the zebra \
-                           modularization is completed.")
 def test_static_route_config(topology, step):
     '''
     This test cases verifies sorted(lexicographic) retrieval of the ip routes

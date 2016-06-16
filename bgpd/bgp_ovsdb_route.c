@@ -114,6 +114,7 @@ struct bgp_ovsdb_txn {
     safi_t safi;
     struct prefix prefix;
     struct bgp_info *bgp_info;
+    char next_hop[PREFIX_MAXLEN];
     unsigned int info_attr_hash;
     time_t update_time;
 };
@@ -131,7 +132,7 @@ void bgp_txn_insert_txn(struct hmap_node *txn_node);
 void bgp_txn_remove_txn(struct hmap_node *txn_node);
 
 static bool bgp_review(struct bgp_ovsdb_txn *txn, enum txn_op_type op, bgp_table_type_t table_type);
-static uint32_t get_lookup_key(char *prefix, char *table_name);
+static uint32_t get_lookup_key(char *prefix, char *table_name, char *next_hop_host);
 void bgp_txn_complete_txn(
         struct ovsdb_idl_txn *complete_txn,
         enum ovsdb_idl_txn_status status);
@@ -157,7 +158,7 @@ txn_command_result(enum ovsdb_idl_txn_status status, char *msg, char *pr)
 
 
 /* Allocate a transaction recovery node, set it up and add to hmap */
-#define HASH_DB_TXN(txn, req, p, info, asn, safi)                       \
+#define HASH_DB_TXN(txn, req, p, info, next_hop, asn, safi)             \
     do {                                                                \
         char p_str[PREFIX_MAXLEN];                                      \
         struct bgp_ovsdb_txn *txn_rec = NULL;                           \
@@ -173,11 +174,12 @@ txn_command_result(enum ovsdb_idl_txn_status status, char *msg, char *pr)
         txn_rec->afi = family2afi(p->family);                           \
         txn_rec->safi = safi;                                           \
         txn_rec->update_time = time (NULL);                             \
+        strcpy (txn_rec->next_hop, next_hop);                           \
         bgp_txn_insert(&txn_rec->hmap_node);                            \
         prefix2str(p, p_str, sizeof(p_str));                            \
     } while (0)
 
-#define START_DB_TXN(txn, msg, req, p, info, asn, safi)                 \
+#define START_DB_TXN(txn, msg, req, p, info, next_hop, asn, safi)       \
     do {                                                                \
         enum ovsdb_idl_txn_status status;                               \
         if (current_txn == NULL) {                                      \
@@ -186,7 +188,7 @@ txn_command_result(enum ovsdb_idl_txn_status status, char *msg, char *pr)
             current_txn_count = 0;                                      \
         }                                                               \
         txn = current_txn;                                              \
-        HASH_DB_TXN(txn, req, p, info, asn, safi);                      \
+        HASH_DB_TXN(txn, req, p, info, next_hop, asn, safi);            \
     } while (0)
 
 #define END_DB_TXN(txn, msg, pr)                              \
@@ -663,18 +665,19 @@ bgp_ovsdb_set_local_rib_nexthop(struct ovsdb_idl_txn *txn,
 }
 
 const struct ovsrec_bgp_route*
-bgp_ovsdb_lookup_local_rib_entry(struct prefix *p)
+bgp_ovsdb_lookup_local_rib_entry(struct prefix *p, char* next_hop_host)
 {
     char pr[PREFIX_MAXLEN];
     struct lookup_hmap_element *hmap_entry = NULL;
     uint32_t lookup_hash;
 
     prefix2str(p, pr, sizeof(pr));
-    lookup_hash = get_lookup_key(pr, BGP_ROUTE_TABLE);
+    lookup_hash = get_lookup_key(pr, BGP_ROUTE_TABLE, next_hop_host);
 
     HMAP_FOR_EACH_IN_BUCKET(hmap_entry, node, lookup_hash, &global_hmap) {
         if(!strcmp(hmap_entry->prefix, pr) &&
-                            (hmap_entry->table_type == BGP_ROUTE)){
+            (hmap_entry->table_type == BGP_ROUTE) &&
+                !strcmp(hmap_entry->next_hop, next_hop_host)){
             const struct ovsrec_bgp_route *ri_row =
                         ovsrec_bgp_route_get_for_uuid(idl, &hmap_entry->uuid);
             return ri_row;
@@ -725,18 +728,19 @@ bgp_ovsdb_get_rib_path_attributes(const struct ovsrec_bgp_route *rib_row,
 
 
 const struct ovsrec_route*
-bgp_ovsdb_lookup_rib_entry(struct prefix *p)
+bgp_ovsdb_lookup_rib_entry(struct prefix *p, char *next_hop_host)
 {
     char pr[PREFIX_MAXLEN];
     struct lookup_hmap_element *hmap_entry = NULL;
     uint32_t lookup_hash;
 
     prefix2str(p, pr, sizeof(pr));
-    lookup_hash = get_lookup_key(pr, ROUTE_TABLE);
+    lookup_hash = get_lookup_key(pr, ROUTE_TABLE, next_hop_host);
 
     HMAP_FOR_EACH_IN_BUCKET (hmap_entry, node, lookup_hash, &global_hmap) {
         if(!strcmp(hmap_entry->prefix, pr) &&
-                             (hmap_entry->table_type == ROUTE)){
+            (hmap_entry->table_type == ROUTE) &&
+                !strcmp(hmap_entry->next_hop, next_hop_host)){
             const struct ovsrec_route *ri_row =
                         ovsrec_route_get_for_uuid(idl, &hmap_entry->uuid);
             return ri_row;
@@ -755,7 +759,7 @@ int
 bgp_ovsdb_withdraw_rib_entry(struct prefix *p,
                              struct bgp_info *info,
                              struct bgp *bgp,
-                             safi_t safi)
+                             safi_t safi, char *next_hop)
 
 {
     const struct ovsrec_route *rib_row = NULL;
@@ -770,10 +774,12 @@ bgp_ovsdb_withdraw_rib_entry(struct prefix *p,
     VLOG_DBG("%s: Withdrawing route %s, flags %d\n",
              __FUNCTION__, pr, info? info->flags : 0);
 
-    lookup_hash = get_lookup_key(pr, ROUTE_TABLE);
+    lookup_hash = get_lookup_key(pr, ROUTE_TABLE, next_hop);
 
     HMAP_FOR_EACH_IN_BUCKET(hmap_entry, node, lookup_hash, &global_hmap) {
-        if(!strcmp(hmap_entry->prefix, pr)  && (hmap_entry->table_type == ROUTE)){
+        if(!strcmp(hmap_entry->prefix, pr)  &&
+                (hmap_entry->table_type == ROUTE) &&
+                        !strcmp(hmap_entry->next_hop, next_hop)){
             if(hmap_entry->state != DB_SYNC){
                 hmap_entry->needs_review = 1;
                 return 0;
@@ -788,6 +794,10 @@ bgp_ovsdb_withdraw_rib_entry(struct prefix *p,
     if (!rib_row) {
         VLOG_ERR("%s: Failed to find route %s in Route table\n",
                  __FUNCTION__, pr);
+        if(hmap_entry) {
+            hmap_remove(&global_hmap, &(hmap_entry->node));
+            free(hmap_entry);
+        }
         return -1;
     }
 
@@ -797,7 +807,7 @@ bgp_ovsdb_withdraw_rib_entry(struct prefix *p,
         return -1;
     }
     START_DB_TXN(txn, "Failed to create route table txn",
-                 TXN_BGP_UPD_WITHDRAW, p, info, bgp->as, safi);
+                 TXN_BGP_UPD_WITHDRAW, p, info, next_hop, bgp->as, safi);
 
     /* Clear route */
     ovsrec_route_delete(rib_row);
@@ -817,7 +827,7 @@ int
 bgp_ovsdb_delete_local_rib_entry(struct prefix *p,
                                  struct bgp_info *info,
                                  struct bgp *bgp,
-                                 safi_t safi)
+                                 safi_t safi, char *next_hop)
 {
     const struct ovsrec_bgp_route *rib_row = NULL;
     char pr[PREFIX_MAXLEN];
@@ -830,10 +840,12 @@ bgp_ovsdb_delete_local_rib_entry(struct prefix *p,
     VLOG_DBG("%s: Deleting route %s, flags %d\n",
              __FUNCTION__, pr, info? info->flags : 0);
 
-    lookup_hash = get_lookup_key(pr, BGP_ROUTE_TABLE);
+    lookup_hash = get_lookup_key(pr, BGP_ROUTE_TABLE, next_hop);
 
     HMAP_FOR_EACH_IN_BUCKET(hmap_entry, node, lookup_hash, &global_hmap) {
-        if(!strcmp(hmap_entry->prefix, pr)  && (hmap_entry->table_type == BGP_ROUTE)){
+        if(!strcmp(hmap_entry->prefix, pr)  &&
+                (hmap_entry->table_type == BGP_ROUTE) &&
+                        !strcmp(hmap_entry->next_hop, next_hop)){
             if(hmap_entry->state != DB_SYNC) {
                 hmap_entry->needs_review = 1;
             }
@@ -845,6 +857,10 @@ bgp_ovsdb_delete_local_rib_entry(struct prefix *p,
     if (!rib_row) {
         VLOG_ERR("%s: Failed to find route %s in Route table\n",
                  __FUNCTION__, pr);
+        if(hmap_entry) {
+            hmap_remove(&global_hmap, &(hmap_entry->node));
+            free(hmap_entry);
+        }
         return -1;
     }
 
@@ -858,7 +874,7 @@ bgp_ovsdb_delete_local_rib_entry(struct prefix *p,
      * }
      */
     START_DB_TXN(txn, "Failed to create route table txn",
-                 TXN_BGP_DEL, p, info, bgp->as, safi);
+                 TXN_BGP_DEL, p, info, next_hop, bgp->as, safi);
 
     /* Delete route from RIB */
     ovsrec_bgp_route_delete(rib_row);
@@ -915,10 +931,12 @@ bgp_ovsdb_announce_rib_entry(struct prefix *p,
         return -1;
     }
 
-    lookup_hash = get_lookup_key(pr, ROUTE_TABLE);
+    lookup_hash = get_lookup_key(pr, ROUTE_TABLE, info->peer->host);
 
     HMAP_FOR_EACH_IN_BUCKET(hmap_entry, node, lookup_hash, &global_hmap) {
-        if(!strcmp(hmap_entry->prefix, pr) && (hmap_entry->table_type == ROUTE)){
+        if(!strcmp(hmap_entry->prefix, pr) &&
+                (hmap_entry->table_type == ROUTE)
+                        && !strcmp(hmap_entry->next_hop, info->peer->host)) {
             if(hmap_entry->state != DB_SYNC){
                 hmap_entry->needs_review = 1;
                 return 0;
@@ -930,8 +948,9 @@ bgp_ovsdb_announce_rib_entry(struct prefix *p,
         }
     }
 
+    char *next_hop = info->peer->host;
     START_DB_TXN(txn, "Failed to create route table txn",
-                 TXN_BGP_UPD_ANNOUNCE, p, info, bgp->as, safi);
+                 TXN_BGP_UPD_ANNOUNCE, p, info, next_hop, bgp->as, safi);
 
     if (!rib) {
         VLOG_DBG("Inserting route %s\n", pr);
@@ -967,6 +986,7 @@ bgp_ovsdb_announce_rib_entry(struct prefix *p,
         global_hmap_node->op_type = INSERT;
         global_hmap_node->table_type = ROUTE;
         strcpy(global_hmap_node->prefix, pr);
+        strcpy(global_hmap_node->next_hop, next_hop);
         hmap_insert(&global_hmap, &global_hmap_node->node, lookup_hash);
     } else
     {
@@ -1019,10 +1039,13 @@ bgp_ovsdb_add_local_rib_entry(struct prefix *p,
     uint32_t lookup_hash;
 
     prefix2str(p, pr, sizeof(pr));
-    lookup_hash = get_lookup_key(pr, BGP_ROUTE_TABLE);
+    lookup_hash = get_lookup_key(pr, BGP_ROUTE_TABLE, info->peer->host);
 
     HMAP_FOR_EACH_IN_BUCKET(hmap_entry, node, lookup_hash, &global_hmap) {
-        if(!strcmp(hmap_entry->prefix, pr) && (hmap_entry->table_type == BGP_ROUTE)){
+        if(!strcmp(hmap_entry->prefix, pr) &&
+                  (hmap_entry->table_type == BGP_ROUTE) &&
+                        !strcmp(hmap_entry->next_hop, info->peer->host)){
+
             if(hmap_entry->state != DB_SYNC){
                 hmap_entry->needs_review = 1;
                 return 0;
@@ -1051,8 +1074,10 @@ bgp_ovsdb_add_local_rib_entry(struct prefix *p,
         return -1;
     }
 
+    char *next_hop = info->peer->host;
+
     START_DB_TXN(txn, "Failed to create bgp route table txn",
-                 TXN_BGP_ADD, p, info, bgp->as, safi);
+                 TXN_BGP_ADD, p, info, next_hop, bgp->as, safi);
     rib = ovsrec_bgp_route_insert(txn);
 
     ovsrec_bgp_route_set_prefix(rib, pr);
@@ -1102,6 +1127,7 @@ bgp_ovsdb_add_local_rib_entry(struct prefix *p,
     global_hmap_node->op_type = INSERT;
     global_hmap_node->table_type = BGP_ROUTE;
     strcpy(global_hmap_node->prefix, pr);
+    strcpy(global_hmap_node->next_hop, next_hop);
     hmap_insert(&global_hmap, &global_hmap_node->node, lookup_hash);
 
     END_DB_TXN(txn, "added route to local RIB, prefix:", pr);
@@ -1122,13 +1148,15 @@ bgp_ovsdb_update_local_rib_entry_attributes(struct prefix *p,
     uint32_t lookup_hash;
 
     prefix2str(p, pr, sizeof(pr));
-    lookup_hash = get_lookup_key(pr, BGP_ROUTE_TABLE);
+    lookup_hash = get_lookup_key(pr, BGP_ROUTE_TABLE, info->peer->host);
 
     VLOG_DBG("%s: Updating flags for route %s, flags %d\n",
-             __FUNCTION__, pr, info? info->flags : 0);
+             __FUNCTION__, pr, info->flags);
 
     HMAP_FOR_EACH_IN_BUCKET(hmap_entry, node, lookup_hash, &global_hmap) {
-        if(!strcmp(hmap_entry->prefix, pr) && (hmap_entry->table_type == BGP_ROUTE)) {
+        if(!strcmp(hmap_entry->prefix, pr) &&
+                (hmap_entry->table_type == BGP_ROUTE) &&
+                        !strcmp(hmap_entry->next_hop, info->peer->host)) {
             if(hmap_entry->state != DB_SYNC){
                 hmap_entry->needs_review = 1;
                 return 0;
@@ -1149,8 +1177,9 @@ bgp_ovsdb_update_local_rib_entry_attributes(struct prefix *p,
     VLOG_DBG("%s: Found route %s from peer %s\n", __FUNCTION__,
                  pr, info? (info->peer? info->peer->host: "NULL") :"NULL");
 
+    char *next_hop = info->peer->host;
     START_DB_TXN(txn, "Failed to create route table txn",
-                 TXN_BGP_UPD_ATTR, p, info, bgp->as, safi);
+                 TXN_BGP_UPD_ATTR, p, info, next_hop, bgp->as, safi);
     smap_init(&smap);
     if (bgp_ovsdb_set_rib_path_attributes(&smap, info, bgp) == 0)
         ovsrec_bgp_route_set_path_attributes(rib_row, &smap);
@@ -1209,11 +1238,11 @@ bgp_txn_remove_txn(struct hmap_node *txn_node) {
  * out of sync
  */
 static bool
-bgp_txn_local_route_found(struct bgp_ovsdb_txn *txn)
+bgp_txn_local_route_found(struct bgp_ovsdb_txn *txn, char *next_hop_host)
 {
     struct bgp *bgp = bgp_lookup(txn->as_no, NULL);
 
-    if (bgp && bgp_ovsdb_lookup_local_rib_entry(&txn->prefix)) {
+    if (bgp && bgp_ovsdb_lookup_local_rib_entry(&txn->prefix, next_hop_host)) {
         return true;
     } else {
         return false;
@@ -1227,11 +1256,11 @@ bgp_txn_local_route_found(struct bgp_ovsdb_txn *txn)
  * out of sync
  */
 static bool
-bgp_txn_route_found(struct bgp_ovsdb_txn *txn)
+bgp_txn_route_found(struct bgp_ovsdb_txn *txn, char *next_hop_host)
 {
     struct bgp *bgp = bgp_lookup(txn->as_no, NULL);
 
-    if (bgp && bgp_ovsdb_lookup_rib_entry(&txn->prefix)) {
+    if (bgp && bgp_ovsdb_lookup_rib_entry(&txn->prefix, next_hop_host)) {
         return true;
     } else {
         return false;
@@ -1402,19 +1431,20 @@ bgp_txn_complete_txn(
                 if ((txn->request == TXN_BGP_ADD) || (txn->request ==
                            TXN_BGP_DEL) || (txn->request == TXN_BGP_UPD_ATTR)){
                     table_type = BGP_ROUTE;
-                    lookup_hash = get_lookup_key(prefix_str, BGP_ROUTE_TABLE);
+                    lookup_hash = get_lookup_key(prefix_str, BGP_ROUTE_TABLE, txn->next_hop);
                 }
                 else if (txn->request == TXN_BGP_UPD_ANNOUNCE ||
                              txn->request == TXN_BGP_UPD_WITHDRAW){
                     table_type = ROUTE;
-                    lookup_hash = get_lookup_key(prefix_str, ROUTE_TABLE);
+                    lookup_hash = get_lookup_key(prefix_str, ROUTE_TABLE, txn->next_hop);
                 }
 
                 /* Find node in global hash map, and update real UUID */
                 HMAP_FOR_EACH_IN_BUCKET (hmap_entry, node, lookup_hash,
-                                                        &global_hmap) {
+                                                            &global_hmap) {
                     if (!strcmp(hmap_entry->prefix, prefix_str) &&
-                                        (table_type == hmap_entry->table_type)){
+                            (table_type == hmap_entry->table_type) &&
+                                !strcmp(hmap_entry->next_hop, txn->next_hop)){
 
                         table_type = hmap_entry->table_type;
                         needs_review = hmap_entry->needs_review;
@@ -1472,38 +1502,38 @@ bgp_txn_complete_txn(
            don't add/update */
 
         if ((txn->request == TXN_BGP_ADD) &&
-            !bgp_txn_local_route_found(txn)) {
+            !bgp_txn_local_route_found(txn, txn->bgp_info->peer->host)) {
             /* add route in OVSDB route table */
             bgp_ovsdb_add_local_rib_entry(&txn->prefix,
                                           txn->bgp_info, bgp, txn->safi);
             bgp_txn_free(txn);
         } else
         if ((txn->request == TXN_BGP_UPD_ANNOUNCE) &&
-            bgp_txn_route_found(txn)) {
+            bgp_txn_route_found(txn, txn->bgp_info->peer->host)) {
             /* announce route in OVSDB route table */
             bgp_ovsdb_announce_rib_entry(&txn->prefix,
                                          txn->bgp_info, bgp, txn->safi);
             bgp_txn_free(txn);
         } else
         if ((txn->request == TXN_BGP_UPD_WITHDRAW) &&
-            bgp_txn_route_found(txn)) {
+            bgp_txn_route_found(txn, txn->bgp_info->peer->host)) {
             /* withdraw route from OVSDB route table */
             bgp_ovsdb_withdraw_rib_entry(&txn->prefix,
-                                         txn->bgp_info, bgp, txn->safi);
+                                         txn->bgp_info, bgp, txn->safi, txn->bgp_info->peer->host);
             bgp_txn_free(txn);
         } else
         if ((txn->request == TXN_BGP_UPD_ATTR) &&
-            bgp_txn_local_route_found(txn)) {
+            bgp_txn_local_route_found(txn, txn->bgp_info->peer->host)) {
             /* update route flags in OVSDB route table */
             bgp_ovsdb_update_local_rib_entry_attributes(&txn->prefix,
                                                         txn->bgp_info, bgp, txn->safi);
             bgp_txn_free(txn);
         } else
         if ((txn->request == TXN_BGP_DEL) &&
-            bgp_txn_local_route_found(txn)) {
+            bgp_txn_local_route_found(txn, txn->bgp_info->peer->host)) {
             /* delete route from OVSDB route table */
             bgp_ovsdb_delete_local_rib_entry(&txn->prefix,
-                                             txn->bgp_info, bgp, txn->safi);
+                                             txn->bgp_info, bgp, txn->safi, txn->bgp_info->peer->host);
             bgp_txn_free(txn);
         } else {
             /* Fall back - if can't recover free up txn */
@@ -2852,21 +2882,22 @@ bgp_ovsdb_republish_route(const struct ovsrec_bgp_router *bgp_first, int asn)
                 prefix2str(&rn->p, pr, sizeof(pr));
                 VLOG_DBG("%s del route %s, has mpaths = %d\n",__FUNCTION__,
                          pr, bgp_info_mpath_count(ri));
-                bgp_ovsdb_withdraw_rib_entry(&rn->p, ri,bgp, SAFI_UNICAST);
+                bgp_ovsdb_withdraw_rib_entry(&rn->p, ri, bgp, SAFI_UNICAST, ri->peer->host);
                 VLOG_DBG("%s re-announce route %s\n",__FUNCTION__, pr);
-                bgp_ovsdb_announce_rib_entry(&rn->p, ri,bgp, SAFI_UNICAST);
+                bgp_ovsdb_announce_rib_entry(&rn->p, ri, bgp, SAFI_UNICAST);
             }
         }
     }
     return 0;
 }
 
-static uint32_t get_lookup_key(char *prefix, char *table_name) {
+static uint32_t get_lookup_key(char *prefix, char *table_name, char *next_hop_host) {
     char key[MAX_KEY_LEN];
     int hashkey;
     memset(key, 0 ,sizeof(key));
     strcpy(key, prefix);
     strcat(key, table_name);
+    strcat(key, next_hop_host);
     hashkey = hash_string(key, 0);
     return hashkey;
 }
@@ -2885,20 +2916,29 @@ bgp_review(struct bgp_ovsdb_txn *txn, enum txn_op_type op,
     prefix2str(&txn->prefix, pr_bgp, sizeof(pr_bgp));
     bgp = bgp_lookup(txn->as_no, NULL);
 
-    if (!bgp) {
+    if(!bgp) {
         VLOG_ERR("BGP node is NULL for incoming prefix %s\n", pr_bgp);
         return false;
     }
 
     rn = bgp_node_lookup (bgp->rib[txn->afi][txn->safi], &txn->prefix);
 
-    if(rn == NULL)
-    {
+    if (rn == NULL) {
+        VLOG_DBG("BGP prefix node lookup for static route is NULL for incoming prefix %s\n", pr_bgp);
         prefix_found = 0;
     }
     else
     {
         ri = rn->info;
+
+        struct bgp_info *info_parse;
+
+        for(info_parse = ri; info_parse; info_parse = info_parse->next){
+            if(!strcmp(info_parse->peer->host, txn->next_hop))
+                break;
+        }
+        ri = info_parse;
+
         if(ri)
         {
             if (!(ri->flags & BGP_INFO_REMOVED)){
@@ -2920,10 +2960,10 @@ bgp_review(struct bgp_ovsdb_txn *txn, enum txn_op_type op,
 
             if (table_type == BGP_ROUTE) {
                 bgp_ovsdb_delete_local_rib_entry(&txn->prefix,
-                                      ri, bgp, txn->safi);
+                                      ri, bgp, txn->safi, txn->next_hop);
             } else {
                 bgp_ovsdb_withdraw_rib_entry(&txn->prefix,
-                                      ri, bgp, txn->safi);
+                                      ri, bgp, txn->safi, txn->next_hop);
             }
         }
         else {
@@ -2938,7 +2978,7 @@ bgp_review(struct bgp_ovsdb_txn *txn, enum txn_op_type op,
         }
     }
 
-    /* If last operation was a delete, and prefix is not found in
+    /* If last operation was a delete, and prefix is found in
        BGP, do an add */
     else if (op == DELETE){
         if (prefix_found)

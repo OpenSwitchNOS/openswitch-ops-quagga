@@ -721,7 +721,7 @@ ospf_zebra_delete (struct prefix_ipv4 *p, struct ospf_route *or)
     }
 #else
     /* Remove entry from RIB table */
-    ovsdb_ospf_delete_rib_entry(p,or);
+    (void)ovsdb_ospf_delete_rib_entry(p,or);
 #endif
 }
 

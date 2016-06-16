@@ -1181,7 +1181,7 @@ ovsdb_ospf_vl_update (const struct ospf_interface* voi)
         ovs_port = find_port_by_ip_addr(vl_addr_ipv4);
         if (!ovs_port){
             VLOG_DBG ("No Port found for %s",voi->ifp->name);
-            ovsdb_idl_txn_abort(vl_txn);
+            ovsdb_idl_txn_destroy(vl_txn);
             return;
         }
         ovsrec_ospf_interface_set_port(ovs_if, ovs_port);
@@ -1252,7 +1252,7 @@ ovsdb_ospf_add_lsa  (struct ospf_lsa* lsa)
     if (!ospf_router_row)
     {
        VLOG_DBG ("No OSPF router found");
-       ovsdb_idl_txn_abort(area_txn);
+       ovsdb_idl_txn_destroy(area_txn);
        return;
     }
     /* OPS_TODO : AS_EXTERNAL LSA check */
@@ -1261,14 +1261,14 @@ ovsdb_ospf_add_lsa  (struct ospf_lsa* lsa)
     if (!area_row)
     {
        VLOG_DBG ("No associated OSPF area : %d exist",lsa->area->area_id.s_addr);
-       ovsdb_idl_txn_abort(area_txn);
+       ovsdb_idl_txn_destroy(area_txn);
        return;
     }
     new_lsas = ovsrec_ospf_lsa_insert(area_txn);
     if (!new_lsas)
     {
        VLOG_DBG ("LSA insert failed");
-       ovsdb_idl_txn_abort(area_txn);
+       ovsdb_idl_txn_destroy(area_txn);
        return;
     }
     switch (lsa->data->type)
@@ -1403,7 +1403,7 @@ ovsdb_ospf_remove_lsa  (struct ospf_lsa* lsa)
     if (!ospf_router_row)
     {
        VLOG_DBG ("No OSPF router found");
-       ovsdb_idl_txn_abort(area_txn);
+       ovsdb_idl_txn_destroy(area_txn);
        return;
     }
     /* OPS_TODO : AS_EXTERNAL LSA check */
@@ -1412,7 +1412,7 @@ ovsdb_ospf_remove_lsa  (struct ospf_lsa* lsa)
     if (!area_row)
     {
        VLOG_DBG ("No associated OSPF area : %d exist",lsa->area->area_id.s_addr);
-       ovsdb_idl_txn_abort(area_txn);
+       ovsdb_idl_txn_destroy(area_txn);
        return;
     }
     switch (lsa->data->type)
@@ -1420,7 +1420,7 @@ ovsdb_ospf_remove_lsa  (struct ospf_lsa* lsa)
         case OSPF_ROUTER_LSA:
             if (0 >= area_row->n_router_lsas)
             {
-               ovsdb_idl_txn_abort(area_txn);
+               ovsdb_idl_txn_destroy(area_txn);
                return;
             }
             router_lsas = xmalloc(sizeof * area_row->router_lsas *
@@ -1441,7 +1441,7 @@ ovsdb_ospf_remove_lsa  (struct ospf_lsa* lsa)
             if (!old_lsas)
             {
 
-                ovsdb_idl_txn_abort(area_txn);
+                ovsdb_idl_txn_destroy(area_txn);
                 free(router_lsas);
                 return;
             }
@@ -1457,7 +1457,7 @@ ovsdb_ospf_remove_lsa  (struct ospf_lsa* lsa)
         case OSPF_NETWORK_LSA:
             if (0 >= area_row->n_network_lsas)
             {
-               ovsdb_idl_txn_abort(area_txn);
+               ovsdb_idl_txn_destroy(area_txn);
                return;
             }
             network_lsas = xmalloc(sizeof * area_row->network_lsas *
@@ -1479,7 +1479,7 @@ ovsdb_ospf_remove_lsa  (struct ospf_lsa* lsa)
             if (!old_lsas)
             {
                 VLOG_DBG ("No lsa");
-                ovsdb_idl_txn_abort(area_txn);
+                ovsdb_idl_txn_destroy(area_txn);
                 free(network_lsas);
                 return;
             }
@@ -1547,14 +1547,14 @@ ovsdb_ospf_update_full_nbr_count (struct ospf_neighbor* nbr,
     if (NULL == ovs_router)
     {
         VLOG_DBG ("No ospf instance of neighbor");
-        ovsdb_idl_txn_abort(nbr_txn);
+        ovsdb_idl_txn_destroy(nbr_txn);
         return;
     }
     ovs_area = ovsrec_ospf_area_get_area_by_id(ovs_router,nbr->oi->area->area_id);
     if (NULL == ovs_area)
     {
         VLOG_DBG ("No associated area of neighbor");
-        ovsdb_idl_txn_abort(nbr_txn);
+        ovsdb_idl_txn_destroy(nbr_txn);
         return;
     }
     snprintf(buf,sizeof(buf),"%u",full_nbr_count);
@@ -1706,21 +1706,21 @@ ovsdb_ospf_update_nbr  (struct ospf_neighbor* nbr)
     if (NULL == intf)
     {
         VLOG_DBG ("No associated interface of neighbor");
-        ovsdb_idl_txn_abort(nbr_txn);
+        ovsdb_idl_txn_destroy(nbr_txn);
         return;
     }
     ovs_oi = find_ospf_interface_by_name(intf->name);
     if (NULL == ovs_oi)
     {
         VLOG_DBG ("No associated interface of neighbor");
-        ovsdb_idl_txn_abort(nbr_txn);
+        ovsdb_idl_txn_destroy(nbr_txn);
         return;
     }
     ovs_nbr = find_ospf_nbr_by_if_addr(ovs_oi,nbr->src);
     if (!ovs_nbr)
     {
        VLOG_DBG ("No Neighbor present");
-       ovsdb_idl_txn_abort(nbr_txn);
+       ovsdb_idl_txn_destroy(nbr_txn);
        return;
     }
 
@@ -1861,14 +1861,14 @@ ovsdb_ospf_add_nbr  (struct ospf_neighbor* nbr)
     if (NULL == intf)
     {
         VLOG_DBG ("No associated interface of neighbor");
-        ovsdb_idl_txn_abort(nbr_txn);
+        ovsdb_idl_txn_destroy(nbr_txn);
         return;
     }
     ovs_oi = find_ospf_interface_by_name(intf->name);
     if (NULL == ovs_oi)
     {
         VLOG_DBG ("No associated interface of neighbor");
-        ovsdb_idl_txn_abort(nbr_txn);
+        ovsdb_idl_txn_destroy(nbr_txn);
         return;
     }
     /* Fix me : Update NBR instead of looping through
@@ -1880,14 +1880,14 @@ ovsdb_ospf_add_nbr  (struct ospf_neighbor* nbr)
     if (new_ovs_nbr)
     {
        VLOG_DBG ("Neighbor already present");
-       ovsdb_idl_txn_abort(nbr_txn);
+       ovsdb_idl_txn_destroy(nbr_txn);
        return;
     }
     new_ovs_nbr = ovsrec_ospf_neighbor_insert (nbr_txn);
     if (NULL == new_ovs_nbr)
     {
         VLOG_DBG ("Neighbor insertion failed");
-        ovsdb_idl_txn_abort(nbr_txn);
+        ovsdb_idl_txn_destroy(nbr_txn);
         return;
     }
     ovs_nbr = xmalloc(sizeof * ovs_oi->neighbors *
@@ -2048,14 +2048,14 @@ ovsdb_ospf_add_nbr_self  (struct ospf_neighbor* nbr, char* intf)
     if (NULL == intf)
     {
         VLOG_DBG ("No associated interface of neighbor");
-        ovsdb_idl_txn_abort(nbr_txn);
+        ovsdb_idl_txn_destroy(nbr_txn);
         return;
     }
     ovs_oi = find_ospf_interface_by_name(intf);
     if (NULL == ovs_oi)
     {
         VLOG_DBG ("No associated interface of neighbor");
-        ovsdb_idl_txn_abort(nbr_txn);
+        ovsdb_idl_txn_destroy(nbr_txn);
         return;
     }
     /* Fix me : Update NBR instead of looping through
@@ -2067,14 +2067,14 @@ ovsdb_ospf_add_nbr_self  (struct ospf_neighbor* nbr, char* intf)
     if (new_ovs_nbr)
     {
        VLOG_DBG ("Neighbor already present");
-       ovsdb_idl_txn_abort(nbr_txn);
+       ovsdb_idl_txn_destroy(nbr_txn);
        return;
     }
     new_ovs_nbr = ovsrec_ospf_neighbor_insert (nbr_txn);
     if (NULL == new_ovs_nbr)
     {
         VLOG_DBG ("Neighbor insertion failed");
-        ovsdb_idl_txn_abort(nbr_txn);
+        ovsdb_idl_txn_destroy(nbr_txn);
         return;
     }
     ovs_nbr = xmalloc(sizeof * ovs_oi->neighbors *
@@ -2232,21 +2232,21 @@ ovsdb_ospf_set_nbr_self_router_id  (char* ifname, struct in_addr if_addr,
     if (NULL == ifname)
     {
         VLOG_DBG ("No associated interface of neighbor");
-        ovsdb_idl_txn_abort(nbr_txn);
+        ovsdb_idl_txn_destroy(nbr_txn);
         return;
     }
     ovs_oi = find_ospf_interface_by_name(ifname);
     if (NULL == ovs_oi)
     {
         VLOG_DBG ("No associated interface of neighbor");
-        ovsdb_idl_txn_abort(nbr_txn);
+        ovsdb_idl_txn_destroy(nbr_txn);
         return;
     }
     ovs_nbr = find_ospf_nbr_by_if_addr(ovs_oi,if_addr);
     if (!ovs_nbr)
     {
        VLOG_DBG ("Self neighbor not present");
-       ovsdb_idl_txn_abort(nbr_txn);
+       ovsdb_idl_txn_destroy(nbr_txn);
        return;
     }
     nbr_router_id = router_id.s_addr;
@@ -2578,14 +2578,14 @@ ovsdb_ospf_delete_nbr_self  (struct ospf_neighbor* nbr, char* ifname)
     if (NULL == ifname)
     {
         VLOG_DBG ("No associated interface of neighbor");
-        ovsdb_idl_txn_abort(nbr_txn);
+        ovsdb_idl_txn_destroy(nbr_txn);
         return;
     }
     ovs_oi = find_ospf_interface_by_name(ifname);
     if (NULL == ovs_oi)
     {
         VLOG_DBG ("No associated interface of neighbor");
-        ovsdb_idl_txn_abort(nbr_txn);
+        ovsdb_idl_txn_destroy(nbr_txn);
         return;
     }
     /* Fix me : Update NBR instead of looping through
@@ -2597,7 +2597,7 @@ ovsdb_ospf_delete_nbr_self  (struct ospf_neighbor* nbr, char* ifname)
     if (!old_ovs_nbr)
     {
        VLOG_DBG ("Neighbor not found");
-       ovsdb_idl_txn_abort(nbr_txn);
+       ovsdb_idl_txn_destroy(nbr_txn);
        return;
     }
     ovs_nbr = xmalloc(sizeof * ovs_oi->neighbors *
@@ -2645,7 +2645,7 @@ ovsdb_ospf_add_area_to_router (int ospf_intance,struct in_addr area_id)
     if (!ospf_router_row)
     {
        VLOG_DBG ("No OSPF router found");
-       ovsdb_idl_txn_abort(area_txn);
+       ovsdb_idl_txn_destroy(area_txn);
        return;
     }
 
@@ -2653,7 +2653,7 @@ ovsdb_ospf_add_area_to_router (int ospf_intance,struct in_addr area_id)
     if (!area_row)
     {
        VLOG_DBG ("OSPF area insert failed");
-       ovsdb_idl_txn_abort(area_txn);
+       ovsdb_idl_txn_destroy(area_txn);
        return;
     }
 
@@ -2784,14 +2784,14 @@ ovsdb_ospf_set_dead_time_intervals (char* ifname, int interval_type,long time_ms
     if (!ospf_if_row)
     {
        VLOG_DBG ("No OSPF interface found");
-       ovsdb_idl_txn_abort (if_txn);
+       ovsdb_idl_txn_destroy (if_txn);
        return;
     }
     ospf_nbr_row = find_ospf_nbr_by_if_addr(ospf_if_row,src);
     if (!ospf_nbr_row)
     {
        VLOG_DBG ("No OSPF Neighbor found");
-       ovsdb_idl_txn_abort (if_txn);
+       ovsdb_idl_txn_destroy (if_txn);
        return;
     }
     snprintf(buf,sizeof (buf),"%u",time_msec);
@@ -2838,7 +2838,7 @@ ovsdb_ospf_set_hello_time_intervals (const char* ifname, int interval_type,long 
     if (!ospf_if_row)
     {
        VLOG_DBG ("No OSPF interface found");
-       ovsdb_idl_txn_abort (if_txn);
+       ovsdb_idl_txn_destroy (if_txn);
        return;
     }
     snprintf(buf,sizeof (buf),"%u",time_msec);
@@ -3034,7 +3034,7 @@ ovsdb_area_set_interface(int instance,struct in_addr area_id,
     if (!interface_row)
     {
        VLOG_DBG ("OSPF interface insert failed");
-       ovsdb_idl_txn_abort(intf_txn);
+       ovsdb_idl_txn_destroy(intf_txn);
        return;
     }
     /* Insert OSPF_Interface table reference in OSPF_Area table. */
@@ -3167,7 +3167,7 @@ ovsdb_ospf_remove_area_from_router (int instance,
     if (!ospf_router_row)
     {
         VLOG_DBG ("No OSPF instance there");
-        ovsdb_idl_txn_abort(txn);
+        ovsdb_idl_txn_destroy(txn);
         return;
     }
 
@@ -3175,7 +3175,7 @@ ovsdb_ospf_remove_area_from_router (int instance,
     if (!ovs_area)
     {
         VLOG_DBG ("No OSPF area there");
-        ovsdb_idl_txn_abort(txn);
+        ovsdb_idl_txn_destroy(txn);
         return;
     }
     if (ovsdb_ospf_is_area_tbl_empty(ovs_area))
@@ -3233,14 +3233,14 @@ ovsdb_ospf_remove_interface_from_area (int instance, struct in_addr area_id,
     if (!ovs_ospf)
     {
         VLOG_DBG ("No OSPF instance there : %d",instance);
-        ovsdb_idl_txn_abort(txn);
+        ovsdb_idl_txn_destroy(txn);
         return;
     }
     area_row = ovsrec_ospf_area_get_area_by_id(ovs_ospf,area_id);
     if (!area_row)
     {
         VLOG_DBG ("No OSPF area there");
-        ovsdb_idl_txn_abort(txn);
+        ovsdb_idl_txn_destroy(txn);
         return;
     }
     ospf_interface_list = xmalloc(sizeof * area_row->ospf_interfaces *
@@ -3272,7 +3272,7 @@ ovsdb_ospf_remove_interface_from_area (int instance, struct in_addr area_id,
     else
     {
        VLOG_DBG ("No OSPF Interface there for the area");
-       ovsdb_idl_txn_abort(txn);
+       ovsdb_idl_txn_destroy(txn);
        free(ospf_interface_list);
        return;
     }
@@ -3385,6 +3385,21 @@ ovsdb_ospf_add_rib_entry (struct prefix_ipv4 *p, struct ospf_route *or)
         VLOG_DBG ("No VRF found");
         return;
     }
+    prefix2str(p, prefix_str, sizeof(prefix_str));
+    if (!strlen (prefix_str))
+    {
+        VLOG_DBG ("Invalid prefix for the route");
+        return;
+    }
+    if(shash_find(&all_routes, prefix_str))
+    {
+        VLOG_DBG ("Route already present!!Deleting");
+        if (0 != ovsdb_ospf_delete_rib_entry(p, or))
+        {
+            VLOG_ERR ("Error deleting route");
+            return;
+        }
+    }
     txn = ovsdb_idl_txn_create(idl);
     if (!txn)
     {
@@ -3395,7 +3410,7 @@ ovsdb_ospf_add_rib_entry (struct prefix_ipv4 *p, struct ospf_route *or)
     if (!ovs_rib)
     {
         VLOG_DBG ("Route insertion failed");
-        ovsdb_idl_txn_abort(txn);
+        ovsdb_idl_txn_destroy(txn);
         return;
     }
     /* Not checking for Duplicate routes as done in route_install */
@@ -3414,13 +3429,6 @@ ovsdb_ospf_add_rib_entry (struct prefix_ipv4 *p, struct ospf_route *or)
         metric = or->cost;
     ovsrec_route_set_metric(ovs_rib,&metric,1);
     ovsrec_route_set_sub_address_family(ovs_rib,saf_str);
-    prefix2str(p, prefix_str, sizeof(prefix_str));
-    if (!strlen (prefix_str))
-    {
-        VLOG_DBG ("Invalid prefix for the route");
-        ovsdb_idl_txn_abort(txn);
-        return;
-    }
     ovsrec_route_set_prefix(ovs_rib,prefix_str);
     /* Set Nexthops for the route */
     (void)ovsdb_ospf_add_route_nexthops(txn,ovs_rib,or,&next_hop_str);
@@ -3456,7 +3464,7 @@ ovsdb_ospf_add_rib_entry (struct prefix_ipv4 *p, struct ospf_route *or)
     ovsdb_idl_txn_destroy(txn);
 }
 
-void
+int
 ovsdb_ospf_delete_rib_entry (struct prefix_ipv4 *p,
                                     struct ospf_route *or OVS_UNUSED)
 {
@@ -3473,13 +3481,13 @@ ovsdb_ospf_delete_rib_entry (struct prefix_ipv4 *p,
     if (!node)
     {
         VLOG_DBG ("No route node found in local hash");
-        return;
+        return -1;
     }
     rt_uuid = (struct uuid*)node->data;
     if (!rt_uuid)
     {
         VLOG_DBG ("No route data found in local hash");
-        return;
+        return -1;
     }
     /* Event logging */
     log_event("OSPFv2_ROUTE",
@@ -3490,15 +3498,15 @@ ovsdb_ospf_delete_rib_entry (struct prefix_ipv4 *p,
     if (!txn)
     {
         VLOG_DBG ("Transaction create failed");
-        return;
+        return -1;
     }
     ovs_rib = ovsrec_route_get_for_uuid(idl,rt_uuid);
     /* OPS_TODO : Not sure whether to remove shash data */
     if (!ovs_rib)
     {
         VLOG_DBG ("No route found for the uuid");
-        ovsdb_idl_txn_abort(txn);
-        return;
+        ovsdb_idl_txn_destroy(txn);
+        return -1;
     }
     ovsrec_route_delete(ovs_rib);
     status = ovsdb_idl_txn_commit_block(txn);
@@ -3510,6 +3518,7 @@ ovsdb_ospf_delete_rib_entry (struct prefix_ipv4 *p,
         shash_delete(&all_routes,node);
     }
     ovsdb_idl_txn_destroy(txn);
+    return 0;
 }
 
 int
@@ -5426,14 +5435,14 @@ ovsdb_ospf_update_network_routes (const struct ospf *ospf, const struct route_ta
         i = j = 0;
         if (!(intra_area_rts = xcalloc (per_area_rt_table->count, sizeof (struct ovsrec_ospf_route *)))) {
           VLOG_ERR ("Memory allocation Failure");
-          ovsdb_idl_txn_abort(ort_txn);
+          ovsdb_idl_txn_destroy(ort_txn);
           route_unlock_node (rn);
           return;
         }
         if (!(inter_area_rts = xcalloc (per_area_rt_table->count, sizeof (struct ovsrec_ospf_route *)))) {
           VLOG_ERR ("Memory allocation Failure");
           free (intra_area_rts);
-          ovsdb_idl_txn_abort(ort_txn);
+          ovsdb_idl_txn_destroy(ort_txn);
           route_unlock_node (rn);
           return;
         }
@@ -5479,7 +5488,7 @@ ovsdb_ospf_update_network_routes (const struct ospf *ospf, const struct route_ta
                   VLOG_ERR ("Memory allocation Failure");
                   free (intra_area_rts);
                   free (inter_area_rts);
-                  ovsdb_idl_txn_abort(ort_txn);
+                  ovsdb_idl_txn_destroy(ort_txn);
                   route_unlock_node (rn1);
                   route_unlock_node (rn);
                   return;
@@ -5495,7 +5504,7 @@ ovsdb_ospf_update_network_routes (const struct ospf *ospf, const struct route_ta
                         free(pathstrs[l]);
                       }
                       free (pathstrs);
-                      ovsdb_idl_txn_abort(ort_txn);
+                      ovsdb_idl_txn_destroy(ort_txn);
                       route_unlock_node (rn1);
                       route_unlock_node (rn);
                       return;
@@ -5607,7 +5616,7 @@ ovsdb_ospf_update_router_routes (const struct ospf *ospf, const struct route_tab
         i = j = 0;
         if (!(router_rts = xcalloc (per_area_rt_table->count, sizeof (struct ovsrec_ospf_route *)))) {
           VLOG_ERR ("Memory allocation Failure");
-          ovsdb_idl_txn_abort(ort_txn);
+          ovsdb_idl_txn_destroy(ort_txn);
           route_unlock_node (rn);
           return;
         }
@@ -5642,7 +5651,7 @@ ovsdb_ospf_update_router_routes (const struct ospf *ospf, const struct route_tab
               if (!(pathstrs = xcalloc (or->paths->count, sizeof (char *)))) {
                 VLOG_ERR ("Memory allocation Failure");
                 free (router_rts);
-                ovsdb_idl_txn_abort(ort_txn);
+                ovsdb_idl_txn_destroy(ort_txn);
                 route_unlock_node (rn1);
                 route_unlock_node (rn);
                 return;
@@ -5657,7 +5666,7 @@ ovsdb_ospf_update_router_routes (const struct ospf *ospf, const struct route_tab
                       free(pathstrs[l]);
                     }
                     free (pathstrs);
-                    ovsdb_idl_txn_abort(ort_txn);
+                    ovsdb_idl_txn_destroy(ort_txn);
                     route_unlock_node (rn1);
                     route_unlock_node (rn);
                     return;
@@ -5741,7 +5750,7 @@ ovsdb_ospf_update_ext_routes (const struct ospf *ospf, const struct route_table 
   /* Add ospf routes to OVSDB OSPF_Route table */
   if (!(ext_rts = xcalloc (rt->count, sizeof (struct ovsrec_ospf_route *)))) {
     VLOG_ERR ("Memory allocation Failure");
-    ovsdb_idl_txn_abort(ort_txn);
+    ovsdb_idl_txn_destroy(ort_txn);
     return;
   }
 
@@ -5783,7 +5792,7 @@ ovsdb_ospf_update_ext_routes (const struct ospf *ospf, const struct route_table 
         if (!(pathstrs = xcalloc (or->paths->count, sizeof (char *)))) {
           VLOG_ERR ("Memory allocation Failure");
           free (ext_rts);
-          ovsdb_idl_txn_abort(ort_txn);
+          ovsdb_idl_txn_destroy(ort_txn);
           route_unlock_node (rn);
           return;
         }
@@ -5795,7 +5804,7 @@ ovsdb_ospf_update_ext_routes (const struct ospf *ospf, const struct route_table 
               for (l = 0; l < k; l++)
                 free(pathstrs[l]);
               free (pathstrs);
-              ovsdb_idl_txn_abort(ort_txn);
+              ovsdb_idl_txn_destroy(ort_txn);
               route_unlock_node (rn);
               return;
             }
@@ -5869,7 +5878,7 @@ ovsdb_ospf_update_ext_route (const struct ospf *ospf, const struct prefix *p_or,
   /* Add ospf routes to OVSDB OSPF_Route table */
   if (!(ext_rts = xcalloc (ospf_router_row->n_ext_ospf_routes + 1, sizeof (struct ovsrec_ospf_route *)))) {
     VLOG_ERR ("Memory allocation Failure");
-    ovsdb_idl_txn_abort(ort_txn);
+    ovsdb_idl_txn_destroy(ort_txn);
     return;
   }
 
@@ -5879,7 +5888,7 @@ ovsdb_ospf_update_ext_route (const struct ospf *ospf, const struct prefix *p_or,
     if (!(ospf_route_row = ovsrec_ospf_route_insert (ort_txn))) {
       VLOG_ERR ("Insert in OSPF_Route table Failed.");
       free (ext_rts);
-      ovsdb_idl_txn_abort(ort_txn);
+      ovsdb_idl_txn_destroy(ort_txn);
       return;
     }
 
@@ -5906,7 +5915,7 @@ ovsdb_ospf_update_ext_route (const struct ospf *ospf, const struct prefix *p_or,
       if (!(pathstrs = xcalloc (or->paths->count, sizeof (char *)))) {
         VLOG_ERR ("Memory allocation Failure");
         free (ext_rts);
-        ovsdb_idl_txn_abort(ort_txn);
+        ovsdb_idl_txn_destroy(ort_txn);
         return;
       }
       for (ALL_LIST_ELEMENTS (or->paths, pnode, pnnode, path)) {
@@ -5918,7 +5927,7 @@ ovsdb_ospf_update_ext_route (const struct ospf *ospf, const struct prefix *p_or,
               free(pathstrs[l]);
             }
             free (pathstrs);
-            ovsdb_idl_txn_abort(ort_txn);
+            ovsdb_idl_txn_destroy(ort_txn);
             return;
           }
           if (path->nexthop.s_addr == 0) {

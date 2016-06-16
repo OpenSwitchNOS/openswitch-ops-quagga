@@ -17,7 +17,7 @@
 
 from re import match
 from re import findall
-from pytest import mark
+from time import sleep
 
 TOPOLOGY = """
 #
@@ -76,11 +76,6 @@ def get_prefix_uuid(switch, prefix_value, step):
     assert prefix_uuid is not None
     return prefix_uuid.group(3).rstrip('\r')
 
-@mark.skipif(True, reason="This test case requires the OVSDB \
-                           enhancements patches and has few cyclic \
-                           dependencies from the ops-cli repo. Skipping\
-                           it temporarily until the zebra \
-                           modularization is completed.")
 def test_static_route_config(topology, step):
     '''
     This test cases verifies sorted(lexicographic) retrieval of the ip routes
@@ -99,6 +94,10 @@ def test_static_route_config(topology, step):
     sw1p4 = sw1.ports['if04']
     sw2p1 = sw2.ports['if01']
     sw2p2 = sw2.ports['if02']
+
+    # Accounting for the time required to bring up the switch and get the
+    # daemons up and running
+    sleep(15)
 
     step("### Verify that the static routes are retrieved in sorted order ###")
     # Configure switch 1
@@ -130,6 +129,10 @@ def test_static_route_config(topology, step):
     sw1('ipv6 route  2001::/96 2')
     sw1('ipv6 route  ::/128 1')
     sw1('ipv6 route  1:1::/127 1')
+
+    # Accounting for the time required to set the configuration in DB and
+    # let zebra install the connected and the static routes in the kernel
+    sleep(10)
 
     # Stop zebra to turn 'on' the selected bit for the listed prefixes and to
     # popluate BGP and OSPF routes using ovsdb-client utility.
@@ -263,7 +266,7 @@ def test_static_route_config(topology, step):
     # interface
     sw1(bpg_route_cmd_ipv6_route, shell='bash')
 
-    # Prepare string for a OSPF route 20.0.0.0/32 using ovsdb-client with
+    # Prepare string for a OSPF route 40.0.0.0/32 using ovsdb-client with
     # lower administration distance as compared with the corresponding
     # static route.This makes the OSPF route more preferable than the static
     # route.

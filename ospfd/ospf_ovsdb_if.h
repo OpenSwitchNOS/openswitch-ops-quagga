@@ -207,7 +207,7 @@ ovsdb_ospf_update_ifsm_state (char* ifname, int ism_state);
 extern void
 ovsdb_ospf_add_rib_entry (struct prefix_ipv4 *p, struct ospf_route *or);
 
-extern void
+extern int
 ovsdb_ospf_delete_rib_entry (struct prefix_ipv4 *p, struct ospf_route *or);
 
 extern void

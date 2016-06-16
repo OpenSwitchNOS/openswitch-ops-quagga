@@ -18,7 +18,13 @@
 # 02111-1307, USA.
 
 
+from helpers_routing import (
+    ZEBRA_TEST_SLEEP_TIME,
+    ZEBRA_INIT_SLEEP_TIME
+)
+from time import sleep
 from pytest import mark
+
 
 TOPOLOGY = """
 # +-------+      +-------+
@@ -45,6 +51,10 @@ sw1:if01 -- sw2:if01
 def test_zebra_ct_fib_selection(topology, step):
     sw1 = topology.get("sw1")
     sw2 = topology.get("sw2")
+
+    # Test case init time sleep
+    sleep(ZEBRA_INIT_SLEEP_TIME)
+
     step('1-Configuring the topology')
 
     # Configure switch sw1
@@ -90,6 +100,8 @@ def test_zebra_ct_fib_selection(topology, step):
     sw1("set interface 2 user_config:admin=up", shell='vsctl')
     sw2("set interface 1 user_config:admin=up", shell='vsctl')
     sw2("set interface 2 user_config:admin=up", shell='vsctl')
+
+    sleep(ZEBRA_TEST_SLEEP_TIME)
 
     step('2-Verify static routes are selected for fib')
 

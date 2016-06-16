@@ -954,7 +954,7 @@ bgp_zebra_withdraw (struct prefix *p, struct bgp_info *info, safi_t safi)
     }
 #endif /* HAVE_IPV6 */
 #else
-  bgp_ovsdb_withdraw_rib_entry(p, info, info->peer->bgp, safi);
+  bgp_ovsdb_withdraw_rib_entry(p, info, info->peer->bgp, safi, info->peer->host);
 #endif
 }
 

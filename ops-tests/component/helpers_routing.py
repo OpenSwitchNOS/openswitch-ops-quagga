@@ -265,7 +265,7 @@ def get_route_from_show(sw1=None, route=None, route_type=None, show=None):
 
         # Match the next-hop lines against the regular expression and populate
         # the next-hop dictionary with distance, metric and routetype
-        nexthop = match("(.+)via  ([0-9.:]+),  \[(\d+)/(\d+)\],  (.+)",
+        nexthop = match("(.+)via  (.+),  \[(\d+)/(\d+)\],  (.+)",
                         line)
 
         if nexthop:

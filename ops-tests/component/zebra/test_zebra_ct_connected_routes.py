@@ -3144,8 +3144,6 @@ def no_routing_or_delete_layer3_interfaces(sw1, sw2, step):
                     rib_ipv6_lag_connected_route_secondary)
 
 
-@mark.skipif(True, reason="Waiting for zebra modular frame changes. \
-                           Skipping zebra connected route CT")
 def test_zebra_ct_connected_routes(topology, step):
     sw1 = topology.get("sw1")
     sw2 = topology.get("sw2")

@@ -15,8 +15,13 @@
 # specific language governing permissions and limitations
 # under the License.
 
+from helpers_routing import (
+    ZEBRA_TEST_SLEEP_TIME,
+    ZEBRA_INIT_SLEEP_TIME
+)
 from re import match
 from re import findall
+from time import sleep
 
 TOPOLOGY = """
 #
@@ -94,6 +99,11 @@ def test_static_route_config(topology, step):
     sw2p1 = sw2.ports['if01']
     sw2p2 = sw2.ports['if02']
 
+
+    # Accounting for the time required to bring up the switch and get the
+    # daemons up and running
+    sleep(ZEBRA_INIT_SLEEP_TIME)
+
     step("### Verify that the static routes are retrieved in sorted order ###")
     # Configure switch 1
     sw1('configure terminal')
@@ -124,6 +134,10 @@ def test_static_route_config(topology, step):
     sw1('ipv6 route  2001::/96 2')
     sw1('ipv6 route  ::/128 1')
     sw1('ipv6 route  1:1::/127 1')
+
+    # Accounting for the time required to set the configuration in DB and
+    # let zebra install the connected and the static routes in the kernel
+    sleep(2 * ZEBRA_TEST_SLEEP_TIME)
 
     # Stop zebra to turn 'on' the selected bit for the listed prefixes and to
     # popluate BGP and OSPF routes using ovsdb-client utility.

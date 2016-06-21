@@ -49,7 +49,8 @@ char* zebra_l3_port_cache_actions_str[] =
   "L3 port add",
   "L3 port changed to L2",
   "L3 port delete",
-  "L3 port IP address update"
+  "L3 port IP address update",
+  "L3 port active state change"
 };
 
 /*

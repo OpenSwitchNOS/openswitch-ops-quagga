@@ -108,6 +108,11 @@ extern int zsend_route_multipath (int, struct zserv *, struct prefix *,
                                   struct rib *);
 extern int zsend_router_id_update(struct zserv *, struct prefix *);
 
+#ifdef ENABLE_OVSDB
+extern void
+rib_queue_add (struct zebra_t *, struct route_node *);
+#endif
+
 extern pid_t pid;
 
 #endif /* _ZEBRA_ZEBRA_H */

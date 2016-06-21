@@ -490,7 +490,6 @@ main (int argc, char **argv)
 
   /* Process ID file creation. */
   pid_output (pid_file);
-#endif /* ENABLE_OVSDB */
 
   /* Make bgp vty socket. */
   vty_serv_sock (vty_addr, vty_port, BGP_VTYSH_PATH);
@@ -500,6 +499,7 @@ main (int argc, char **argv)
 	       vty_port, 
 	       (bm->address ? bm->address : "<all>"),
 	       bm->port);
+#endif /* ENABLE_OVSDB */
 
   /* Start finite state machine, here we go! */
 #ifdef ENABLE_OVSDB

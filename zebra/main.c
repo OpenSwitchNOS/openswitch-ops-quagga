@@ -330,15 +330,19 @@ main (int argc, char **argv)
 
   /* Vty related initialize. */
   signal_init (zebrad.master, array_size(zebra_signals), zebra_signals);
+#ifndef ENABLE_OVSDB
   cmd_init (1);
   vty_init (zebrad.master);
+#endif
   memory_init ();
 
   /* Zebra related initialize. */
   zebra_init ();
   rib_init ();
   zebra_if_init ();
+#ifndef ENABLE_OVSDB
   zebra_debug_init ();
+#endif
   router_id_init();
   zebra_vty_init ();
   access_list_init ();
@@ -427,6 +431,7 @@ main (int argc, char **argv)
   /* Needed for BSD routing socket. */
   pid = getpid ();
 
+#ifndef ENABLE_OVSDB
   /* This must be done only after locking pidfile (bug #403). */
   zebra_zserv_socket_init (zserv_path);
 
@@ -435,6 +440,10 @@ main (int argc, char **argv)
 
   /* Print banner. */
   zlog_notice ("Zebra %s starting: vty@%d", QUAGGA_VERSION, vty_port);
+#else
+  /* Print banner. */
+  zlog_notice ("Zebra %s starting", QUAGGA_VERSION);
+#endif
 
 #ifdef ENABLE_OVSDB
   while (!exiting && thread_fetch (zebrad.master, &thread))

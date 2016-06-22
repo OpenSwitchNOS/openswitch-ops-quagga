@@ -427,6 +427,7 @@ main (int argc, char **argv)
   /* Needed for BSD routing socket. */
   pid = getpid ();
 
+#ifndef ENABLE_OVSDB
   /* This must be done only after locking pidfile (bug #403). */
   zebra_zserv_socket_init (zserv_path);
 
@@ -435,6 +436,10 @@ main (int argc, char **argv)
 
   /* Print banner. */
   zlog_notice ("Zebra %s starting: vty@%d", QUAGGA_VERSION, vty_port);
+#else
+  /* Print banner. */
+  zlog_notice ("Zebra %s starting", QUAGGA_VERSION);
+#endif
 
 #ifdef ENABLE_OVSDB
   while (!exiting && thread_fetch (zebrad.master, &thread))

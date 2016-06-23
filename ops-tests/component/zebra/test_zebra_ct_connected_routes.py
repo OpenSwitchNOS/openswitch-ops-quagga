@@ -28,7 +28,6 @@ from helpers_routing import (
     verify_show_rib
 )
 from time import sleep
-import pytest
 
 
 zebra_stop_command_string = "systemctl stop ops-zebra"
@@ -3145,7 +3144,6 @@ def no_routing_or_delete_layer3_interfaces(sw1, sw2, step):
                     rib_ipv6_lag_connected_route_secondary)
 
 
-@pytest.mark.skipif(True, reason="Failing at the gate due to conflict with portd code")
 def test_zebra_ct_connected_routes(topology, step):
     sw1 = topology.get("sw1")
     sw2 = topology.get("sw2")

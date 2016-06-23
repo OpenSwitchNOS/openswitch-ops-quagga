@@ -19,8 +19,6 @@
 
 
 from helpers_routing import (
-    ZEBRA_TEST_SLEEP_TIME,
-    ZEBRA_INIT_SLEEP_TIME,
     verify_show_ip_route,
     verify_show_rib
 )
@@ -290,7 +288,7 @@ def add_static_bgp_routes(sw1, sw2, step):
     route_ipv4_bgp_route2 = dict()
     route_ipv4_bgp_route2['Route'] = '143.0.0.1/32'
 
-    sleep(ZEBRA_TEST_SLEEP_TIME)
+    sleep(15)
 
     step("Verifying the IPv4 static and BGP routes on switch 1")
     aux_route = route_ipv4_static_route1['Route']
@@ -397,9 +395,7 @@ def delete_static_bgp_routes(sw1, sw2, step):
     # Populate the expected FIB ("show ip route") route dictionary for the BGP
     # route 123.0.0.1/32 and its next-hops.
     route_ipv4_bgp_route2 = rib_ipv4_bgp_route2
-
-    sleep(ZEBRA_TEST_SLEEP_TIME)
-
+    sleep(15)
     step("Verifying the IPv4 static and BGP "
          "routes on switch 1 after route deletes")
     # Verify the static/BGP routes in RIB and FIB
@@ -427,9 +423,5 @@ def test_zebra_ct_ipv4_static_bgp_nexthop_selection(topology, step):
     assert sw1 is not None
     sw2 = topology.get("sw2")
     assert sw2 is not None
-
-    # Test case init time sleep
-    sleep(ZEBRA_INIT_SLEEP_TIME)
-
     add_static_bgp_routes(sw1, sw2, step)
     delete_static_bgp_routes(sw1, sw2, step)

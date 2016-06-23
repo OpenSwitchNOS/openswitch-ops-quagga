@@ -52,10 +52,7 @@
 #include "openswitch-idl.h"
 
 #include "zebra/zebra_ovsdb_if.h"
-
-#define NUM_CHAR_CMP 6
-#define NUM_CHAR_UNSUPPORTED 20
-#define MAX_ZEBRA_TXN_COUNT  100
+#include "zebra/zebra_diagnostics.h"
 
 /* Local structure to hold the master thread
  * and counters for read/write callbacks
@@ -74,10 +71,10 @@ extern struct zebra_t zebrad;
 COVERAGE_DEFINE(zebra_ovsdb_cnt);
 VLOG_DEFINE_THIS_MODULE(zebra_ovsdb_if);
 
-static struct ovsdb_idl *idl;
-static unsigned int idl_seqno;
-static char *appctl_path = NULL;
-static struct unixctl_server *appctl;
+struct ovsdb_idl *idl;
+unsigned int idl_seqno;
+char *appctl_path = NULL;
+struct unixctl_server *appctl;
 static int system_configured = false;
 static struct ovsdb_idl_txn *zebra_txn = NULL;
 bool zebra_txn_updates = false;
@@ -95,7 +92,6 @@ bool zebra_first_run_after_restart = true;
  */
 bool zebra_cleanup_kernel_after_restart = false;
 
-boolean exiting = false;
 /* Hash for ovsdb route.*/
 static struct hash *zebra_route_hash;
 
@@ -243,424 +239,6 @@ zebra_is_route_in_my_vrf (const struct ovsrec_route *ovs_route)
   return(!strncmp(ovs_rt_vrf, zebra_vrf, OVSDB_VRF_NAME_MAXLEN));
 }
 #endif
-
-/*
- ********************************************************************
- * Start of the set of debugging functions for dumping zebra's route
- * table.
- ********************************************************************
- */
-
-/*
- * This function returns the string  for the various route types
- * supported by zebra.
- */
-static char*
-zebra_route_type_to_str (int route_type)
-{
-  switch (route_type)
-    {
-      case ZEBRA_ROUTE_SYSTEM:
-        return("system");
-      case ZEBRA_ROUTE_KERNEL:
-        return("kernel");
-      case ZEBRA_ROUTE_CONNECT:
-        return("connected");
-      case ZEBRA_ROUTE_STATIC:
-        return("static");
-      case ZEBRA_ROUTE_RIP:
-        return("rip");
-      case ZEBRA_ROUTE_RIPNG:
-        return("ripng");
-      case ZEBRA_ROUTE_OSPF:
-        return("ospf");
-      case ZEBRA_ROUTE_OSPF6:
-        return("ospf6");
-      case ZEBRA_ROUTE_ISIS:
-        return("isis");
-      case ZEBRA_ROUTE_BGP:
-        return("bgp");
-      case ZEBRA_ROUTE_PIM:
-        return("pim");
-      case ZEBRA_ROUTE_HSLS:
-        return("hsls");
-      case ZEBRA_ROUTE_OLSR:
-        return("olsr");
-      case ZEBRA_ROUTE_BABEL:
-        return("babel");
-      default:
-        return("unsupported");
-    }
-}
-
-/*
- * This function prints the content of a nexthop in zebra's rib entry.
- */
-void
-zebra_dump_internal_nexthop (struct prefix *p, struct nexthop* nexthop)
-{
-  char nexthop_str[256];
-
-  if (!p)
-    {
-      VLOG_DBG("       prefix is NULL");
-      return;
-    }
-
-  if (!nexthop)
-    {
-      VLOG_DBG("       Nexthop is NULL");
-      return;
-    }
-
-  memset(nexthop_str, 0, sizeof(nexthop_str));
-
-  if (p->family == AF_INET)
-    if (nexthop->type == NEXTHOP_TYPE_IPV4)
-      {
-        inet_ntop(AF_INET, &nexthop->gate.ipv4,
-                  nexthop_str, sizeof(nexthop_str));
-         VLOG_DBG("      Nexthop->%s Active: %s", nexthop_str,
-                  CHECK_FLAG(nexthop->flags,
-                          NEXTHOP_FLAG_ACTIVE)? "true":"false");
-      }
-
-   if (p->family == AF_INET6)
-     if (nexthop->type == NEXTHOP_TYPE_IPV6)
-       {
-         inet_ntop(AF_INET6, &nexthop->gate.ipv6,
-                   nexthop_str, sizeof(nexthop_str));
-         VLOG_DBG("      Nexthop->%s Active: %s", nexthop_str,
-                  CHECK_FLAG(nexthop->flags,
-                            NEXTHOP_FLAG_ACTIVE)? "true":"false");
-       }
-
-   if ((nexthop->type == NEXTHOP_TYPE_IFNAME) ||
-       (nexthop->type == NEXTHOP_TYPE_IPV4_IFNAME) ||
-       (nexthop->type == NEXTHOP_TYPE_IPV6_IFNAME))
-       VLOG_DBG("      Nexthop->%s Active: %s", nexthop->ifname,
-                CHECK_FLAG(nexthop->flags,
-                           NEXTHOP_FLAG_ACTIVE)? "true":"false");
-}
-
-/*
- * This function prints the contents of a rib entry in the zebra
- * route node.
- */
-void
-zebra_dump_internal_rib_entry (struct prefix *p, struct rib* rib)
-{
-  struct nexthop *nexthop;
-  char nexthop_str[256];
-
-  if (!p)
-    {
-      VLOG_DBG("   prefix is NULL");
-      return;
-    }
-
-  if (!rib)
-    {
-      VLOG_DBG("   Rib entry is NULL");
-      return;
-    }
-
-  if (!(rib->nexthop))
-    {
-      VLOG_DBG("   Empty RIB entry");
-      return;
-    }
-
-  VLOG_DBG("\tRoute type: %s Metric: %u Distance: %u Number: %u",
-           zebra_route_type_to_str(rib->type), rib->metric,
-           rib->distance, rib->nexthop_num);
-
-  for (nexthop = rib->nexthop; nexthop; nexthop = nexthop->next)
-   {
-     zebra_dump_internal_nexthop(p, nexthop);
-   }
-}
-
-/*
- * This function dumps the contents of a route node in zebra's
- * route table.
- */
-void
-zebra_dump_internal_route_node (struct route_node *rn)
-{
-  struct rib *rib;
-  struct nexthop *nexthop;
-  char prefix_str[256];
-  char nexthop_str[256];
-  struct prefix *p = NULL;
-
-  if (!rn)
-    {
-      VLOG_DBG("Route node is null");
-      return;
-    }
-
-  p = &rn->p;
-  memset(prefix_str, 0, sizeof(prefix_str));
-  prefix2str(p, prefix_str, sizeof(prefix_str));
-
-  VLOG_DBG("Prefix %s Family %d\n",prefix_str,
-           PREFIX_FAMILY(p));
-
-  RNODE_FOREACH_RIB (rn, rib)
-    {
-      zebra_dump_internal_rib_entry(p, rib);
-    }
-}
-
-/*
- * This function walks the zebra route table and prints the contents
- * of all route nodes.
- */
-void
-zebra_dump_internal_route_table (struct route_table *table)
-{
-  struct route_node *rn;
-
-  if (!table)
-    {
-      VLOG_DBG("The table is null");
-      return;
-    }
-
-  for (rn = route_top (table); rn; rn = route_next (rn))
-    {
-      zebra_dump_internal_route_node(rn);
-    }
-}
-
-/*
- ********************************************************************
- * End of the set of debugging functions for dumping zebra's route
- * table.
- ********************************************************************
- */
-
-/*
- ********************************************************************
- * Start of the set of debugging functions for OVSDB zebra interface.
- ********************************************************************
- */
-/*
- * This function returns the UUID of a some entry in OVSDB in string
- * format.
- */
-static inline char*
-zebra_dump_ovsdb_uuid (struct uuid* uuid)
-{
-  static char uuid_to_string[ZEBRA_MAX_STRING_LEN];
-
-  memset(uuid_to_string, 0, ZEBRA_MAX_STRING_LEN);
-
-  if (!uuid)
-    snprintf(uuid_to_string, ZEBRA_MAX_STRING_LEN,
-             "The UUID is NULL");
-  else
-    snprintf(uuid_to_string, ZEBRA_MAX_STRING_LEN, "%u-%u-%u-%u",
-             uuid->parts[0], uuid->parts[1], uuid->parts[2],
-             uuid->parts[3]);
-
-  return(uuid_to_string);
-}
-
-/*
- * This function dumps the details of the next-hops for a given route row in
- * OVSDB route table.
- */
-static void
-zebra_dump_ovsdb_nexthop_entry (const struct ovsrec_nexthop *nh_row)
-{
-  int port_index;
-
-  if (!nh_row)
-    {
-      VLOG_DBG("    The next-hop entry is NULL\n");
-      return;
-    }
-
-  /*
-   * Printing next-hop row parameters.
-   */
-  VLOG_DBG("    Address = %s %s%s\n", nh_row->ip_address,
-           OVSREC_IDL_IS_ROW_INSERTED(nh_row, idl_seqno) ? "(I)":"",
-           OVSREC_IDL_IS_ROW_MODIFIED(nh_row, idl_seqno) ? "(M)":"");
-
-  /*
-   * Walk the port list for the next-hop and print the details of
-   * next-hop.
-   */
-  for (port_index = 0; port_index < nh_row->n_ports; ++port_index)
-    {
-      VLOG_DBG("        The next-hop port is %s\n",
-               (nh_row->ports[port_index]->name) ?
-                nh_row->ports[port_index]->name :
-                "NULL");
-    }
-}
-
-/*
- * This function dumps the details of a route row in OVSDB route table.
- */
-static void
-zebra_dump_ovsdb_route_entry (const struct ovsrec_route *route_row)
-{
-  int next_hop_index;
-  struct uuid route_uuid;
-
-  if (!route_row)
-    {
-      VLOG_DBG("The route entry is NULL\n");
-      return;
-    }
-
-  route_uuid = OVSREC_IDL_GET_TABLE_ROW_UUID(route_row);
-
-  /*
-   * Printing the route row details.
-   */
-  VLOG_DBG("Route = %s AF = %s protocol = %s vrf = %s\n uuid = %s %s%s",
-           route_row->prefix ? route_row->prefix : "NULL",
-           route_row->address_family ? route_row->address_family : "NULL",
-           route_row->from ? route_row->from : "NULL",
-           route_row->vrf ? (route_row->vrf->name ? route_row->vrf->name :
-                             "NULL") : "NULL",
-           zebra_dump_ovsdb_uuid(&route_uuid),
-           OVSREC_IDL_IS_ROW_INSERTED(route_row, idl_seqno) ? "(I)":"",
-           OVSREC_IDL_IS_ROW_MODIFIED(route_row, idl_seqno) ? "(M)":"");
-
-  /*
-   * Walk the array of nxt-hops and print the route's next-hop details.
-   */
-  for (next_hop_index = 0; next_hop_index < route_row->n_nexthops;
-       ++next_hop_index)
-    {
-      zebra_dump_ovsdb_nexthop_entry(route_row->nexthops[next_hop_index]);
-    }
-}
-
-/*
- * This function causes the dumps of the entire OVSDB route table.
- */
-static void
-zebra_dump_ovsdb_route_table (void)
-{
-  const struct ovsrec_route *route_row = NULL;
-  int count = 0;
-
-  VLOG_DBG("Printing the OVSDB route table snapshot\n");
-
-  /*
-   * Walk all the entries in the OVSDB route table and print all the
-   * route entries.
-   */
-  OVSREC_ROUTE_FOR_EACH (route_row, idl)
-    {
-      if (route_row)
-        {
-          ++count;
-          zebra_dump_ovsdb_route_entry(route_row);
-        }
-    }
-
-  VLOG_DBG("Total number of route entries in OVSDB route table are %d\n",
-           count);
-}
-
-/*
- ******************************************************************
- * End of the set of debugging functions for OVSDB zebra interface.
- ******************************************************************
- */
-
-/*
- ************************************************************************
- * Start of function for handling port add, delete and update triggers
- * from OVSDB.
- */
-/*
- * Type of port actions. The action done on the port is stored in the
- * cached L3 port node.
- */
-enum zebra_l3_port_cache_actions
-{
-  ZEBRA_L3_PORT_NO_CHANGE,
-  ZEBRA_L3_PORT_ADD,
-  ZEBRA_L3_PORT_L3_CHANGED_TO_L2,
-  ZEBRA_L3_PORT_DELETE,
-  ZEBRA_L3_PORT_UPADTE_IP_ADDR
-};
-
-/*
- * Options under which we need to walk the zebra's route table and
- * decode which nexthop ports/addresses we need to withdraw from kernel
- * and remove or mark unselected in the OVSDB tables.
- */
-enum zebra_handle_port_op_options
-{
-  ZEBRA_L3_PORT_DELETE_UPDATE_OPTION,
-  ZEBRA_L3_PORT_ACTIVE_STATE_CHN_OPTION
-};
-
-/*
- * the string representation of the port actions.
- */
-char* zebra_l3_port_cache_actions_str[] =
-{
-  "L3 port no change",
-  "L3 port add",
-  "L3 port changed to L2",
-  "L3 port delete",
-  "L3 port IP address update"
-};
-
-/*
- * The L3 port structure. This structure is used to store the
- * L3 ovsrec_port data. We need to cache this data in order to
- * handle triggers like "no routing" on a port where the port
- * entry in the port table loses all the IP/IPv6 addresses. We
- * use the cached IP addresses to clean up the kernel and the
- * update the OVSDB tables appropriately.
- */
-struct zebra_l3_port
-{
-  char *port_name;                       /* name of the port */
-  char *ip4_address;                     /* Primary IP address on port */
-  char *ip6_address;                     /* Primary IPv6 address on port */
-  struct shash ip4_address_secondary;    /* Hash for the secondary
-                                            IP addresses. The key is the
-                                            IP address in string format and
-                                            value is IP address in string
-                                            format */
-  struct shash ip4_connected_routes_uuid;/* Hash for the UUIDs for the
-                                            connected routes programmed by
-                                            zebra for the IP addresses on the
-                                            port. The key is connected route
-                                            prefix string and the value is
-                                            OVSDB connected route UUID. */
-  struct shash ip6_address_secondary;    /* Hash for the secondary
-                                            IPv6 addresses. The key is the
-                                            IPv6 address in string format and
-                                            value is IPv6 address in string
-                                            format */
-  struct shash ip6_connected_routes_uuid;/* Hash for the UUIDs for the
-                                            connected routes programmed by
-                                            zebra for the IPv6 addresses on the
-                                            port. The key is connected route
-                                            prefix string and the value is
-                                            OVSDB connected route UUID.*/
-  struct uuid ovsrec_port_uuid;          /* UUID to the OVSDB port entry */
-  enum zebra_l3_port_cache_actions port_action;
-                                         /* Action performed on the
-                                            port */
-  bool if_active;                        /* If the port is still active in
-                                            event of shut/un-shut triggers
-                                            on the resolving interfaces.*/
-};
 
 /*
  * Hash to keep track of the L3 ports in the zebra system
@@ -1298,202 +876,64 @@ zebra_l3_port_node_free (struct zebra_l3_port* l3_port)
 
   shash_destroy(&(l3_port->ip6_connected_routes_uuid));
 
-  free(l3_port);
-}
-
-/*
- * This function prints the contents of the cached L3 port node. This is
- * useful for debugging the port/interface triggers.
- */
-static void
-zebra_l3_port_node_print (struct zebra_l3_port* l3_port)
-{
-  struct shash_node *node, *next;
-  char* ip_secondary_address;
-  struct uuid* connected_route_uuid;
-  int secondary_address_count, route_uuid_count;
-
-  if (!l3_port)
+  /*
+   * Walk the IPv6 seocndary hash table, Free the secondary IPv4 address.
+   */
+  if (shash_count(&(l3_port->ip6_address_secondary)))
     {
-      VLOG_DBG("The L3 port structure is NULL. Nothing to print");
-      return;
-    }
-
-  VLOG_DBG("Printing the L3 node\n");
-  VLOG_DBG("     Port Name: %s", l3_port->port_name ? l3_port->port_name :
-                                                       "NULL");
-  VLOG_DBG("     Port Primary IP Address: %s", l3_port->ip4_address ?
-                                                l3_port->ip4_address :
-                                                "NULL");
-  VLOG_DBG("     Port Primary IPv6 Address: %s", l3_port->ip6_address ?
-                                                  l3_port->ip6_address :
-                                                  "NULL");
-
-  VLOG_DBG("     OVSDB port UUID is: %s",
-           zebra_dump_ovsdb_uuid((struct uuid*)&(l3_port->ovsrec_port_uuid)));
-
-  VLOG_DBG("     Port action is: %s", zebra_l3_port_cache_actions_str[
-                                                     l3_port->port_action]);
-  VLOG_DBG("     Port state is: %s",
-            l3_port->if_active ? "Active" : "Inactive");
-
-  VLOG_DBG("     Printing the IPv4 seconary address in the port");
-  if (!shash_count(&(l3_port->ip4_address_secondary)))
-    VLOG_DBG("         No IPv4 seconary address in the port");
-  else
-    {
-      secondary_address_count = 0;
-      SHASH_FOR_EACH_SAFE (node, next, &(l3_port->ip4_address_secondary))
-        {
-          if (!node)
-            {
-              VLOG_DBG("No node found in the L3 port hash\n");
-              continue;
-            }
-
-          if (!(node->data))
-            {
-              VLOG_DBG("No node data found\n");
-              continue;
-            }
-
-          ip_secondary_address = (char*)node->data;
-          ++secondary_address_count;
-
-          VLOG_DBG("         %d. Address %s", secondary_address_count,
-                    ip_secondary_address);
-
-        }
-    }
-
-  VLOG_DBG("     Printing the IPv4 connected route UUIDs in the port");
-  if (!shash_count(&(l3_port->ip4_connected_routes_uuid)))
-    VLOG_DBG("         No IPv4 connected route UUIDs in the port");
-  else
-    {
-      route_uuid_count = 0;
-      SHASH_FOR_EACH_SAFE (node, next, &(l3_port->ip4_connected_routes_uuid))
-        {
-          if (!node)
-            {
-              VLOG_DBG("No node found in the L3 port hash\n");
-              continue;
-            }
-
-          if (!(node->data))
-            {
-              VLOG_DBG("No node data found\n");
-              continue;
-            }
-
-          connected_route_uuid = (struct uuid*)node->data;
-          ++route_uuid_count;
-
-          VLOG_DBG("         %d. IPv4 connected route UUID %s",
-                   route_uuid_count,
-                   zebra_dump_ovsdb_uuid(connected_route_uuid));
-
-        }
-    }
-
-  VLOG_DBG("     Printing the IPv6 seconary address in the port");
-  if (!shash_count(&(l3_port->ip6_address_secondary)))
-    VLOG_DBG("         No IPv6 seconary address in the port");
-  else
-    {
-      secondary_address_count = 0;
       SHASH_FOR_EACH_SAFE (node, next, &(l3_port->ip6_address_secondary))
         {
           if (!node)
             {
-              VLOG_DBG("No node found in the L3 port hash\n");
+              VLOG_ERR("No node found in the L3 port hash\n");
               continue;
             }
 
           if (!(node->data))
             {
-              VLOG_DBG("No node data found\n");
-               continue;
+              VLOG_ERR("No node data found\n");
+              continue;
             }
 
           ip_secondary_address = (char*)node->data;
-          ++secondary_address_count;
 
-          VLOG_DBG("         %d. Address %s", secondary_address_count,
-                    ip_secondary_address);
-
+          shash_delete(&(l3_port->ip6_address_secondary), node);
+          free(ip_secondary_address);
         }
     }
 
-  VLOG_DBG("     Printing the IPv6 connected route UUIDs in the port");
-  if (!shash_count(&(l3_port->ip6_connected_routes_uuid)))
-    VLOG_DBG("         No IPv6 connected route UUIDs in the port");
-  else
+  shash_destroy(&(l3_port->ip6_address_secondary));
+
+  /*
+   * Walk the IPv6 connected routes UUID hash table and free the connected route
+   * UUID for secondary IPv6 address.
+   */
+  if (shash_count(&(l3_port->ip6_connected_routes_uuid)))
     {
-      route_uuid_count = 0;
       SHASH_FOR_EACH_SAFE (node, next, &(l3_port->ip6_connected_routes_uuid))
         {
           if (!node)
             {
-              VLOG_DBG("No node found in the L3 port hash\n");
+              VLOG_ERR("No node found in the L3 port hash\n");
               continue;
             }
 
           if (!(node->data))
             {
-              VLOG_DBG("No node data found\n");
+              VLOG_ERR("No node data found\n");
               continue;
             }
 
-          connected_route_uuid = (struct uuid*)node->data;
-          ++route_uuid_count;
+          route_uuid = node->data;
 
-          VLOG_DBG("         %d. IPv6 connected route UUID %s",
-                   route_uuid_count,
-                   zebra_dump_ovsdb_uuid(connected_route_uuid));
-
+          shash_delete(&(l3_port->ip6_connected_routes_uuid), node);
+          free(route_uuid);
         }
     }
-}
 
-/*
- * Walk all cached L3 ports in the hash table 'zebra_cached_l3_ports' This is
- * useful for debugging the port/interface triggers.
- */
-static void
-zebra_l3_port_walk_cache_and_print (struct shash* zebra_cached_l3_ports,
-                                    bool if_permanent_hash)
-{
-  struct shash_node *node, *next;
-  struct zebra_l3_port* l3_port;
+  shash_destroy(&(l3_port->ip6_connected_routes_uuid));
 
-  VLOG_DBG("Walking the L3 port cache to print all L3 ports in %s cache",
-            if_permanent_hash ? "permanent" : "temporary");
-
-  if (!shash_count(zebra_cached_l3_ports))
-    {
-      VLOG_DBG("The hash table is empty. Nothing to walk and print");
-      return;
-    }
-
-  SHASH_FOR_EACH_SAFE (node, next, zebra_cached_l3_ports)
-    {
-      if (!node)
-        {
-          VLOG_DBG("No node found in the L3 port hash\n");
-          continue;
-        }
-
-      if (!(node->data))
-        {
-          VLOG_DBG("No node data found\n");
-          continue;
-        }
-
-      l3_port = (struct zebra_l3_port*)node->data;
-
-      zebra_l3_port_node_print(l3_port);
-    }
+  free(l3_port);
 }
 
 /*
@@ -3676,7 +3116,7 @@ zebra_nh_port_in_deleted_cached_l3_ports_hash (char* port_name)
   else
     {
       VLOG_DBG("Found a valid L3 port structure");
-      zebra_l3_port_node_print(l3_port);
+      zebra_l3_port_node_print(NULL, l3_port);
       if ((l3_port->port_action ==
                         ZEBRA_L3_PORT_L3_CHANGED_TO_L2) ||
           (l3_port->port_action == ZEBRA_L3_PORT_DELETE))
@@ -3718,7 +3158,7 @@ zebra_nh_address_in_deleted_cached_l3_ports_hash (char* nexthop_str,
       VLOG_DBG("Found a valid L3 port structure containing "
                "nexthop %s", nexthop_str);
 
-      zebra_l3_port_node_print(l3_port);
+      zebra_l3_port_node_print(NULL, l3_port);
       if ((l3_port->port_action ==
                         ZEBRA_L3_PORT_L3_CHANGED_TO_L2) ||
           (l3_port->port_action == ZEBRA_L3_PORT_DELETE))
@@ -4245,102 +3685,6 @@ zebra_find_routes_with_deleted_ports (
  ************************************************************************
  */
 
-/* ovs appctl dump function for this daemon
- * This is useful for debugging
- */
-static void
-zebra_unixctl_dump (struct unixctl_conn *conn, int argc OVS_UNUSED,
-                    const char *argv[] OVS_UNUSED, void *aux OVS_UNUSED)
-{
-  unixctl_command_reply_error(conn, "Nothing to dump");
-}
-
-/* ovs appctl function for this daemon
- * to display or modify the level of zebra logging.
- */
-static void
-debug_parse_options(int argc, const char *argv[], char *return_status,
-                    struct unixctl_conn *conn)
-{
-  if (argc != 2) {
-    sprintf(return_status, "Wrong argument count - %d", argc);
-    return;
-  }
-
-  if (!strncmp("event", argv[1], NUM_CHAR_CMP)) {
-    zebra_debug_event = ZEBRA_DEBUG_EVENT;
-  } else if (!strncmp("packet", argv[1], NUM_CHAR_CMP)) {
-    zebra_debug_packet |= ZEBRA_DEBUG_PACKET;
-  } else if (!strncmp("send", argv[1], NUM_CHAR_CMP)) {
-    zebra_debug_packet |= ZEBRA_DEBUG_SEND;
-  } else if (!strncmp("recv", argv[1], NUM_CHAR_CMP)) {
-    zebra_debug_packet |= ZEBRA_DEBUG_RECV;
-  } else if (!strncmp("detail", argv[1], NUM_CHAR_CMP)) {
-    zebra_debug_packet |= ZEBRA_DEBUG_DETAIL;
-  } else if (!strncmp("kernel", argv[1], NUM_CHAR_CMP)) {
-    zebra_debug_kernel = ZEBRA_DEBUG_KERNEL;
-  } else if (!strncmp("rib", argv[1], NUM_CHAR_CMP)) {
-    zebra_debug_rib |= ZEBRA_DEBUG_RIB;
-  } else if (!strncmp("ribq", argv[1], NUM_CHAR_CMP)) {
-    zebra_debug_rib |= ZEBRA_DEBUG_RIB_Q;
-  } else if (!strncmp("fpm", argv[1], NUM_CHAR_CMP)) {
-    zebra_debug_fpm = ZEBRA_DEBUG_FPM;
-  } else if (!strncmp("all", argv[1], NUM_CHAR_CMP)) {
-    zebra_debug_event = ZEBRA_DEBUG_EVENT;
-    zebra_debug_packet = ZEBRA_DEBUG_PACKET | ZEBRA_DEBUG_SEND | \
-                         ZEBRA_DEBUG_RECV  | ZEBRA_DEBUG_DETAIL;
-    zebra_debug_kernel = ZEBRA_DEBUG_KERNEL;
-    zebra_debug_rib = ZEBRA_DEBUG_RIB | ZEBRA_DEBUG_RIB_Q;
-    zebra_debug_fpm = ZEBRA_DEBUG_FPM;
-  } else if (!strncmp("off", argv[1], NUM_CHAR_CMP)) {
-    zebra_debug_event = 0;
-    zebra_debug_packet = 0;
-    zebra_debug_kernel = 0;
-    zebra_debug_rib = 0;
-    zebra_debug_fpm = 0;
-  } else if (!strncmp("show", argv[1], NUM_CHAR_CMP)) {
-    if (IS_ZEBRA_DEBUG_EVENT)
-      sprintf(return_status + strlen(return_status), "event\n");
-    if (IS_ZEBRA_DEBUG_KERNEL)
-      sprintf(return_status + strlen(return_status), "kernel\n");
-    if (IS_ZEBRA_DEBUG_FPM)
-      sprintf(return_status + strlen(return_status), "fpm\n");
-    if (IS_ZEBRA_DEBUG_PACKET)
-      sprintf(return_status + strlen(return_status), "packet\n");
-    if (IS_ZEBRA_DEBUG_SEND)
-      sprintf(return_status + strlen(return_status), "send\n");
-    if (IS_ZEBRA_DEBUG_RECV)
-      sprintf(return_status + strlen(return_status), "recv\n");
-    if (IS_ZEBRA_DEBUG_DETAIL)
-      sprintf(return_status + strlen(return_status), "detail\n");
-    if (IS_ZEBRA_DEBUG_RIB)
-      sprintf(return_status + strlen(return_status), "rib\n");
-    if (IS_ZEBRA_DEBUG_RIB_Q)
-      sprintf(return_status + strlen(return_status), "ribq\n");
-  } else {
-    sprintf(return_status, "Unsupported argument - %s", argv[1]);
-  }
-
-  return;
-}
-
-static void
-zebra_unixctl_set_debug_level (struct unixctl_conn *conn, int argc OVS_UNUSED,
-                    const char *argv[] OVS_UNUSED, void *aux OVS_UNUSED)
-{
-  char return_status[200] = "";
-
-  debug_parse_options(argc, argv, return_status, conn);
-
-  if (!strncmp(return_status, "Unsupported argument", NUM_CHAR_UNSUPPORTED)) {
-    unixctl_command_reply_error(conn, return_status);
-  } else {
-    unixctl_command_reply(conn, return_status);
-  }
-
-  return;
-}
-
 /* Create a connection to the OVSDB at db_path and create a dB cache
  * for this daemon. */
 static void
@@ -4442,22 +3786,6 @@ ovsdb_init (const char *db_path)
    */
   zebra_init_cached_l3_ports_hash();
 
-  /* Register ovs-appctl commands for this daemon. */
-  unixctl_command_register("zebra/dump", "", 0, 0, zebra_unixctl_dump, NULL);
-  unixctl_command_register("zebra/debug", "event|packet|send|recv|detail|kernel"
-                           "|rib|ribq|fpm|all|show|off", 1, 1,
-                           zebra_unixctl_set_debug_level, NULL);
-}
-
-/* This function is invoked on appctl exit command to stop the daemon
- */
-static void
-ops_zebra_exit (struct unixctl_conn *conn, int argc OVS_UNUSED,
-                const char *argv[] OVS_UNUSED, void *exiting_)
-{
-  boolean *exiting = exiting_;
-  *exiting = true;
-  unixctl_command_reply(conn, NULL);
 }
 
 /* This function lists all the OVS specific command line options
@@ -4563,20 +3891,14 @@ zebra_ovsdb_init (int argc, char *argv[])
   /* Fork and return in child process; but don't notify parent of
    * startup completion yet. */
   daemonize_start();
-  /* Create UDS connection for ovs-appctl. */
-  retval = unixctl_server_create(appctl_path, &appctl);
-  if (retval)
-    exit(EXIT_FAILURE);
-
-  /* Register the ovs-appctl "exit" command for this daemon. */
-  unixctl_command_register("exit", "", 0, 0, ops_zebra_exit, &exiting);
-
   /* Create the IDL cache of the dB at ovsdb_sock. */
   ovsdb_init(ovsdb_sock);
   free(ovsdb_sock);
 
   /* Notify parent of startup completion. */
   daemonize_complete();
+
+  zebra_diagnostics_init();
 
   /* Enable asynch log writes to disk. */
   vlog_enable_async();
@@ -5581,12 +4903,6 @@ zebra_apply_route_changes (void)
     }
 
   /*
-   * If debug logging is enabled, then dump the OVSDB route table.
-   */
-  if (VLOG_IS_DBG_ENABLED())
-    zebra_dump_ovsdb_route_table();
-
-  /*
    * Check if anything changed in the route table and the next-hop table.
    * If nothing changed then return from this function.
    */
@@ -6108,14 +5424,15 @@ zebra_handle_port_add_delete_changes (void)
   zebra_remove_deleted_cached_l3_ports_hash();
 
   /*
-   * If debug logging is enabled, then dump the OVSDB route table.
+   * If debug logging is enabled, then dump the L3 port cache.
    */
   if (VLOG_IS_DBG_ENABLED())
     {
-      zebra_l3_port_walk_cache_and_print(
-                                  &zebra_cached_l3_ports, true);
-      zebra_l3_port_walk_cache_and_print(
-                     &zebra_updated_or_changed_l3_ports, false);
+      zebra_l3_port_walk_cache_and_print(NULL,
+                                         &zebra_cached_l3_ports, true);
+      zebra_l3_port_walk_cache_and_print(NULL,
+                                         &zebra_updated_or_changed_l3_ports,
+                                         false);
     }
 
   /* Update Active Router-ID */
@@ -6211,10 +5528,17 @@ zebra_reconfigure (struct ovsdb_idl *idl)
        */
       if (VLOG_IS_DBG_ENABLED())
         {
-          zebra_dump_internal_route_table(
-                     vrf_shadow_table(AFI_IP, SAFI_UNICAST, 0));
-          zebra_dump_internal_route_table(
-                     vrf_shadow_table(AFI_IP6, SAFI_UNICAST, 0));
+          VLOG_DBG("Printing shadow internal route table for kernel"
+                   "cleanup after zebra restart\n");
+
+          zebra_dump_internal_route_table(NULL,
+                                          vrf_shadow_table(AFI_IP,
+                                                           SAFI_UNICAST,
+                                                           0));
+          zebra_dump_internal_route_table(NULL,
+                                          vrf_shadow_table(AFI_IP6,
+                                                           SAFI_UNICAST,
+                                                           0));
         }
 
       zebra_pre_restart_setup();

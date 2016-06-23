@@ -47,6 +47,7 @@
 #include "coverage.h"
 #include "openvswitch/vlog.h"
 #include "zebra/zebra_ovsdb_if.h"
+#include "zebra/zebra_diagnostics.h"
 #endif
 
 /* Default rtm_table for all clients */

@@ -15,10 +15,6 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from helpers_routing import (
-    ZEBRA_TEST_SLEEP_TIME,
-    ZEBRA_INIT_SLEEP_TIME
-)
 from re import match
 from re import findall
 from time import sleep
@@ -99,10 +95,9 @@ def test_static_route_config(topology, step):
     sw2p1 = sw2.ports['if01']
     sw2p2 = sw2.ports['if02']
 
-
     # Accounting for the time required to bring up the switch and get the
     # daemons up and running
-    sleep(ZEBRA_INIT_SLEEP_TIME)
+    sleep(15)
 
     step("### Verify that the static routes are retrieved in sorted order ###")
     # Configure switch 1
@@ -137,7 +132,7 @@ def test_static_route_config(topology, step):
 
     # Accounting for the time required to set the configuration in DB and
     # let zebra install the connected and the static routes in the kernel
-    sleep(2 * ZEBRA_TEST_SLEEP_TIME)
+    sleep(10)
 
     # Stop zebra to turn 'on' the selected bit for the listed prefixes and to
     # popluate BGP and OSPF routes using ovsdb-client utility.
@@ -271,7 +266,7 @@ def test_static_route_config(topology, step):
     # interface
     sw1(bpg_route_cmd_ipv6_route, shell='bash')
 
-    # Prepare string for a OSPF route 20.0.0.0/32 using ovsdb-client with
+    # Prepare string for a OSPF route 40.0.0.0/32 using ovsdb-client with
     # lower administration distance as compared with the corresponding
     # static route.This makes the OSPF route more preferable than the static
     # route.

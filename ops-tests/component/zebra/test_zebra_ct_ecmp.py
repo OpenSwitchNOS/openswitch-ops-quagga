@@ -17,11 +17,8 @@
 # Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 # 02111-1307, USA.
 
-from helpers_routing import (
-    ZEBRA_TEST_SLEEP_TIME,
-    ZEBRA_INIT_SLEEP_TIME
-)
 from time import sleep
+# from re import search
 
 TOPOLOGY = """
 #               +-------+     +-------+
@@ -55,10 +52,6 @@ def _configure_switches(topology, step):
     assert sw1 is not None
     sw2 = topology.get("sw2")
     assert sw2 is not None
-
-    # Test case init time sleep
-    sleep(ZEBRA_INIT_SLEEP_TIME)
-
     step('1-Configuring Switches')
     # Configure switch sw1
     sw1("configure terminal")
@@ -115,6 +108,7 @@ def _configure_switches(topology, step):
     sw2("exit")
     sw2("ip route 10.0.10.0/24 10.0.30.1")
     sw2("ip route 10.0.10.0/24 10.0.40.1")
+    sleep(1)
     sw2("ip route 10.0.20.0/24 10.0.30.1")
     sw2("ip route 10.0.20.0/24 10.0.40.1")
 
@@ -160,9 +154,7 @@ def _v4_route_ping_test(topology, step):
     assert hs1 is not None
     hs2 = topology.get("hs2")
     assert hs2 is not None
-
-    sleep(ZEBRA_TEST_SLEEP_TIME)
-
+    sleep(3)
     step('3-IPv4 Ping test')
 
     # Ping host3 from host1
@@ -188,7 +180,7 @@ def _v4_route_delete_ping_test(topology, step):
     sw1("no ip route 10.0.70.0/24 10.0.30.2")
 
     # Ping host1 from host2
-    sleep(ZEBRA_TEST_SLEEP_TIME)
+    sleep(3)
     ping = hs1.libs.ping.ping(5, '10.0.70.1')
     assert ping['transmitted'] is 5 and ping['received'] is 0
 

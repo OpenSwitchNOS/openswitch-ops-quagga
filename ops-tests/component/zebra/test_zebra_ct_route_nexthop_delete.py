@@ -19,8 +19,6 @@
 
 
 from helpers_routing import (
-    ZEBRA_TEST_SLEEP_TIME,
-    ZEBRA_INIT_SLEEP_TIME,
     route_and_nexthop_in_show_running_config,
     verify_show_ip_route,
     verify_show_ipv6_route,
@@ -253,7 +251,7 @@ def add_static_routes(sw1, sw2, step):
     # route 3234:3234::1/128 and its next-hops.
     route_ipv6_static_route3 = rib_ipv6_static_route3
 
-    sleep(ZEBRA_TEST_SLEEP_TIME)
+    sleep(15)
 
     step("Verifying the IPv4 static routes on switch 1")
     # Verify route 123.0.0.1/32 and next-hops in RIB, FIB and verify the
@@ -442,7 +440,7 @@ def delete_static_routes(sw1, sw2, step):
     # route 2234:2234::1/128 and its remaining next-hops.
     route_ipv6_static_route2 = rib_ipv6_static_route2
 
-    sleep(ZEBRA_TEST_SLEEP_TIME)
+    sleep(15)
 
     step("Verifying the IPv4 static routes on switch 1")
     # Verify route 123.0.0.1/32 and next-hops in RIB, FIB and verify the
@@ -539,9 +537,5 @@ def test_zebra_ct_route_nexthop_delete(topology, step):
     assert sw1 is not None
     sw2 = topology.get("sw2")
     assert sw2 is not None
-
-    # Test case init time sleep
-    sleep(ZEBRA_INIT_SLEEP_TIME)
-
     add_static_routes(sw1, sw2, step)
     delete_static_routes(sw1, sw2, step)

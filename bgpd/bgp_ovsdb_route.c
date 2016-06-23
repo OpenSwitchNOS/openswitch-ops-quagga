@@ -65,6 +65,7 @@
 
 #define MAX_ARGC         10
 #define MAX_ARG_LEN     256
+#define MAX_TXN_COUNT    20
 
 extern unsigned int idl_seqno;
 extern const char *bgp_origin_str[];
@@ -117,10 +118,17 @@ struct bgp_ovsdb_txn {
     time_t update_time;
 };
 
+struct bgp_ovsdb_txn_txn {
+    struct hmap_node hmap_node;
+    struct ovsdb_idl_txn *txn;
+};
+
 void bgp_txn_init(void);
 void bgp_txn_destroy(void);
 void bgp_txn_insert(struct hmap_node *txn_node);
 void bgp_txn_remove(struct hmap_node *txn_node);
+void bgp_txn_insert_txn(struct hmap_node *txn_node);
+void bgp_txn_remove_txn(struct hmap_node *txn_node);
 int route_map_action_str_to_enum(const char *action_str, int *action);
 int
 policy_rt_map_apply_changes (struct route_map *map,
@@ -130,6 +138,13 @@ policy_rt_map_apply_changes (struct route_map *map,
 
 static bool bgp_review(struct bgp_ovsdb_txn *txn, enum txn_op_type op, bgp_table_type_t table_type);
 static uint32_t get_lookup_key(char *prefix, char *table_name);
+void bgp_txn_complete_txn(
+        struct ovsdb_idl_txn *complete_txn,
+        enum ovsdb_idl_txn_status status);
+
+// global
+static struct ovsdb_idl_txn *current_txn = NULL;
+static int current_txn_count = 0;
 
 static int
 txn_command_result(enum ovsdb_idl_txn_status status, char *msg, char *pr)
@@ -153,12 +168,6 @@ txn_command_result(enum ovsdb_idl_txn_status status, char *msg, char *pr)
         char p_str[PREFIX_MAXLEN];                                      \
         struct bgp_ovsdb_txn *txn_rec = NULL;                           \
         txn_rec = xzalloc(sizeof (*txn_rec));                           \
-        if (txn_rec == NULL) {                                          \
-            VLOG_ERR("%s: %s\n",                                        \
-                     __FUNCTION__, "Failed to insert txn to hash");     \
-            ovsdb_idl_txn_destroy(txn);                                 \
-            return -1;                                                  \
-        }                                                               \
         txn_rec->request = req;                                         \
         txn_rec->txn = txn;                                             \
         memcpy (&txn_rec->prefix, p, sizeof (*p));                      \
@@ -177,30 +186,47 @@ txn_command_result(enum ovsdb_idl_txn_status status, char *msg, char *pr)
 #define START_DB_TXN(txn, msg, req, p, info, asn, safi)                 \
     do {                                                                \
         enum ovsdb_idl_txn_status status;                               \
-        txn = ovsdb_idl_txn_create(idl);                                \
-        if (txn == NULL) {                                              \
-            VLOG_ERR("%s: %s\n",                                        \
-                     __FUNCTION__, msg);                                \
-            return -1;                                                  \
+        if (current_txn == NULL) {                                      \
+            current_txn = ovsdb_idl_txn_create(idl);                    \
+            VLOG_DBG("%s: created txn %p", __FUNCTION__, current_txn);  \
+            current_txn_count = 0;                                      \
         }                                                               \
+        txn = current_txn;                                              \
         HASH_DB_TXN(txn, req, p, info, asn, safi);                      \
     } while (0)
 
-#define END_DB_TXN(txn, msg, pr)                          \
-    do {                                                  \
-        enum ovsdb_idl_txn_status status;                 \
-        status = ovsdb_idl_txn_commit(txn);               \
-        return txn_command_result(status, msg, pr);       \
+#define END_DB_TXN(txn, msg, pr)                              \
+    do {                                                      \
+        enum ovsdb_idl_txn_status status = TXN_INCOMPLETE;    \
+        ++current_txn_count;                                  \
+        if (current_txn_count >= MAX_TXN_COUNT) {             \
+            struct bgp_ovsdb_txn_txn *txn_txn = NULL;         \
+            VLOG_DBG("%s: commit txn %p", __FUNCTION__, txn); \
+            status = ovsdb_idl_txn_commit(txn);               \
+            txn_txn = xzalloc(sizeof (*txn_txn));             \
+            txn_txn->txn = txn;                               \
+            bgp_txn_insert_txn(&txn_txn->hmap_node);          \
+            current_txn_count = 0;                            \
+            current_txn = NULL;                               \
+        }                                                     \
+        return txn_command_result(status, msg, pr);           \
     } while (0)
 
-
-/* used when NO error is detected but still need to terminate */
-#define ABORT_DB_TXN(txn, msg)                                      \
-    do {                                                            \
-        ovsdb_idl_txn_destroy(txn);                                 \
-        VLOG_ERR("%s: Aborting txn: %s\n", __FUNCTION__, msg);      \
-        return CMD_SUCCESS;                                         \
-    } while (0)
+#define FINISH_DB_TXN()                                               \
+    do {                                                              \
+        enum ovsdb_idl_txn_status status = TXN_INCOMPLETE;            \
+        if (current_txn_count != 0) {                                 \
+            struct bgp_ovsdb_txn_txn *txn_txn = NULL;                 \
+            VLOG_DBG("%s: commit txn %p", __FUNCTION__, current_txn); \
+            status = ovsdb_idl_txn_commit(current_txn);               \
+            txn_txn = xzalloc(sizeof (*txn_txn));                     \
+            txn_txn->txn = current_txn;                               \
+            bgp_txn_insert_txn(&txn_txn->hmap_node);                  \
+            current_txn_count = 0;                                    \
+            current_txn = NULL;                                       \
+        }                                                             \
+    }                                                     \
+    while (0)
 
 static const char *
 get_str_from_afi(u_char family)
@@ -1147,14 +1173,19 @@ bgp_ovsdb_update_local_rib_entry_attributes(struct prefix *p,
 static struct hmap bgp_ovsdb_txn_hmap =
               HMAP_INITIALIZER(&bgp_ovsdb_txn_hmap);
 
+static struct hmap bgp_ovsdb_txn_hmap_txn =
+              HMAP_INITIALIZER(&bgp_ovsdb_txn_hmap_txn);
+
 void
 bgp_txn_init(void) {
     hmap_init(&bgp_ovsdb_txn_hmap);
+    hmap_init(&bgp_ovsdb_txn_hmap_txn);
 }
 
 void
 bgp_txn_destroy(void) {
     hmap_destroy(&bgp_ovsdb_txn_hmap);
+    hmap_destroy(&bgp_ovsdb_txn_hmap_txn);
 }
 
 void
@@ -1163,8 +1194,18 @@ bgp_txn_insert(struct hmap_node *txn_node) {
 }
 
 void
+bgp_txn_insert_txn(struct hmap_node *txn_node) {
+    hmap_insert(&bgp_ovsdb_txn_hmap_txn, txn_node, hash_pointer(txn_node, 0));
+}
+
+void
 bgp_txn_remove(struct hmap_node *txn_node) {
     hmap_remove(&bgp_ovsdb_txn_hmap, txn_node);
+}
+
+void
+bgp_txn_remove_txn(struct hmap_node *txn_node) {
+    hmap_remove(&bgp_ovsdb_txn_hmap_txn, txn_node);
 }
 
 /*
@@ -1241,8 +1282,15 @@ bgp_info_found(struct bgp *bgp, struct bgp_ovsdb_txn *txn)
 static void
 bgp_txn_free(struct bgp_ovsdb_txn *txn)
 {
-    ovsdb_idl_txn_destroy(txn->txn);
     bgp_txn_remove (&txn->hmap_node);
+    free(txn);
+}
+
+static void
+bgp_txn_free_txn(struct bgp_ovsdb_txn_txn *txn)
+{
+    bgp_txn_remove_txn (&txn->hmap_node);
+    ovsdb_idl_txn_destroy(txn->txn);
     free(txn);
 }
 
@@ -1257,6 +1305,34 @@ bgp_txn_log(struct bgp_ovsdb_txn *txn, int status)
     prefix2str(&txn->prefix, prefix_str, sizeof(prefix_str));
     VLOG_DBG("Active Transaction for route %s at time %lld status=%d",
               prefix_str, txn->update_time, status);
+}
+
+void
+bgp_txn_finish(void)
+{
+    FINISH_DB_TXN();
+}
+
+void
+bgp_txn_complete_processing(void)
+{
+    struct bgp_ovsdb_txn_txn *txn;
+    struct bgp_ovsdb_txn_txn *next;
+    enum   ovsdb_idl_txn_status status;
+
+    bgp_txn_finish();
+
+    HMAP_FOR_EACH_SAFE (txn, next, hmap_node, &bgp_ovsdb_txn_hmap_txn) {
+
+        VLOG_DBG("%s: commit txn complete processing %p", __FUNCTION__, txn->txn);
+        status = ovsdb_idl_txn_commit(txn->txn);
+
+        if (status != TXN_INCOMPLETE) {
+            bgp_txn_complete_txn(txn->txn, status);
+            bgp_txn_finish();
+            bgp_txn_free_txn(txn);
+        }
+    }
 }
 
 /*
@@ -1293,13 +1369,14 @@ bgp_txn_log(struct bgp_ovsdb_txn *txn, int status)
  *
  */
 
-static int skip_txn=0;
 void
-bgp_txn_complete_processing(void)
+bgp_txn_complete_txn(
+        struct ovsdb_idl_txn *complete_txn,
+        enum ovsdb_idl_txn_status status)
 {
     struct bgp_ovsdb_txn *txn;
+    struct bgp_ovsdb_txn *next;
     struct bgp *bgp;
-    enum   ovsdb_idl_txn_status status;
     char prefix_str[PREFIX_MAXLEN];
     struct lookup_hmap_element *hmap_entry = NULL;
     uint32_t lookup_hash;
@@ -1307,9 +1384,12 @@ bgp_txn_complete_processing(void)
     int needs_review;
     enum txn_op_type op_type;
 
-    HMAP_FOR_EACH (txn, hmap_node, &bgp_ovsdb_txn_hmap) {
+    HMAP_FOR_EACH_SAFE (txn, next, hmap_node, &bgp_ovsdb_txn_hmap) {
         /* Get commit status for transaction */
-        status = ovsdb_idl_txn_commit(txn->txn);
+        if (txn->txn != complete_txn) {
+            continue;
+        }
+
         prefix2str(&txn->prefix, prefix_str, sizeof(prefix_str));
 
         /* log transaction */
@@ -1374,12 +1454,6 @@ bgp_txn_complete_processing(void)
             continue;
         }
 
-        /* If incomplete allow more time to complete */
-        if (status == TXN_INCOMPLETE){
-            VLOG_DBG("Route transaction incomplete as=%d prefix=%s time=%lld",
-                     txn->as_no, prefix_str, txn->update_time);
-            continue;
-        }
 
         /*
          * Handle all error cases
@@ -1448,8 +1522,6 @@ bgp_txn_complete_processing(void)
         }
     }
 }
-
-
 
 struct lookup_entry {
    int index;
@@ -1549,6 +1621,7 @@ policy_rt_map_read_ovsdb_apply_deletion (struct ovsdb_idl *idl)
     ovs_first = ovsrec_route_map_first(idl);
     if (ovs_first && !OVSREC_IDL_ANY_TABLE_ROWS_DELETED(ovs_first, idl_seqno)) {
         VLOG_DBG("No route map rows were deleted");
+        VLOG_INFO("%s: no route-map rows were deleted", __FUNCTION__);
         return;
     }
 
@@ -1564,6 +1637,7 @@ policy_rt_map_read_ovsdb_apply_deletion (struct ovsdb_idl *idl)
         if (!matched) {
             route_map_delete (map);
             VLOG_DBG("Route map row deleted");
+            VLOG_INFO("%s: route-map row is deleted", __FUNCTION__);
         }
     }
 }
@@ -1582,6 +1656,7 @@ policy_rt_map_entry_read_ovsdb_apply_deletion (struct ovsdb_idl *idl)
     ovs_first = ovsrec_route_map_entry_first(idl);
     if (ovs_first && !OVSREC_IDL_ANY_TABLE_ROWS_DELETED(ovs_first, idl_seqno)) {
         VLOG_DBG("No route map entry deletions detected.");
+        VLOG_INFO("%s: No route map entry deletions detected", __FUNCTION__);
         return;
     }
 
@@ -1593,6 +1668,8 @@ policy_rt_map_entry_read_ovsdb_apply_deletion (struct ovsdb_idl *idl)
             VLOG_DBG("Comparing against route-map with name: %s",
                      ovs_map->name);
 
+            VLOG_INFO("%s: map->name %s ovs_map->name %s", __FUNCTION__,
+                      map->name, ovs_map->name);
             if (strcmp (map->name, ovs_map->name) == 0) {
                 for (index = map->head; index; index = index->next) {
                     VLOG_DBG("Checking pref %lld", index->pref);
@@ -1601,6 +1678,9 @@ policy_rt_map_entry_read_ovsdb_apply_deletion (struct ovsdb_idl *idl)
                     for (i = 0; i < ovs_map->n_route_map_entries; i ++) {
                         VLOG_DBG("Checking against pref %lld", index->pref);
 
+                        VLOG_INFO("%s: index->pref %d ovs_map->key_route_map_entries %d",
+                                  __FUNCTION__, index->pref,
+                                  ovs_map->key_route_map_entries[i]);
                         if (index->pref == ovs_map->key_route_map_entries[i]) {
                             matched = 1;
                             break;
@@ -1610,6 +1690,7 @@ policy_rt_map_entry_read_ovsdb_apply_deletion (struct ovsdb_idl *idl)
                     if (!matched) {
                         route_map_index_delete (index, 1);
                         VLOG_DBG("Route map entry deleted");
+                        VLOG_INFO("%s: route-map entry is deleted", __FUNCTION__);
                     }
                 }
             }
@@ -1625,12 +1706,15 @@ policy_rt_map_description_ovsdb_apply_changes(
     if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_route_map_entry_col_description,
                                       idl_seqno)) {
         VLOG_DBG("Route-map description was modified");
+        VLOG_INFO("%s: route-map col description modified", __FUNCTION__);
         *argc = RT_MAP_DESCRIPTION;
         if (ovs_entry->description) {
             VLOG_DBG("Setting description %s", ovs_entry->description);
+            VLOG_INFO("%s: Setting description %s", __FUNCTION__, ovs_entry->description);
             strcpy(argv1[RT_MAP_DESCRIPTION], ovs_entry->description);
         } else {
             VLOG_DBG("Unsetting description");
+            VLOG_INFO("%s: Unsetting description %s", __FUNCTION__, ovs_entry->description);
             argv1[RT_MAP_DESCRIPTION] = NULL;
         }
     }
@@ -1648,21 +1732,37 @@ policy_rt_map_match_ovsdb_apply_changes(
     char *match_name;
     const char *tmp;
 
+    VLOG_INFO("%s: route-map name %s pref %ld action %d", __FUNCTION__,
+              map->name, pref, action);
+
     if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_route_map_entry_col_match,
                                       idl_seqno)) {
+        VLOG_INFO("%s: route_map entry column match is modified", __FUNCTION__);
         VLOG_DBG("Route map match was changed. Detecting additions/deletions.");
+
         int i;
         for (i = 0, *argc = 0; match_table[i].table_key; i++) {
             VLOG_DBG("Checking value for: %s", match_table[i].table_key);
+            VLOG_INFO("%s: match_table[%d].table_key %s", __FUNCTION__, i,
+                      match_table[i].table_key);
 
             tmp  = smap_get(&ovs_entry->match, match_table[i].table_key);
             match_name = match_table[i].cli_cmd;
+            VLOG_INFO("%s: tmp %s match_name %s", __FUNCTION__, tmp, match_name);
+
             if (tmp) {
                 VLOG_DBG("Value was set with: %s", tmp);
                 strcpy(argv[(*argc)++], match_name);
                 strcpy(argv[(*argc)++], tmp);
+
+                int j;
+                for (j = 0; j < *argc; j++) {
+                    VLOG_INFO("%s: argv[%d] %s", __FUNCTION__, j, argv[j]);
+                }
             } else {
                 VLOG_DBG("Value was not set. Detecting deletion.");
+                VLOG_INFO("%s: value was not set. Detecting deletion.",
+                          __FUNCTION__);
 
                 /* Value was not found in the ovsdb record, check if
                  * it exists in BGP. If exists, then indicates it was deleted.
@@ -1672,6 +1772,7 @@ policy_rt_map_match_ovsdb_apply_changes(
                     /* Attempt to delete the match rule. */
                     if (route_map_delete_match(index, match_name, NULL) == 0) {
                         VLOG_DBG("Route map match deleted");
+                        VLOG_INFO("%s: Route map match deleted", __FUNCTION__);
                     }
                 }
             }
@@ -1691,21 +1792,36 @@ policy_rt_map_set_ovsdb_apply_changes(
     char *set_name;
     const char *tmp;
 
+    VLOG_INFO("%s: route-map name %s pref %ld action %d", __FUNCTION__,
+              map->name, pref, action);
+
     if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_route_map_entry_col_set,
                                       idl_seqno)) {
+        VLOG_INFO("%s: route_map entry column set is modified", __FUNCTION__);
         VLOG_DBG("Route map set was changed. Detecting additions/deletions.");
         int i;
         for (i = 0, *argc = 0; set_table[i].table_key; i++) {
             VLOG_DBG("Checking value for: %s", set_table[i].table_key);
+            VLOG_INFO("%s: set_table[%d].table_key %s", __FUNCTION__, i,
+                      set_table[i].table_key);
 
             tmp  = smap_get(&ovs_entry->set, set_table[i].table_key);
             set_name = set_table[i].cli_cmd;
+            VLOG_INFO("%s: tmp %s set_name %s", __FUNCTION__, tmp, set_name);
+
             if (tmp) {
                 VLOG_DBG("Value was set with: %s", tmp);
                 strcpy(argv[(*argc)++], set_name);
                 strcpy(argv[(*argc)++], tmp);
+
+                int j;
+                for (j = 0; j < *argc; j++) {
+                    VLOG_INFO("%s: argv[%d] %s", __FUNCTION__, j, argv[j]);
+                }
             } else {
                 VLOG_DBG("Value was not set. Detecting deletion.");
+                VLOG_INFO("%s: Value was not set. Detecting deletion.",
+                          __FUNCTION__);
 
                 /* Value was not found in the ovsdb record, check if
                  * it exists in BGP. If exists, then indicates it was deleted.
@@ -1715,6 +1831,7 @@ policy_rt_map_set_ovsdb_apply_changes(
                     /* Attempt to delete the set rule. */
                     if (route_map_delete_set(index, set_name, NULL) == 0) {
                         VLOG_DBG("Route map set deleted");
+                        VLOG_INFO("%s: Route map set deleted", __FUNCTION__);
                     }
                 }
             }
@@ -1749,10 +1866,20 @@ policy_rt_map_do_change(struct ovsdb_idl *idl,
 
         /* Get route map associated with the provided name. */
         VLOG_DBG("Configuring for route-map with name: %s", argv1[RT_MAP_NAME]);
+        VLOG_INFO("%s: Configuring route-map with name: %s", __FUNCTION__,
+                  argv1[RT_MAP_NAME]);
+
         map = route_map_get(argv1[RT_MAP_NAME]);
+
+        if(!map)
+            VLOG_INFO("%s: route_map_get returned NULL", __FUNCTION__);
 
         for (i = 0; i < ovs_map->n_route_map_entries; i ++) {
             ovs_entry = ovs_map->value_route_map_entries[i];
+
+            if(!ovs_entry)
+                VLOG_INFO("%s: route_map entry is NULL", __FUNCTION__);
+
             if (!(OVSREC_IDL_IS_ROW_INSERTED(ovs_entry, idl_seqno)) &&
                 !(OVSREC_IDL_IS_ROW_MODIFIED(ovs_entry, idl_seqno))) {
                 continue;
@@ -1899,6 +2026,8 @@ policy_rt_map_apply_changes (struct route_map *map,
         return CMD_SUCCESS;
     }
 
+    VLOG_INFO("%s: route-map name %s action %d pref %ld", __FUNCTION__,
+              map->name, action, pref);
     index = route_map_index_get(map, action, pref);
 
     if (!index) {
@@ -1913,12 +2042,16 @@ policy_rt_map_apply_changes (struct route_map *map,
         index->description = argv1[RT_MAP_DESCRIPTION] ?
                                 argv_concat (&argv1[RT_MAP_DESCRIPTION], 1, 0) :
                                 NULL;
+        VLOG_INFO("%s: route-map index description %s",
+                  __FUNCTION__, index->description);
     }
 
     /*
     * Add route map match command
     */
     for (i = 0; i < argcmatch; i += 2) {
+        VLOG_INFO("%s: route-map argvmatch1 %s argvmatch2 %s", __FUNCTION__,
+                  argvmatch[i], argvmatch[i+1]);
         ret = route_map_add_match (index, argvmatch[i], argvmatch[i+1]);
         /* log if error */
         ret = policy_ovsdb_rt_map_vlog(ret);
@@ -1928,10 +2061,13 @@ policy_rt_map_apply_changes (struct route_map *map,
     * Add route map set command
     */
     for (i = 0; i < argcset; i += 2) {
+        VLOG_INFO("%s: route-map argvset1 %s argvset2 %s", __FUNCTION__,
+                  argvset[i], argvset[i+1]);
         ret = route_map_add_set (index, argvset[i], argvset[i+1]);
         ret = policy_ovsdb_rt_map_vlog(ret);
     }
 
+    VLOG_INFO("%s: Returning SUCCESS", __FUNCTION__);
     return CMD_SUCCESS;
 }
 
@@ -2360,7 +2496,7 @@ policy_prefix_list_read_ovsdb_apply_changes(struct ovsdb_idl *idl)
             seqnum = ovs_plist->key_prefix_list_entries[i];
             argcseq =1 ;
 
-            temp_prefix = (char *)malloc(strlen(ovs_entry->prefix)+1);
+            temp_prefix = (char *)malloc(strlen(ovs_entry->prefix) + 1);
 
             strcpy(temp_prefix,ovs_entry->prefix);
             strtok(temp_prefix,"/");

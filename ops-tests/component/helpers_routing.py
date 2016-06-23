@@ -28,8 +28,6 @@ IPV6_STATIC_ROUTE = "ipv6_static_route"
 IPV4_ROUTE = "ip route"
 IPV6_ROUTE = "ipv6 route"
 RIB = "rib"
-ZEBRA_TEST_SLEEP_TIME = 5
-ZEBRA_INIT_SLEEP_TIME = 15
 
 
 def route_exists(switch=None, next_hop=None, bgp_network=None):
@@ -267,7 +265,7 @@ def get_route_from_show(sw1=None, route=None, route_type=None, show=None):
 
         # Match the next-hop lines against the regular expression and populate
         # the next-hop dictionary with distance, metric and routetype
-        nexthop = match("(.+)via  (.+),  \[(\d+)/(\d+)\],  (.+)",
+        nexthop = match("(.+)via  ([0-9.:]+),  \[(\d+)/(\d+)\],  (.+)",
                         line)
 
         if nexthop:

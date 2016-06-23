@@ -21,16 +21,15 @@
 
 
 from helpers_routing import (
-    ZEBRA_TEST_SLEEP_TIME,
-    ZEBRA_INIT_SLEEP_TIME,
     verify_show_ip_route,
     verify_show_ipv6_route,
     verify_show_rib
 )
 from time import sleep
-import pytest
+from pytest import mark
 
 
+TIME_IN_SEC_TO_SLEEP = 20
 zebra_stop_command_string = "systemctl stop ops-zebra"
 zebra_start_command_string = "systemctl start ops-zebra"
 
@@ -385,7 +384,7 @@ def configure_layer3_interfaces(sw1, sw2, step):
     # IPv6 route for LAG secndary address and its next-hops.
     fib_ipv6_lag_connected_route_secondary = rib_ipv6_lag_connected_route_secondary
 
-    sleep(ZEBRA_TEST_SLEEP_TIME)
+    sleep(TIME_IN_SEC_TO_SLEEP)
 
     step("Verifying the IPv4/IPv6 connected routes on switch 1")
 
@@ -754,7 +753,7 @@ def shutdown_layer3_interfaces(sw1, sw2, step):
     fib_ipv6_lag_connected_route_secondary = dict()
     fib_ipv6_lag_connected_route_secondary['Route'] = '55:55::/64'
 
-    sleep(ZEBRA_TEST_SLEEP_TIME)
+    sleep(TIME_IN_SEC_TO_SLEEP)
 
     step("Verifying the IPv4/IPv6 connected routes on switch 1")
 
@@ -1094,7 +1093,7 @@ def no_shutdown_layer3_interfaces(sw1, sw2, step):
     # IPv6 route for LAG secndary address and its next-hops.
     fib_ipv6_lag_connected_route_secondary = rib_ipv6_lag_connected_route_secondary
 
-    sleep(ZEBRA_TEST_SLEEP_TIME)
+    sleep(TIME_IN_SEC_TO_SLEEP)
 
     step("Verifying the IPv4/IPv6 connected routes on switch 1")
 
@@ -1399,7 +1398,7 @@ def remove_addresses_from_layer3_interfaces(sw1, sw2, step):
     # IPv6 route for LAG secndary address and its next-hops.
     fib_ipv6_lag_connected_route_secondary = rib_ipv6_lag_connected_route_secondary
 
-    sleep(ZEBRA_TEST_SLEEP_TIME)
+    sleep(TIME_IN_SEC_TO_SLEEP)
 
     step("Verifying the IPv4/IPv6 connected routes on switch 1")
 
@@ -1797,7 +1796,7 @@ def reconfigure_addresses_on_layer3_interfaces(sw1, sw2, step):
     # IPv6 route for LAG secndary address and its next-hops.
     fib_ipv6_lag_connected_route_secondary = rib_ipv6_lag_connected_route_secondary
 
-    sleep(ZEBRA_TEST_SLEEP_TIME)
+    sleep(TIME_IN_SEC_TO_SLEEP)
 
     step("Verifying the IPv4/IPv6 connected routes on switch 1")
 
@@ -2227,7 +2226,7 @@ def restart_zebra_with_config_change_for_layer3_interfaces(sw1, sw2, step):
     # Start ops-zebra process on sw1
     sw1(zebra_start_command_string, shell='bash')
 
-    sleep(ZEBRA_TEST_SLEEP_TIME)
+    sleep(TIME_IN_SEC_TO_SLEEP)
 
     step("Verifying the IPv4/IPv6 connected routes on switch 1")
 
@@ -2682,7 +2681,7 @@ def change_layer3_interface_config_after_zebra_restart(sw1, sw2, step):
     # IPv6 route for second LAG secndary address and its next-hops.
     fib_ipv6_second_lag_connected_route_secondary = rib_ipv6_second_lag_connected_route_secondary
 
-    sleep(ZEBRA_TEST_SLEEP_TIME)
+    sleep(TIME_IN_SEC_TO_SLEEP)
 
     step("Verifying the IPv4/IPv6 connected routes on switch 1")
 
@@ -3018,7 +3017,7 @@ def no_routing_or_delete_layer3_interfaces(sw1, sw2, step):
     # IPv6 route for LAG secndary address and its next-hops.
     fib_ipv6_lag_connected_route_secondary = rib_ipv6_lag_connected_route_secondary
 
-    sleep(ZEBRA_TEST_SLEEP_TIME)
+    sleep(TIME_IN_SEC_TO_SLEEP)
 
     step("Verifying the IPv4/IPv6 connected routes on switch 1")
 
@@ -3145,16 +3144,14 @@ def no_routing_or_delete_layer3_interfaces(sw1, sw2, step):
                     rib_ipv6_lag_connected_route_secondary)
 
 
-@pytest.mark.skipif(True, reason="Failing at the gate due to conflict with portd code")
+@mark.skipif(True, reason="Waiting for zebra modular frame changes. \
+                           Skipping zebra connected route CT")
 def test_zebra_ct_connected_routes(topology, step):
     sw1 = topology.get("sw1")
     sw2 = topology.get("sw2")
 
     assert sw1 is not None
     assert sw2 is not None
-
-    # Test case init time sleep
-    sleep(ZEBRA_INIT_SLEEP_TIME)
 
     configure_layer3_interfaces(sw1, sw2, step)
     shutdown_layer3_interfaces(sw1, sw2, step)

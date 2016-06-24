@@ -302,9 +302,11 @@ main (int argc, char **argv)
   /* Library inits. */
   zprivs_init (&ospfd_privs);
   signal_init (master, array_size(ospf_signals), ospf_signals);
+#ifndef ENABLE_OVSDB
   cmd_init (1);
   debug_init ();
   vty_init (master);
+#endif
   memory_init ();
 
   access_list_init ();
@@ -359,13 +361,16 @@ main (int argc, char **argv)
 
   /* Process id file create. */
   pid_output (pid_file);
-#endif
 
   /* Create VTY socket */
   vty_serv_sock (vty_addr, vty_port, OSPF_VTYSH_PATH);
 
   /* Print banner. */
   zlog_notice ("OSPFd %s starting: vty@%d", QUAGGA_VERSION, vty_port);
+#else
+  /* Print banner. */
+  zlog_notice ("OSPFd %s starting", QUAGGA_VERSION);
+#endif
 
   /* Fetch next active thread. */
 #ifdef ENABLE_OVSDB

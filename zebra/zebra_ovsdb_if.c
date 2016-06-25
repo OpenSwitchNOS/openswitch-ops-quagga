@@ -310,44 +310,6 @@ zebra_port_change_cached_l3_ports_hash_init (void)
 }
 
 /*
- * This function returns true if a port is L3 port and false
- * otherwise.
- */
-static bool
-zebra_if_port_is_l3 (struct zebra_l3_port* port)
-{
-  if (!port)
-    return(false);
-
-  /*
-   * Check if there are any primary IP/IPv6 addresses
-   * on the port
-   */
-  if (port->ip4_address || port->ip6_address)
-    return(true);
-
-  /*
-   * Check if there are any secondary IP addresses
-   * on the port
-   */
-  if (shash_count(&(port->ip4_address_secondary)))
-    return(true);
-
-  /*
-   * Check if there are any secondary IPv6 addresses
-   * on the port
-   */
-  if (shash_count(&(port->ip6_address_secondary)))
-    return(true);
-
-  /*
-   * If there are no primary or secondary IP/IPv6
-   * addresses on the the port, then port is L2.
-   */
-  return(false);
-}
-
-/*
  * This function returns true if an OVSDB port is L3 port and false
  * otherwise.
  */
@@ -2594,8 +2556,7 @@ zebra_add_or_update_cached_l3_ports_hash (const struct ovsrec_port* ovsrec_port)
        * 1. If port changed from L3 capable to L2 capable.
        * 2. If the primary and secondary IP addresses changed on the port.
        */
-      if (!zebra_if_ovsrec_port_is_l3(ovsrec_port) &&
-                              zebra_if_port_is_l3(l3_port))
+      if (!zebra_if_ovsrec_port_is_l3(ovsrec_port))
         {
           VLOG_DBG("Port changed from L3 to L2. Deleting the port %s"
                    " from the hash\n", ovsrec_port->name);

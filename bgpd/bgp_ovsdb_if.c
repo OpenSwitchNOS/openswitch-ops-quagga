@@ -331,6 +331,8 @@ bgp_ovsdb_tables_init (struct ovsdb_idl *idl)
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_bgp_peer_group);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_local_interface);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_remote_as);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_bfd_fallover_enable);
+    ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_bfd_fallover_status);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_allow_as_in);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_local_as);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_weight);
@@ -393,6 +395,18 @@ bgp_ovsdb_tables_init (struct ovsdb_idl *idl)
     ovsdb_idl_add_table(idl, &ovsrec_table_bgp_nexthop);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_nexthop_col_ip_address);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_nexthop_col_type);
+
+    /* BFD Session table */
+    ovsdb_idl_add_table(idl, &ovsrec_table_bfd_session);
+    ovsdb_idl_add_column(idl, &ovsrec_bfd_session_col_enable);
+    ovsdb_idl_add_column(idl, &ovsrec_bfd_session_col_bfd_dst_ip);
+    ovsdb_idl_add_column(idl, &ovsrec_bfd_session_col_bfd_src_ip);
+    ovsdb_idl_add_column(idl, &ovsrec_bfd_session_col_min_tx);
+    ovsdb_idl_add_column(idl, &ovsrec_bfd_session_col_min_rx);
+    ovsdb_idl_add_column(idl, &ovsrec_bfd_session_col_decay_min_rx);
+    ovsdb_idl_add_column(idl, &ovsrec_bfd_session_col_state);
+    ovsdb_idl_add_column(idl, &ovsrec_bfd_session_col_from);
+    ovsdb_idl_add_column(idl, &ovsrec_bfd_session_col_bgp_asn);
 }
 
 /*
@@ -2174,6 +2188,20 @@ bgp_nbr_remote_as_ovsdb_apply_changes (const struct ovsrec_bgp_neighbor *ovs_nbr
 }
 
 static void
+bgp_nbr_fall_over_ovsdb_apply_changes (const struct ovsrec_bgp_neighbor *ovs_nbr,
+    char * name,
+    struct bgp *bgp_instance)
+{
+    /* fall-over */
+    if (COL_CHANGED(ovs_nbr, ovsrec_bgp_neighbor_col_bfd_fallover_enable, idl_seqno)) {
+	bool is_set = (ovs_nbr->bfd_fallover_enable) ? true : false;
+
+        VLOG_DBG("Fallover BFD %s for %s", (is_set) ? "Enable" : "Disable", name);
+        daemon_neighbor_bfd_fallover_enable_cmd_execute(bgp_instance, name, is_set);
+    }
+}
+
+static void
 bgp_nbr_peer_group_ovsdb_apply_changes (const struct ovsrec_bgp_neighbor *ovs_nbr,
     const struct ovsrec_bgp_router *ovs_bgp,
     char * name,
@@ -2772,6 +2800,10 @@ bgp_nbr_read_ovsdb_apply_changes (struct ovsdb_idl *idl)
             bgp_nbr_remote_as_ovsdb_apply_changes(ovs_nbr,
                 ovs_bgp->key_bgp_neighbors[j], bgp_instance);
 
+	    /* fall-over */
+            bgp_nbr_fall_over_ovsdb_apply_changes(ovs_nbr,
+                ovs_bgp->key_bgp_neighbors[j], bgp_instance);
+
             /* peer group */
             bgp_nbr_peer_group_ovsdb_apply_changes(ovs_nbr, ovs_bgp,
                 ovs_bgp->key_bgp_neighbors[j], bgp_instance);
@@ -2892,6 +2924,226 @@ bgp_apply_bgp_neighbor_changes (struct ovsdb_idl *idl)
     bgp_nbr_read_ovsdb_apply_changes(idl);
 }
 
+static const char *
+bfd_session_state_enum_to_string(int state)
+{
+	switch (state) {
+		case BFD_SESSION_STATE_ADMIN_DOWN:
+			return BFD_SESSION_STATE_STR_ADMIN_DOWN;
+		case BFD_SESSION_STATE_DOWN:
+			return BFD_SESSION_STATE_STR_DOWN;
+		case BFD_SESSION_STATE_INIT:
+			return BFD_SESSION_STATE_STR_INIT;
+		case BFD_SESSION_STATE_UP:
+			return BFD_SESSION_STATE_STR_UP;
+		default:
+			return "Unknown";
+	}
+	return NULL;
+}
+
+static int
+bfd_session_state_string_to_enum (const char *state_str)
+{
+	if (strcmp(state_str, BFD_SESSION_STATE_STR_ADMIN_DOWN) == 0)
+		return BFD_SESSION_STATE_ADMIN_DOWN;
+	else if (strcmp(state_str, BFD_SESSION_STATE_STR_DOWN) == 0)
+		return BFD_SESSION_STATE_DOWN;
+	else if (strcmp(state_str, BFD_SESSION_STATE_STR_INIT) == 0)
+		return BFD_SESSION_STATE_INIT;
+	else if (strcmp(state_str, BFD_SESSION_STATE_STR_UP) == 0)
+		return BFD_SESSION_STATE_UP;
+
+	return BFD_SESSION_STATE_ADMIN_DOWN;
+}
+
+static void
+bgp_apply_bfd_neighbor_changes (struct ovsdb_idl *idl)
+{
+	const struct ovsrec_bfd_session *ovs_bfd_session;
+	//int64_t asn;
+	struct bgp *bgp_instance;
+	int bfd_state;
+
+	OVSREC_BFD_SESSION_FOR_EACH(ovs_bfd_session, idl) {
+		if (!OVSREC_IDL_IS_ROW_INSERTED(ovs_bfd_session, idl_seqno) &&
+				!OVSREC_IDL_IS_ROW_MODIFIED(ovs_bfd_session, idl_seqno)) {
+			continue;
+		}
+
+		if (strcmp(ovs_bfd_session->from, OVSREC_BFD_SESSION_FROM_BGP) != 0) {
+			VLOG_ERR("BGP is not the Session owner of BFD Session: %s\n",
+					ovs_bfd_session->bfd_dst_ip);
+			continue;
+		}
+
+#if 0
+		asn = *((struct ovsrec_bgp_neighbor *)ovs_bfd_session->bgp_asn)->local_as;
+		bgp_instance = bgp_lookup((as_t)asn, NULL);
+		if (!bgp_instance) {
+			VLOG_ERR("BGP instance not found for AS: %d\n", asn);
+			continue;
+		}
+#else
+		bgp_instance = bgp_lookup((as_t)*ovs_bfd_session->bgp_asn, NULL);
+		if (!bgp_instance) {
+			VLOG_ERR("BGP instance not found for AS: %d\n", ovs_bfd_session->bgp_asn);
+			continue;
+		}
+#endif
+
+		if (COL_CHANGED(ovs_bfd_session, ovsrec_bfd_session_col_state, idl_seqno)) {
+			VLOG_INFO("Setting BFD session %s State to %s\n",
+					ovs_bfd_session->bfd_dst_ip, ovs_bfd_session->state);
+
+			bfd_state = bfd_session_state_string_to_enum (ovs_bfd_session->state);
+			daemon_neighbor_bfd_state_cmd_execute(bgp_instance, ovs_bfd_session->bfd_dst_ip, bfd_state);
+		}
+	}
+}
+
+static const struct ovsrec_bfd_session *
+find_matching_bfd_session_in_ovsdb(struct ovsdb_idl *idl, const char *remote)
+{
+        const struct ovsrec_bfd_session *ovs_bfd_session;
+
+        OVSREC_BFD_SESSION_FOR_EACH(ovs_bfd_session, idl) {
+                if (strcmp(ovs_bfd_session->bfd_dst_ip, remote) == 0) {
+                        return ovs_bfd_session;
+                }
+        }
+        return NULL;
+}
+
+#if 0
+void
+bgp_create_bfd_session_in_ovsdb(struct peer *peer)
+{
+    struct ovsrec_bgp_neighbor *ovs_nbr;
+    const struct ovsrec_bfd_session *ovs_bfd_session;
+    struct ovsdb_idl_txn *ovs_txn=NULL;
+    char remote_str[BUFSIZ];
+    char local_str[BUFSIZ];
+
+    printf("bgp_create_bfd_session_in_ovsdb: BGP neighbor for %s\n", peer->host);
+    ovs_txn = ovsdb_idl_txn_create(idl);
+
+    ovs_nbr = (struct ovsrec_bgp_neighbor *)get_bgp_neighbor_db_row(peer);
+    if (ovs_nbr != NULL) {
+    printf("bgp_create_bfd_session_in_ovsdb: BGP neighbor found for %s\n", peer->host);
+	    if (peer->su_local)
+		    sockunion2str(peer->su_local, local_str, SU_ADDRSTRLEN);
+	    if (peer->su_remote)
+		    sockunion2str(peer->su_remote, remote_str, SU_ADDRSTRLEN);
+
+	    printf("Creating BFD session for AS=%d host=%s peer=%s local=%s\n",
+			    peer->local_as, peer->host, remote_str, local_str);
+	    VLOG_INFO("Creating BFD session for AS=%d host=%s peer=%s local=%s\n",
+			    peer->local_as, peer->host, remote_str, local_str);
+
+	    ovs_bfd_session = find_matching_bfd_session_in_ovsdb(idl, remote_str);
+	    if (ovs_bfd_session) {
+		    VLOG_INFO("BFD session exists for remote=%s local=%s\n", remote_str, local_str);
+		    printf("BFD session exists for remote=%s local=%s\n", remote_str, local_str);
+
+		    if (strcmp(ovs_bfd_session->bfd_src_ip, local_str) == 0) {
+			    VLOG_INFO("DB has the correct BFD Session info already! \n");
+			    printf("DB has the correct BFD Session info already! \n");
+		    } else {
+			    ovsrec_bfd_session_set_bfd_src_ip(ovs_bfd_session, local_str);
+		    }
+	    } else {
+		    ovs_bfd_session = ovsrec_bfd_session_insert(ovs_txn);
+		    if (ovs_bfd_session) {
+			    printf("New BFD Session created for remote %s local %s \n", remote_str, local_str);
+			    VLOG_DBG("New BFD Session created for remote %s local %s \n", remote_str, local_str);
+			    ovsrec_bfd_session_set_bfd_dst_ip(ovs_bfd_session, remote_str);
+			    ovsrec_bfd_session_set_bfd_src_ip(ovs_bfd_session, local_str);
+			    ovsrec_bfd_session_set_from(ovs_bfd_session, OVSREC_BFD_SESSION_FROM_BGP);
+			    ovsrec_bfd_session_set_bgp_asn(ovs_bfd_session, &ovs_nbr, 1);
+		    }
+	    }
+    } else {
+	printf("bgp_create_bfd_session_in_ovsdb: BGP neighbor not found in OVS for %s\n", peer->host);
+    }
+
+    ovsdb_idl_txn_commit_block(ovs_txn);
+    ovsdb_idl_txn_destroy(ovs_txn);
+}
+#else
+void
+bgp_create_bfd_session_in_ovsdb(char *remote, char *local, as_t asn)
+{
+    const struct ovsrec_bfd_session *ovs_bfd_session;
+    struct ovsdb_idl_txn *ovs_txn=NULL;
+    const int64_t asid = asn;
+
+    VLOG_DBG("Creating BFD session in DB for remote=%s local=%s\n", remote, local);
+
+    ovs_txn = ovsdb_idl_txn_create(idl);
+
+    ovs_bfd_session = find_matching_bfd_session_in_ovsdb(idl, remote);
+    if (ovs_bfd_session) {
+      VLOG_INFO("BFD session exists for remote=%s local=%s\n", remote, local);
+      if (strcmp(ovs_bfd_session->bfd_src_ip, local) == 0) {
+          VLOG_INFO("DB has the correct BFD Session info already! \n");
+      } else {
+          ovsrec_bfd_session_set_bfd_src_ip(ovs_bfd_session, local);
+      }
+    } else {
+      ovs_bfd_session = ovsrec_bfd_session_insert(ovs_txn);
+      if (ovs_bfd_session) {
+          VLOG_DBG("New BFD Session created for remote %s local %s \n", remote, local);
+          ovsrec_bfd_session_set_bfd_dst_ip(ovs_bfd_session, remote);
+          ovsrec_bfd_session_set_bfd_src_ip(ovs_bfd_session, local);
+          ovsrec_bfd_session_set_from(ovs_bfd_session, OVSREC_BFD_SESSION_FROM_BGP);
+          ovsrec_bfd_session_set_bgp_asn(ovs_bfd_session, &asid, 1);
+      }
+    }
+
+    ovsdb_idl_txn_commit_block(ovs_txn);
+    ovsdb_idl_txn_destroy(ovs_txn);
+}
+#endif
+
+void
+bgp_delete_bfd_session_in_ovsdb(char *remote)
+{
+    const struct ovsrec_bfd_session *ovs_bfd_session;
+    struct ovsdb_idl_txn *ovs_txn=NULL;
+
+    VLOG_DBG("Delete BDF session in DB for remote=%s\n", remote);
+
+    ovs_txn = ovsdb_idl_txn_create(idl);
+
+    ovs_bfd_session = find_matching_bfd_session_in_ovsdb(idl, remote);
+    if (ovs_bfd_session) {
+	    VLOG_INFO("Session found, proceeding to delete BFD session for remote=%s \n", remote);
+	    ovsrec_bfd_session_delete(ovs_bfd_session);
+    }
+
+    ovsdb_idl_txn_commit_block(ovs_txn);
+    ovsdb_idl_txn_destroy(ovs_txn);
+}
+
+void
+bgp_update_bfd_status_in_ovsdb (struct peer *peer, int  bfd_state)
+{
+    const struct ovsrec_bgp_neighbor *ovs_nbr;
+    struct ovsdb_idl_txn *bgp_router_txn=NULL;
+
+    bgp_router_txn = ovsdb_idl_txn_create(idl);
+
+    ovs_nbr = get_bgp_neighbor_db_row(peer);
+    if (ovs_nbr != NULL) {
+	    ovsrec_bgp_neighbor_set_bfd_fallover_status(ovs_nbr,
+			    bfd_session_state_enum_to_string(bfd_state));
+	    ovsdb_idl_txn_commit_block(bgp_router_txn);
+    }
+
+    ovsdb_idl_txn_destroy(bgp_router_txn);
+}
+
 static void
 bgp_reconfigure (struct ovsdb_idl *idl)
 {
@@ -2915,6 +3167,9 @@ bgp_reconfigure (struct ovsdb_idl *idl)
     bgp_apply_global_changes();
     bgp_apply_bgp_router_changes(idl);
     bgp_apply_bgp_neighbor_changes(idl);
+
+    /* Apply BFD Session status */
+    bgp_apply_bfd_neighbor_changes(idl);
 
     /* Scan active route transaction list and handle completions */
     bgp_txn_complete_processing();

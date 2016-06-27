@@ -356,6 +356,15 @@ struct peer
   int shared_network;		/* Is this peer shared same network. */
   struct bgp_nexthop nexthop;	/* Nexthop */
 
+#ifdef ENABLE_OVSDB
+  /* BFD section */
+  int bfd_status;	/* status of BFD session */
+#define PEER_BFD_STATUS_ADMIN_DOWN	0	/* fall-over bfd is NOT configured */
+#define PEER_BFD_STATUS_INIT		1	/* fall-over bfd is configured */
+#define PEER_BFD_STATUS_DOWN		2	/* BFDD reported neighbor down */
+#define PEER_BFD_STATUS_UP		3	/* BFDD reported neighbor up */
+#endif
+
   /* Peer address family configuration. */
   u_char afc[AFI_MAX][SAFI_MAX];
   u_char afc_nego[AFI_MAX][SAFI_MAX];
@@ -398,6 +407,9 @@ struct peer
 #define PEER_FLAG_DISABLE_CONNECTED_CHECK   (1 << 6) /* disable-connected-check */
 #define PEER_FLAG_LOCAL_AS_NO_PREPEND       (1 << 7) /* local-as no-prepend */
 #define PEER_FLAG_LOCAL_AS_REPLACE_AS       (1 << 8) /* local-as no-prepend replace-as */
+#ifdef ENABLE_OVSDB
+#define PEER_FLAG_BFD                       (1 << 9) /* fall-over bfd */
+#endif
 
   /* NSF mode (graceful restart) */
   u_char nsf[AFI_MAX][SAFI_MAX];

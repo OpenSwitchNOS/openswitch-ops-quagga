@@ -645,6 +645,10 @@ bgp_connect_success (struct peer *peer)
   if (! CHECK_FLAG (peer->sflags, PEER_STATUS_ACCEPT_PEER))
     bgp_getsockname (peer);
 
+#ifdef ENABLE_OVSDB
+  bgp_bfd_neigh_add(peer);
+#endif
+
   if (BGP_DEBUG (normal, NORMAL))
     {
       char buf1[SU_ADDRSTRLEN];
@@ -904,6 +908,12 @@ bgp_establish (struct peer *peer)
 	if (CHECK_FLAG (peer->af_cap[afi][safi], PEER_CAP_ORF_PREFIX_SM_RCV)
 	    || CHECK_FLAG (peer->af_cap[afi][safi], PEER_CAP_ORF_PREFIX_SM_OLD_RCV))
 	  SET_FLAG (peer->af_sflags[afi][safi], PEER_STATUS_ORF_WAIT_REFRESH);
+
+#ifdef ENABLE_OVSDB
+  /* Notify BFD about the session state, and start it if didn't started yet */
+  if (CHECK_FLAG (peer->flags, PEER_FLAG_BFD))
+    bgp_bfd_neigh_estab(peer);
+#endif
 
   bgp_announce_route_all (peer);
 

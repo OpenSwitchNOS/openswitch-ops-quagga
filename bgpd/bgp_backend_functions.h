@@ -69,5 +69,13 @@ extern int daemon_bgp_clear_request (const char *name, afi_t afi, safi_t safi,
                             const char *arg);
 extern int daemon_neighbor_peer_group_cmd_execute (struct bgp *bgp, const char *groupName);
 
+extern int daemon_neighbor_fall_over_bfd_cmd_execute (struct bgp *bgp, char *peer_str, bool fall_over);
+
+extern int daemon_neighbor_bfd_state_cmd_execute (struct bgp *bgp, char *peer_str, int bfd_state);
+
+extern int bgp_bfd_neigh_add(struct peer *peer);
+extern int bgp_bfd_neigh_del(struct peer *peer);
+extern int bgp_bfd_neigh_estab(struct peer *peer);
+
 
 #endif /* BGP_BACKEND_FUNCTIONS_H */

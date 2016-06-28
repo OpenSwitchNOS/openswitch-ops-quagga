@@ -63,6 +63,7 @@
 #define MAX_ZEBRA_TXN_COUNT 100
 
 extern bool zebra_cleanup_kernel_after_restart;
+extern char* zebra_l3_port_cache_actions_str[];
 
 struct ipv4v6_addr
 {
@@ -98,18 +99,8 @@ enum zebra_l3_port_cache_actions
   ZEBRA_L3_PORT_ADD,
   ZEBRA_L3_PORT_L3_CHANGED_TO_L2,
   ZEBRA_L3_PORT_DELETE,
-  ZEBRA_L3_PORT_UPADTE_IP_ADDR
-};
-
-/*
- * Options under which we need to walk the zebra's route table and
- * decode which nexthop ports/addresses we need to withdraw from kernel
- * and remove or mark unselected in the OVSDB tables.
- */
-enum zebra_handle_port_op_options
-{
-  ZEBRA_L3_PORT_DELETE_UPDATE_OPTION,
-  ZEBRA_L3_PORT_ACTIVE_STATE_CHN_OPTION
+  ZEBRA_L3_PORT_UPADTE_IP_ADDR,
+  ZEBRA_L3_PORT_ACTIVE_STATE_CHANGE
 };
 
 /*

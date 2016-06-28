@@ -2274,8 +2274,14 @@ rib_meta_queue_add (struct meta_queue *mq, struct route_node *rn)
 }
 
 /* Add route_node to work queue and schedule processing */
+
+#ifdef ENABLE_OVSDB
+void
+rib_queue_add (struct zebra_t *zebra, struct route_node *rn)
+#else
 static void
 rib_queue_add (struct zebra_t *zebra, struct route_node *rn)
+#endif
 {
   assert (zebra && rn);
 

@@ -241,6 +241,12 @@ zebra_is_route_in_my_vrf (const struct ovsrec_route *ovs_route)
 #endif
 
 /*
+ ************************************************************************
+ * Start of function for handling port add, delete and update triggers
+ * from OVSDB.
+ */
+
+/*
  * Hash to keep track of the L3 ports in the zebra system
  */
 struct shash zebra_cached_l3_ports;
@@ -261,51 +267,60 @@ struct shash connected_routes_hash_after_restart;
 
 /*
  * This bool variable keeps track if in given iteration of
- * proacessing the OVSDB interface update, any interface admin
+ * processing the OVSDB interface update, any interface admin
  * state changed.
  */
 bool zebra_if_port_active_state_changed;
 
 /*
  * This bool variable keeps track if in given iteration of
- * proacessing the OVSDB port update, any L3 port changed
+ * processing the OVSDB port update, any L3 port changed
  * its state from L3 to L2, any port got deleted or any
  * port IP/IPv6 addresses changed.
  */
 bool zebra_if_port_updated_or_changed;
 
 /*
- * this function initializes all the L3 port nodes in the
- * L3 port hash to "deleted", in order to find which L3 ports
- * got deleted in a given IDL update of OVSDB.
+ * This function initializes all the L3 port nodes in the
+ * L3 port hash to the desired port action.
  */
 static void
-zebra_port_change_cached_l3_ports_hash_init (void)
+zebra_port_change_cached_l3_ports_hash_init (
+                         enum zebra_l3_port_cache_actions port_init_action)
 {
-    struct shash_node *node, *next;
-    struct zebra_l3_port* l3_port;
+  struct shash_node *node, *next;
+  struct zebra_l3_port* l3_port;
 
-    VLOG_DBG("Walking the L3 port cache to mark all the L3 ports "
-              "as deleted");
+  if ((port_init_action < ZEBRA_L3_PORT_NO_CHANGE) ||
+      (port_init_action > ZEBRA_L3_PORT_ACTIVE_STATE_CHANGE))
+    {
+      VLOG_ERR("Illegal L3 port action");
+      return;
+    }
 
-    SHASH_FOR_EACH_SAFE (node, next, &zebra_cached_l3_ports) {
+  VLOG_DBG("Walking the L3 port cache to mark all the L3 ports "
+           "as %s", zebra_l3_port_cache_actions_str[port_init_action]);
 
-        if (!node) {
-            VLOG_ERR("No node found in the L3 port hash\n");
-            continue;
+  SHASH_FOR_EACH_SAFE (node, next, &zebra_cached_l3_ports)
+    {
+      if (!node)
+        {
+          VLOG_ERR("No node found in the L3 port hash\n");
+          continue;
         }
 
-        if (!(node->data)) {
-            VLOG_ERR("No node data found\n");
-            continue;
+      if (!(node->data))
+        {
+          VLOG_ERR("No node data found\n");
+          continue;
         }
 
-        l3_port = (struct zebra_l3_port*)node->data;
+      l3_port = (struct zebra_l3_port*)node->data;
 
-        /*
-         * Mark the cached L3 port node as deleted.
-         */
-        l3_port->port_action = ZEBRA_L3_PORT_DELETE;
+      /*
+       * Mark the cached L3 port node as deleted.
+       */
+      l3_port->port_action = port_init_action;
     }
 }
 
@@ -945,6 +960,8 @@ static void
 zebra_init_if_port_active_state_changed (void)
 {
   zebra_if_port_active_state_changed = false;
+  zebra_port_change_cached_l3_ports_hash_init(
+                                ZEBRA_L3_PORT_NO_CHANGE);
 }
 
 /*
@@ -985,7 +1002,8 @@ zebra_init_if_port_updated_or_changed (void)
 {
   zebra_if_port_updated_or_changed = false;
   zebra_init_updated_or_changed_l3_ports_hash();
-  zebra_port_change_cached_l3_ports_hash_init();
+  zebra_port_change_cached_l3_ports_hash_init(
+                                ZEBRA_L3_PORT_DELETE);
 }
 
 /*
@@ -2536,7 +2554,7 @@ zebra_add_or_update_cached_l3_ports_hash (const struct ovsrec_port* ovsrec_port)
   if (!l3_port)
     {
       VLOG_DBG("No L3 port exists for port %s in the port cache\n",
-                ovsrec_port->name);
+               ovsrec_port->name);
 
       /*
        * If the OVSDB port is not a L3 port, then no need to add the
@@ -2545,7 +2563,7 @@ zebra_add_or_update_cached_l3_ports_hash (const struct ovsrec_port* ovsrec_port)
       if (!zebra_if_ovsrec_port_is_l3(ovsrec_port))
         {
           VLOG_DBG("     This is an L2 port. No need to add into the"
-                    " l3 port cache");
+                   " l3 port cache");
           return;
         }
 
@@ -2578,11 +2596,18 @@ zebra_add_or_update_cached_l3_ports_hash (const struct ovsrec_port* ovsrec_port)
           VLOG_ERR("Unable to add L3 port to the hash");
           zebra_l3_port_node_free(l3_port);
         }
-      else {
+      else
+        {
           VLOG_DBG("Added L3 port to the hash successfully");
+
           log_event("ZEBRA_PORT", EV_KV("port_msg", "%s",
                     "L3 port added"),
                     EV_KV("port_name", "%s", ovsrec_port->name));
+
+          /*
+           * Set a flag that some port configuration changed
+           */
+          zebra_set_if_port_updated_or_changed();
         }
     }
   else
@@ -2599,6 +2624,7 @@ zebra_add_or_update_cached_l3_ports_hash (const struct ovsrec_port* ovsrec_port)
         {
           VLOG_DBG("Port changed from L3 to L2. Deleting the port %s"
                    " from the hash\n", ovsrec_port->name);
+
           log_event("ZEBRA_PORT", EV_KV("port_msg", "%s",
                     "changed L3 to L2"),
                     EV_KV("port_name", "%s", ovsrec_port->name));
@@ -2608,6 +2634,11 @@ zebra_add_or_update_cached_l3_ports_hash (const struct ovsrec_port* ovsrec_port)
            * appropriate flag.
            */
           l3_port->port_action = ZEBRA_L3_PORT_L3_CHANGED_TO_L2;
+
+          /*
+           * Set a flag that some port configuration changed
+           */
+          zebra_set_if_port_updated_or_changed();
         }
       else if (zebra_if_cached_port_and_ovsrec_port_ip4_addr_change
                                                  (ovsrec_port, l3_port) ||
@@ -2619,8 +2650,8 @@ zebra_add_or_update_cached_l3_ports_hash (const struct ovsrec_port* ovsrec_port)
            * L3 ports cache.
            */
           VLOG_DBG("Port IPv4/IPv6 changed. Update the port %s IP address in "
-                    " the hash and add a node in the temp hash\n",
-                    ovsrec_port->name);
+                   " the hash and add a node in the temp hash\n",
+                   ovsrec_port->name);
 
           log_event("ZEBRA_PORT", EV_KV("port_msg", "%s",
                     "Port IPv4/v6 Updated"),
@@ -2631,7 +2662,16 @@ zebra_add_or_update_cached_l3_ports_hash (const struct ovsrec_port* ovsrec_port)
            */
           zebra_update_l3_port_cache_and_connected_routes(ovsrec_port, &l3_port,
                                                           true);
+
+          /*
+           * Since the port IPv4/IPv6 address changed, then update the L3
+           * port with the appropriate flag.
+           */
           l3_port->port_action = ZEBRA_L3_PORT_UPADTE_IP_ADDR;
+
+          /*
+           * Set a flag that some port configuration changed
+           */
           zebra_set_if_port_updated_or_changed();
         }
       else
@@ -2700,10 +2740,65 @@ zebra_remove_deleted_cached_l3_ports_hash (void)
           else
             {
               VLOG_DBG("Added L3 port to the hash successfully");
-              zebra_set_if_port_updated_or_changed();
             }
         }
     }
+}
+
+/*
+ * This function checks if any L3 ports got deleted that is if some
+ * L3 ports are currently not present in the IDL.
+ */
+static void
+zebra_check_for_deleted_l3_ports ()
+{
+  struct shash_node *node, *next;
+  struct zebra_l3_port* l3_port;
+
+  /*
+   * If there are no L3 ports in the cache, then simply return from
+   * the function
+   */
+  if (!shash_count(&zebra_cached_l3_ports))
+    return;
+
+  VLOG_DBG("Walking the L3 port cache to trigger route cleanup in "
+           "case of find deleted L3 ports");
+
+  /*
+   * Walk the L3 ports hash table.
+   */
+  SHASH_FOR_EACH_SAFE (node, next, &zebra_cached_l3_ports)
+    {
+      if (!node)
+        {
+          VLOG_ERR("No node found in the L3 port hash\n");
+          continue;
+        }
+
+      if (!(node->data))
+        {
+          VLOG_ERR("No data found in the node\n");
+          continue;
+        }
+
+      l3_port = (struct zebra_l3_port*)node->data;
+
+      /*
+       * If the port was marked for deletion, then trigger cleanup
+       * of static route routing via this previous L3 port.
+       */
+      if (l3_port->port_action == ZEBRA_L3_PORT_DELETE)
+
+        {
+          /*
+           * Set a flag that some port configuration changed
+           */
+          zebra_set_if_port_updated_or_changed();
+          VLOG_DBG("Triggering static route clean-up in case of "
+                   "L3 port delete");
+        }
+     }
 }
 
 /*
@@ -3037,88 +3132,6 @@ zebra_search_nh_addr_in_l3_ports_hash (struct shash* port_hash,
 }
 
 static bool
-zebra_nh_port_in_deleted_cached_l3_ports_hash (char* port_name)
-{
-  struct zebra_l3_port* l3_port = NULL;
-
-  if (!port_name || !port_name[0])
-    {
-      VLOG_ERR("The port name is null");
-      return(false);
-    }
-
-  l3_port = zebra_search_port_name_in_l3_ports_hash(
-                                &zebra_updated_or_changed_l3_ports,
-                                port_name);
-
-  if (!l3_port)
-    {
-      VLOG_DBG("Interface %s not found in the hash", port_name);
-      return(false);
-    }
-  else
-    {
-      VLOG_DBG("Found a valid L3 port structure");
-      zebra_l3_port_node_print(NULL, l3_port);
-      if ((l3_port->port_action ==
-                        ZEBRA_L3_PORT_L3_CHANGED_TO_L2) ||
-          (l3_port->port_action == ZEBRA_L3_PORT_DELETE))
-        {
-          VLOG_DBG("The next-hop is now deleted. Cleanup "
-                   "The OVSDB route and next-hop and kernel"
-                   " route and next-hop");
-          return(true);
-        }
-    }
-
-  return(false);
-}
-
-static bool
-zebra_nh_address_in_deleted_cached_l3_ports_hash (char* nexthop_str,
-                                                  afi_t afi)
-{
-  struct zebra_l3_port* l3_port = NULL;
-
-  if (!nexthop_str || !nexthop_str[0])
-    {
-      VLOG_ERR("The nexthop string is null");
-      return(false);
-    }
-
-  l3_port = zebra_search_nh_addr_in_l3_ports_hash(
-                          &zebra_updated_or_changed_l3_ports,
-                          nexthop_str, afi);
-
-  if (!l3_port)
-    {
-      VLOG_DBG("Nexthop addr %s not found in the hash",
-               nexthop_str);
-      return(false);
-    }
-  else
-    {
-      VLOG_DBG("Found a valid L3 port structure containing "
-               "nexthop %s", nexthop_str);
-
-      zebra_l3_port_node_print(NULL, l3_port);
-      if ((l3_port->port_action ==
-                        ZEBRA_L3_PORT_L3_CHANGED_TO_L2) ||
-          (l3_port->port_action == ZEBRA_L3_PORT_DELETE))
-        {
-          VLOG_DBG("The next-hop is now deleted. Cleanup "
-                   "The OVSDB route and next-hop and kernel"
-                   " route and next-hop");
-          log_event("ZEBRA_NEXTHOP_STATE", EV_KV("nexthop_port", "%s",
-                    nexthop_str), EV_KV("msg", "%s", "deleted"));
-          return(true);
-        }
-    }
-
-    return(false);
-}
-
-static bool
 zebra_nh_port_active_in_cached_l3_ports_hash (char* port_name)
 {
   struct zebra_l3_port* l3_port = NULL;
@@ -3331,6 +3344,11 @@ zebra_update_port_active_state (const struct ovsrec_interface *interface)
       l3_port->if_active = new_active_state;
 
       /*
+       * Set the L3 port state change flag
+       */
+      l3_port->port_action = ZEBRA_L3_PORT_ACTIVE_STATE_CHANGE;
+
+      /*
        * Signal updation of OVSDB route table due to change in interface
        * admin state.
        */
@@ -3338,15 +3356,18 @@ zebra_update_port_active_state (const struct ovsrec_interface *interface)
     }
 }
 
-
 /*
- * Find routes and their next-hops which have been deleted/shut and add them to
- * route delete list. List is used to delete routes from system
+ * This function adds work for the quagga back-end thread to revisit
+ * a static route in case its resolving next-hop has changed admin
+ * state or the resolving IP/IPv6 address changes or gets deleted.
+ * This function also handles the clean-up of static routes in case
+ * the interface gets converted into L2 or the L3 interface gets
+ * deleted.
  */
 static void
-zebra_find_routes_with_deleted_ports (
+zebra_find_routes_with_updated_ports_state (
                         afi_t afi, safi_t safi, u_int32_t id,
-                        enum zebra_handle_port_op_options option)
+                        const char* cleanup_reason)
 {
   struct route_table *table;
   struct route_node *rn;
@@ -3356,9 +3377,12 @@ zebra_find_routes_with_deleted_ports (
   struct prefix *p = NULL;
   char nexthop_str[256];
   char ifname[IF_NAMESIZE + 1];
+  struct zebra_l3_port* l3_port = NULL;
+  bool if_revisit_route_node;
   #ifdef VRF_ENABLE
   const struct ovsrec_route *ovs_route = NULL;
   #endif
+
   table = vrf_table (afi, safi, id);
   if (!table)
     {
@@ -3377,9 +3401,8 @@ zebra_find_routes_with_deleted_ports (
       return;
     }
 
-  VLOG_DBG("Cleaning-up/Populating routes in response to %s trigger",
-           (option == ZEBRA_L3_PORT_ACTIVE_STATE_CHN_OPTION) ?
-           "interface state/address change": "interface delete");
+  VLOG_DBG("Cleaning-up/Populating %s routes in response to %s trigger",
+           (afi == AFI_IP) ? "IPv4" : "IPv6",cleanup_reason);
 
   /*
    * Create a transaction for any IDL route updates to OVSDB from
@@ -3394,6 +3417,8 @@ zebra_find_routes_with_deleted_ports (
           VLOG_ERR("Route node is NULL");
           continue;
         }
+
+      if_revisit_route_node = false;
 
       p = &rn->p;
       memset(prefix_str, 0, sizeof(prefix_str));
@@ -3419,11 +3444,10 @@ zebra_find_routes_with_deleted_ports (
             }
           #endif
 
-          if ((rib->type != ZEBRA_ROUTE_STATIC &&
-              rib->type != ZEBRA_ROUTE_BGP) ||
+          if (rib->type != ZEBRA_ROUTE_STATIC ||
               !rib->nexthop)
             {
-              VLOG_DBG("Not a static/BGP route or null next-hop");
+              VLOG_DBG("Not a static route or null next-hop");
               continue;
             }
 
@@ -3431,6 +3455,7 @@ zebra_find_routes_with_deleted_ports (
             {
               memset(nexthop_str, 0, sizeof(nexthop_str));
               memset(ifname, 0, sizeof(ifname));
+              l3_port = NULL;
 
               if (afi == AFI_IP)
                 {
@@ -3451,158 +3476,142 @@ zebra_find_routes_with_deleted_ports (
                 strncpy(ifname, nexthop->ifname, IF_NAMESIZE);
 
               VLOG_DBG("Processing route %s for the next-hop IP %s or "
-                        "interface %s\n", prefix_str,
-                        nexthop_str[0] ? nexthop_str : "NONE",
-                        ifname[0] ? ifname : "NONE");
+                       "interface %s\n", prefix_str,
+                       nexthop_str[0] ? nexthop_str : "NONE",
+                       ifname[0] ? ifname : "NONE");
 
               /*
-               * If 'ifname' is legal, then peak into the hash table
-               * 'zebra_updated_or_changed_l3_ports' to see if the L3 port
-               * got deleted.
+               * If 'ifname' is legal, then find the L3 port node having
+               * this name.
                */
               if (ifname[0])
                 {
-                  switch (option)
-                    {
-                      case ZEBRA_L3_PORT_DELETE_UPDATE_OPTION:
-                        if (zebra_nh_port_in_deleted_cached_l3_ports_hash(ifname))
-                          {
-                            /*
-                              * Remove the next-hop via the deleted port from
-                              * the kernel.
-                              */
-                            zebra_route_list_add_data(rn, rib, nexthop);
-                            zebra_delete_route_nexthop_port_from_db(rib,
-                                                                  ifname);
-                          }
-                        break;
-
-                      case ZEBRA_L3_PORT_ACTIVE_STATE_CHN_OPTION:
-                        if (!zebra_nh_port_active_in_cached_l3_ports_hash(ifname))
-                          {
-                            VLOG_DBG("Mark the next-hop port %s of the "
-                                     "route as unselected in OVSDB", ifname);
-                            log_event("ZEBRA_NEXTHOP_STATE",
-                                      EV_KV("nexthop_port", "%s",ifname),
-                                      EV_KV("msg", "%s","unselected"));
-                            zebra_update_selected_nh(rn, rib, ifname, NULL,
-                                                     ZEBRA_NH_UNINSTALL);
-                          }
-                        else
-                          {
-                            VLOG_DBG("Mark the next-hop port %s of the "
-                                     "route as selected in OVSDB", ifname);
-                            log_event("ZEBRA_NEXTHOP_STATE",
-                                      EV_KV("nexthop_port", "%s",ifname),
-                                      EV_KV("msg", "%s","selected"));
-                            zebra_update_selected_nh(rn, rib, ifname, NULL,
-                                                     ZEBRA_NH_INSTALL);
-                          }
-                        break;
-
-                      default:
-                        VLOG_ERR("Unsupported option for zebra OVSDB route "
-                                 "cleanup");
-                        break;
-                    }
+                  l3_port = zebra_search_port_name_in_l3_ports_hash(
+                                                         &zebra_cached_l3_ports,
+                                                         ifname);
                 }
 
               /*
-               * If 'nexthop' is legal, then walk the hash table
-               * 'zebra_updated_or_changed_l3_ports' to see if the L3 port
-               * with the IP subnet got deleted.
+               * If 'nexthop' is legal, then walk the hash table of L3
+               * port nodes to find if the nexthop IP/IPv6 addresses occurs
+               * in the subnets configured on L3 interfaces.
                */
               if (nexthop_str[0])
                 {
-                  switch (option)
+                  l3_port = zebra_search_nh_addr_in_l3_ports_hash(
+                                                 &zebra_cached_l3_ports,
+                                                 nexthop_str, afi);
+                }
+
+              /*
+               * There is a possibility that in case of next-hop as IP/IPv6 address,
+               * we could have forward reference and we cannot find a L3 port node
+               * with that next-hop IP subnet. In that case mark this node for
+               * inspection by backend thread.
+               */
+              if (!l3_port)
+                {
+                  VLOG_DBG("Next-hop %s not found in L3 port cache",
+                            ifname[0] ? ifname :
+                                (nexthop_str[0] ? nexthop_str:"NONE"));
+
+                  /*
+                   * We should always be able to find a L3 port node, if the
+                   * next-hop is IP/IPv6 address.
+                   */
+                  if (ifname[0])
+                    assert(0);
+
+                  if (nexthop_str[0])
                     {
-                      case ZEBRA_L3_PORT_DELETE_UPDATE_OPTION:
-
-                        /*
-                         * Check if the next-hop occurs in the port cache for
-                         * deleted ports.
-                         */
-                        if (zebra_nh_address_in_deleted_cached_l3_ports_hash(
-                                                         nexthop_str, afi))
-                          {
-                            VLOG_DBG("The next-hop string %s found in the "
-                                     " deleted L3 port list", nexthop_str);
-                            zebra_route_list_add_data(rn, rib, nexthop);
-                            zebra_delete_route_nexthop_addr_from_db(rib,
-                                                                  nexthop_str);
-                          }
-                        else
-                          {
-                            /*
-                             * If the next-hop address does not occur in the
-                             * L3 port cache or if the next-hop address occurs
-                             * in some port node in L3 port cache but the port
-                             * is shut, then mark the next-hop as unselected in
-                             * OVSDB. Otherwise mark the next-hop as selected
-                             * in OVSDB.
-                             */
-                            if (!zebra_nh_addr_active_in_cached_l3_ports_hash(
-                                                                nexthop_str, afi))
-                              {
-                                VLOG_DBG("Mark the next-hop addr %s of the "
-                                         "route as unselected in OVSDB",
-                                         nexthop_str);
-                                log_event("ZEBRA_NEXTHOP_STATE",
-                                          EV_KV("nexthop_port", "%s",nexthop_str),
-                                          EV_KV("msg", "%s","unselected"));
-                                zebra_update_selected_nh(rn, rib, NULL,
-                                                         nexthop_str,
-                                                         ZEBRA_NH_UNINSTALL);
-                              }
-                            else
-                              {
-                                VLOG_DBG("Mark the next-hop addr %s of the "
-                                         "route as selected in OVSDB",
-                                         nexthop_str);
-                                log_event("ZEBRA_NEXTHOP_STATE",
-                                          EV_KV("nexthop_port", "%s",nexthop_str),
-                                          EV_KV("msg", "%s","selected"));
-                                log_event("ZEBRA_ROUTE",
-                                          EV_KV("routemsg", "%s", ""),
-                                          EV_KV("prefix", "%s", prefix_str));
-                                zebra_update_selected_nh(rn, rib, NULL,
-                                                         nexthop_str,
-                                                         ZEBRA_NH_INSTALL);
-                              }
-                          }
-                        break;
-
-                      case ZEBRA_L3_PORT_ACTIVE_STATE_CHN_OPTION:
-                        if (!zebra_nh_addr_active_in_cached_l3_ports_hash(
-                                                                nexthop_str, afi))
-                          {
-                            VLOG_DBG("Mark the next-hop addr %s of the "
-                                      "route as unselected in OVSDB", nexthop_str);
-                            log_event("ZEBRA_NEXTHOP_STATE",
-                                      EV_KV("nexthop_port", "%s",nexthop_str),
-                                      EV_KV("msg", "%s","unselected"));
-                            zebra_update_selected_nh(rn, rib, NULL, nexthop_str,
-                                                     ZEBRA_NH_UNINSTALL);
-                          }
-                        else
-                          {
-                            VLOG_DBG("Mark the next-hop addr %s of the "
-                                     "route as selected in OVSDB", nexthop_str);
-                            log_event("ZEBRA_NEXTHOP_STATE",
-                                      EV_KV("nexthop_port", "%s",nexthop_str),
-                                      EV_KV("msg", "%s","selected"));
-                            zebra_update_selected_nh(rn, rib, NULL, nexthop_str,
-                                                     ZEBRA_NH_INSTALL);
-                          }
-                        break;
-
-                      default:
-                        VLOG_ERR("Unsupported option for zebra OVSDB route "
-                                 "cleanup");
-                        break;
+                      if_revisit_route_node = true;
+                      continue;
                     }
                 }
+              else
+                {
+                  VLOG_DBG("Found L3 port node %s with action %s",
+                           l3_port->port_name,
+                           zebra_l3_port_cache_actions_str[l3_port->port_action]);
+                }
+
+              switch (l3_port->port_action)
+                {
+                  /*
+                   * In case nothing changed in the L3 port node,
+                   * zebra is in sync with OVSDB and no action needs
+                   * to be taken
+                   */
+                  case ZEBRA_L3_PORT_NO_CHANGE:
+                    break;
+
+                  /*
+                   * We need to have the backend zebra thread to examine
+                   * the route node in the following cases:-
+                   * 1. A new L3 port node got added
+                   * 2. Some IP address got added on an L3 port
+                   * 3. Some admin or link state change happened on the
+                   *    L3 interface
+                   */
+                  case ZEBRA_L3_PORT_ADD:
+                  case ZEBRA_L3_PORT_UPADTE_IP_ADDR:
+                  case ZEBRA_L3_PORT_ACTIVE_STATE_CHANGE:
+                    if_revisit_route_node = true;
+                    break;
+
+                  /*
+                   * We need to delete the static route configuration
+                   * and trigger a kernel cleanup for a route in case
+                   * of the following:-
+                   * 1. We get a "no routing" trigger on an interface
+                   *    and the interface becomes L2
+                   * 2. We get an interface delete like
+                   *    "no interface <blah>"
+                   */
+                  case ZEBRA_L3_PORT_L3_CHANGED_TO_L2:
+                  case ZEBRA_L3_PORT_DELETE:
+
+                    /*
+                     * Add the route in deleted list
+                     */
+                    zebra_route_list_add_data(rn, rib, nexthop);
+
+                    if (ifname[0])
+                      {
+                        VLOG_DBG("The next-hop port %s found in the "
+                                 " deleted L3 port list", ifname);
+
+                        /*
+                         * Delete the static route from OVSDB
+                         */
+                        zebra_delete_route_nexthop_port_from_db(rib,
+                                                               ifname);
+                      }
+
+                    if (nexthop_str[0])
+                      {
+                        VLOG_DBG("The next-hop IP %s found in the "
+                                 " deleted L3 port list", nexthop_str);
+
+                        /*
+                         * Delete the static route from OVSDB
+                         */
+                        zebra_delete_route_nexthop_addr_from_db(rib,
+                                                             nexthop_str);
+                      }
+                    break;
+
+                  default:
+                    VLOG_ERR("Wrong L3 port action");
+                }
             }
+        }
+
+      if (if_revisit_route_node)
+        {
+          VLOG_DBG("Adding route node with prefix %s for backend "
+                   "processing", prefix_str);
+          rib_queue_add(&zebrad, rn);
         }
 
         /*
@@ -5001,15 +5010,10 @@ zebra_handle_interface_admin_state_changes (void)
    * shut, then walk all zebra routes and mark the appropriate
    * next-hops/routes as selected or unselected in the OVSDB.
    */
-  if (zebra_get_if_port_active_state_changed())
-    {
-      zebra_find_routes_with_deleted_ports(
-                                        AFI_IP, SAFI_UNICAST, 0,
-                                        ZEBRA_L3_PORT_ACTIVE_STATE_CHN_OPTION);
-      zebra_find_routes_with_deleted_ports(
-                                        AFI_IP6, SAFI_UNICAST, 0,
-                                        ZEBRA_L3_PORT_ACTIVE_STATE_CHN_OPTION);
-    }
+  zebra_find_routes_with_updated_ports_state(AFI_IP, SAFI_UNICAST, 0,
+                                        "L3 interface state change");
+  zebra_find_routes_with_updated_ports_state(AFI_IP6, SAFI_UNICAST, 0,
+                                        "L3 interface state change");
 
   zebra_cleanup_if_port_active_state_changed();
 }
@@ -5044,7 +5048,9 @@ zebra_ovsdb_get_router_id(char *active_router_id)
       return NULL;
     }
 
-  /* Check if active_router_id present in current available L3 port cache */
+  /*
+   * Check if active_router_id present in current available L3 port cache
+   */
   if (active_router_id != NULL)
     {
       SHASH_FOR_EACH_SAFE (node, next, &zebra_cached_l3_ports)
@@ -5111,7 +5117,9 @@ zebra_ovsdb_get_router_id(char *active_router_id)
   if(active_router_id_present)
       return NULL;
 
-  /* Find Loopback interface if present */
+  /*
+   * Find Loopback interface if present
+   */
   SHASH_FOR_EACH_SAFE (node, next, &zebra_cached_l3_ports)
     {
       if (!(node->data))
@@ -5125,7 +5133,9 @@ zebra_ovsdb_get_router_id(char *active_router_id)
       if (l3_port->ip4_address != NULL ||
           shash_count(&(l3_port->ip4_address_secondary)))
         {
-          /* Get Port from UUID */
+          /*
+           * Get Port from UUID
+           */
           ovsrec_port = ovsrec_port_get_for_uuid(idl,
                             (const struct uuid *)&(l3_port->ovsrec_port_uuid));
           if (!ovsrec_port)
@@ -5136,7 +5146,9 @@ zebra_ovsdb_get_router_id(char *active_router_id)
 
           if (ovsrec_port->n_interfaces)
             {
-              /* Get the first available Loopback interface */
+              /*
+               * Get the first available Loopback interface
+               */
               for (interface_index = 0;
                    interface_index < ovsrec_port->n_interfaces;
                    ++interface_index)
@@ -5167,7 +5179,9 @@ zebra_ovsdb_get_router_id(char *active_router_id)
         }
     }
 
-  /* If loopback interface is not available then get the any first available L3 port */
+  /*
+   * If loopback interface is not available then get the any first available L3 port
+   */
   if (!found_loopback)
     {
       SHASH_FOR_EACH_SAFE (node, next, &zebra_cached_l3_ports)
@@ -5186,7 +5200,9 @@ zebra_ovsdb_get_router_id(char *active_router_id)
         }
     }
 
-  /* Get the IPv4 address or secondary IPv4 address from the selected port */
+  /*
+   * Get the IPv4 address or secondary IPv4 address from the selected port
+   */
   if (l3_port != NULL)
     {
       VLOG_DBG("L3 port selected for router ID is %s ipaddr = %s\n",
@@ -5211,13 +5227,16 @@ zebra_ovsdb_get_router_id(char *active_router_id)
         }
     }
 
-  /* Form the new active router-id */
+  /*
+   * Form the new active router-id
+   */
   if (int_ip_addr != NULL)
     {
       router_id = strtok(int_ip_addr, "/");
     }
 
   VLOG_DBG("Identified router ID is %s\n", router_id);
+
   return router_id;
 }
 
@@ -5244,7 +5263,10 @@ zebra_ovsdb_update_active_router_id(void)
    * the zebra main thread.
    */
   zebra_create_txn();
-  /* Update active router id for the Default VRF */
+
+  /*
+   * Update active router id for the Default VRF
+   */
   OVSREC_VRF_FOR_EACH(ovs_vrf, idl)
     {
       if (!strcmp(ovs_vrf->name, DEFAULT_VRF_NAME))
@@ -5262,12 +5284,12 @@ zebra_ovsdb_update_active_router_id(void)
             {
               /*
                * TODO: For each VRF check for user configured router-id,
-               *       if it is already present then do not use ZEBRA identified router-id,
-               *       instead update the user configured router-id as active_router_id.
-               *       Routing deamons will pick the active_router_id and use it as
-               *       the protocol specific router-id.
-               *       Below is the sample code which need to be added once user configurable
-               *       router-id support is available.
+               *       if it is already present then do not use ZEBRA identified
+               *       router-id, instead update the user configured router-id as
+               *       active_router_id. Routing deamons will pick the
+               *       active_router_id and use it as the protocol specific
+               *       router-id. Below is the sample code which need to be
+               *       added once user configurable router-id support is available.
                *
                *       if (!ovs_vrf->router_id &&
                *           strcmp(ovs_vrf->router_id, ovs_vrf->active_router_id) != 0){
@@ -5279,6 +5301,7 @@ zebra_ovsdb_update_active_router_id(void)
               zebra_txn_updates = true;
               free(router_id);
             }
+
           zebra_finish_txn(false);
         }
     }
@@ -5363,6 +5386,28 @@ zebra_handle_port_add_delete_changes (void)
   zebra_finish_txn(true);
 
   /*
+   * Check if any L3 ports got deleted in order to trigger cleanup
+   * of static routes.
+   */
+  zebra_check_for_deleted_l3_ports();
+
+  /*
+   * Walk the zebra route table and find which nexthops need to be
+   * deleted from the kernel and OVSDB.
+   */
+  zebra_find_routes_with_updated_ports_state(AFI_IP, SAFI_UNICAST, 0,
+                                       "L3 port delete/no routing");
+  zebra_find_routes_with_updated_ports_state(AFI_IP6, SAFI_UNICAST, 0,
+                                       "L3 port delete/no routing");
+
+  /*
+   * Delte the next-hops which have been marked for deletion from
+   * he kernel and the OVSDB.
+   */
+  zebra_route_del_process();
+  list_free(zebra_route_del_list);
+
+  /*
    * Find out which ports got deleted from the L3 port hash.
    */
   zebra_remove_deleted_cached_l3_ports_hash();
@@ -5379,24 +5424,10 @@ zebra_handle_port_add_delete_changes (void)
                                          false);
     }
 
-  /* Update Active Router-ID */
+  /*
+   * Update Active Router-ID
+   */
   zebra_ovsdb_update_active_router_id();
-
-  /*
-   * Walk the zebra route table and find which nexthops need to be
-   * deleted from the kernel and OVSDB.
-   */
-  zebra_find_routes_with_deleted_ports(AFI_IP, SAFI_UNICAST, 0,
-                                       ZEBRA_L3_PORT_DELETE_UPDATE_OPTION);
-  zebra_find_routes_with_deleted_ports(AFI_IP6, SAFI_UNICAST, 0,
-                                       ZEBRA_L3_PORT_DELETE_UPDATE_OPTION);
-
-  /*
-   * Delte the next-hops which have been marked for deletion from
-   * he kernel and the OVSDB.
-   */
-  zebra_route_del_process();
-  list_free(zebra_route_del_list);
 
   /*
    * Clean-up all the connected routes from the L3 cache containing

@@ -52,30 +52,40 @@ def _configure_switches(topology, step):
     assert sw1 is not None
     sw2 = topology.get("sw2")
     assert sw2 is not None
+
+    # Changing hardcode interfaces for dinamics
+    int11 = sw1.ports["if01"]
+    int12 = sw1.ports["if02"]
+    int13 = sw1.ports["if03"]
+    int14 = sw1.ports["if04"]
+    int21 = sw2.ports["if01"]
+    int22 = sw2.ports["if02"]
+    int23 = sw2.ports["if03"]
+
     step('1-Configuring Switches')
     # Configure switch sw1
     sw1("configure terminal")
 
     # Configure interface 1 on switch sw1
-    sw1("interface 1")
+    sw1("interface {}".format(int11))
     sw1("ip address 10.0.10.2/24")
     sw1("no shut")
     sw1("exit")
 
     # Configure interface 2 on switch sw1
-    sw1("interface 2")
+    sw1("interface {}".format(int12))
     sw1("ip address 10.0.20.2/24")
     sw1("no shut")
     sw1("exit")
 
     # Configure interface 3 on switch sw1
-    sw1("interface 3")
+    sw1("interface {}".format(int13))
     sw1("ip address 10.0.30.1/24")
     sw1("no shut")
     sw1("exit")
 
     # Configure interface 4 on switch sw1
-    sw1("interface 4")
+    sw1("interface {}".format(int14))
     sw1("ip address 10.0.40.1/24")
     sw1("no shut")
     sw1("exit")
@@ -90,19 +100,19 @@ def _configure_switches(topology, step):
     sw2("configure terminal")
 
     # Configure interface 1 on switch sw2
-    sw2("interface 1")
+    sw2("interface {}".format(int21))
     sw2("ip address 10.0.30.2/24")
     sw2("no shut")
     sw2("exit")
 
     # Configure interface 2 on switch sw2
-    sw2("interface 2")
+    sw2("interface {}".format(int22))
     sw2("ip address 10.0.40.2/24")
     sw2("no shut")
     sw2("exit")
 
-    # Configure interface 3 on switch s4
-    sw2("interface 3")
+    # Configure interface 3 on switch sw2
+    sw2("interface {}".format(int23))
     sw2("ip address 10.0.70.2/24")
     sw2("no shut")
     sw2("exit")
@@ -141,7 +151,10 @@ def _configure_hosts(topology, step):
     hs1("ip route add 10.0.40.0/24 via 10.0.10.2")
     hs1("ip route add 10.0.70.0/24 via 10.0.10.2")
     hs2("ip route add 10.0.30.0/24 via 10.0.20.2")
-    hs2("ip route add 10.0.40.0/24 via 10.0.10.2")
+    # Fix typo that has no consecuence in the testcase
+    # logic but it was causing and error to be
+    # shown in logs
+    hs2("ip route add 10.0.40.0/24 via 10.0.20.2")
     hs2("ip route add 10.0.70.0/24 via 10.0.20.2")
     hs3("ip route add 10.0.10.0/24 via 10.0.70.2")
     hs3("ip route add 10.0.20.0/24 via 10.0.70.2")

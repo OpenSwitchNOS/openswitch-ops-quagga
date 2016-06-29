@@ -58,7 +58,15 @@ def test_bgp_ct_timers(topology, step):
     sw1("no timers bgp")
     output = sw1("do show running-config")
     assert timer_ not in output
-    step("4-Verifying no router bgp...")
+    step("5-Verifying 0 timers...")
+    timers_bgp_keepalive = 0
+    timers_bgp_holdtime = 0
+    timer_ = "timers bgp {} {}".format(timers_bgp_keepalive,
+                                        timers_bgp_holdtime)
+    sw1(timer_)
+    output = sw1("do show running-config")
+    assert timer_ in output
+    step("6-Verifying no router bgp...")
     sw1("exit")
     sw1("no {router_}".format(**locals()))
     output = sw1("do show running-config")

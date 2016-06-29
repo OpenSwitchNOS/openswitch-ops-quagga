@@ -569,6 +569,129 @@ def no_routing_trigger_static_routes(sw1, sw2, step):
                                                     nexthop='2')
 
 
+# This function tests a corner case of "no routing" when the L3 interface
+# does not have an IP/IPv6 address but this interface is L3 since it is the
+# part of vrf. In case of "no routing" in this kind of interface, zebra should
+# clean-up the DB for the route going via this interface.
+def no_routing_on_interface_without_ip(sw1, sw2, step):
+
+    step("Entering interface for link 1 SW1, to execute 'routing'")
+
+    # Make the L2 interface 1 as L3 by executing "routing"
+    sw1("interface {}".format(sw1.ports["if01"]))
+    sw1("routing")
+    sw1("exit")
+
+    # Add a static IPv4 route with next-hop interface as 1
+    sw1("ip route 203.0.0.1/32 1")
+
+    # Populate the expected RIB ("show rib") route dictionary for the route
+    # 203.0.0.1/32 and its next-hops.
+    rib_ipv4_static_route1 = dict()
+    rib_ipv4_static_route1['Route'] = '203.0.0.1/32'
+    rib_ipv4_static_route1['NumberNexthops'] = '1'
+    rib_ipv4_static_route1['1'] = dict()
+    rib_ipv4_static_route1['1']['Distance'] = '1'
+    rib_ipv4_static_route1['1']['Metric'] = '0'
+    rib_ipv4_static_route1['1']['RouteType'] = 'static'
+
+    # Populate the expected FIB ("show ip route") route dictionary for the
+    # route 203.0.0.1/32 and its next-hops.
+    route_ipv4_static_route1 = rib_ipv4_static_route1
+
+    # Add a static IPv6 route with next-hop interface as 1
+    sw1("ipv6 route 2003:2003::1/128 1")
+
+    # Populate the expected RIB ("show rib") route dictionary for the
+    # route 2003:2003::1/128 and its next-hops.
+    rib_ipv6_static_route1 = dict()
+    rib_ipv6_static_route1['Route'] = '2003:2003::1/128'
+    rib_ipv6_static_route1['NumberNexthops'] = '1'
+    rib_ipv6_static_route1['1'] = dict()
+    rib_ipv6_static_route1['1']['Distance'] = '1'
+    rib_ipv6_static_route1['1']['Metric'] = '0'
+    rib_ipv6_static_route1['1']['RouteType'] = 'static'
+
+    # Populate the expected FIB ("show ipv6 route") route dictionary for the
+    # route 2003:2003::1/128 and its next-hops.
+    route_ipv6_static_route1 = rib_ipv6_static_route1
+
+    sleep(ZEBRA_TEST_SLEEP_TIME)
+
+    step("Verifying the IPv4 static routes on switch 1")
+
+    # Verify route 203.0.0.1/32 and next-hops in RIB, FIB and
+    # running-config
+    aux_route = route_ipv4_static_route1["Route"]
+    verify_show_ip_route(sw1, aux_route, 'static', route_ipv4_static_route1)
+    aux_route = rib_ipv4_static_route1["Route"]
+    verify_show_rib(sw1, aux_route, 'static', rib_ipv4_static_route1)
+    assert route_and_nexthop_in_show_running_config(sw1=sw1,
+                                                    if_ipv4=True,
+                                                    route='203.0.0.1/32',
+                                                    nexthop='1')
+
+    # Verify route 2003:2003::1/128 and next-hops in RIB, FIB and verify the
+    # presence of all next-hops in running-config
+    aux_route = route_ipv6_static_route1["Route"]
+    verify_show_ipv6_route(sw1, aux_route, 'static', route_ipv6_static_route1)
+    aux_route = rib_ipv6_static_route1["Route"]
+    verify_show_rib(sw1, aux_route, 'static', rib_ipv6_static_route1)
+    assert route_and_nexthop_in_show_running_config(sw1=sw1,
+                                                    if_ipv4=False,
+                                                    route='2003:2003::1/128',
+                                                    nexthop='1')
+
+    step("Entering interface for link 1 SW1, to execute 'no routing'")
+
+    # Make the L3 interface 1 as L2 by executing "no routing"
+    sw1("interface {}".format(sw1.ports["if01"]))
+    sw1("no routing")
+    sw1("exit")
+
+    # Populate the expected RIB ("show rib") route dictionary for the route
+    # 203.0.0.1/32 and its next-hops.
+    rib_ipv4_static_route1 = dict()
+    rib_ipv4_static_route1['Route'] = '203.0.0.1/32'
+
+    # Populate the expected FIB ("show ip route") route dictionary for the
+    # route 203.0.0.1/32 and its next-hops.
+    route_ipv4_static_route1 = rib_ipv4_static_route1
+
+    # Populate the expected RIB ("show rib") route dictionary for the
+    # route 2003:2003::1/128 and its next-hops.
+    rib_ipv6_static_route1 = dict()
+    rib_ipv6_static_route1['Route'] = '2003:2003::1/128'
+
+    # Populate the expected FIB ("show ipv6 route") route dictionary for the
+    # route 2003:2003::1/128 and its next-hops.
+    route_ipv6_static_route1 = rib_ipv6_static_route1
+
+    sleep(ZEBRA_TEST_SLEEP_TIME)
+
+    # Verify route 203.0.0.1/32 and next-hops in RIB, FIB and
+    # running-config
+    aux_route = route_ipv4_static_route1["Route"]
+    verify_show_ip_route(sw1, aux_route, 'static', route_ipv4_static_route1)
+    aux_route = rib_ipv4_static_route1["Route"]
+    verify_show_rib(sw1, aux_route, 'static', rib_ipv4_static_route1)
+    assert not route_and_nexthop_in_show_running_config(sw1=sw1,
+                                                    if_ipv4=True,
+                                                    route='203.0.0.1/32',
+                                                    nexthop='1')
+
+    # Verify route 2003:2003::1/128 and next-hops in RIB, FIB and verify the
+    # presence of all next-hops in running-config
+    aux_route = route_ipv6_static_route1["Route"]
+    verify_show_ipv6_route(sw1, aux_route, 'static', route_ipv6_static_route1)
+    aux_route = rib_ipv6_static_route1["Route"]
+    verify_show_rib(sw1, aux_route, 'static', rib_ipv6_static_route1)
+    assert not route_and_nexthop_in_show_running_config(sw1=sw1,
+                                                    if_ipv4=False,
+                                                    route='2003:2003::1/128',
+                                                    nexthop='1')
+
+
 # This test does "routing" trigger on the non-routed interfaces and checks if
 # the routes and next-hops show correctly or not added incorrectly in the
 # output of "show ip/ipv6 route/show rib/show running-config".
@@ -1111,6 +1234,7 @@ def test_zebra_ct_no_routing_trigger(topology, step):
 
     add_static_routes(sw1, sw2, step)
     no_routing_trigger_static_routes(sw1, sw2, step)
+    no_routing_on_interface_without_ip(sw1, sw2, step)
     routing_trigger_static_routes(sw1, sw2, step)
     add_static_routes_via_l3_sub_interfaces(sw1, sw2, step)
     no_routing_trigger_l3_parent_interfaces(sw1, sw2, step)

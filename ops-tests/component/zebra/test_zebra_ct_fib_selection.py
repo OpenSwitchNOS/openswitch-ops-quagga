@@ -72,8 +72,8 @@ def test_zebra_ct_fib_selection(topology, step):
     sw2("ip route 10.0.20.0/24 10.0.10.1")
 
     # Add IPv6 static route on sw1 and sw2
-    sw1("ipv6 route 2002::0/120 2000::2")
-    sw2("ipv6 route 2001::0/120 2000::1")
+    sw1("ipv6 route 2002::/120 2000::2")
+    sw2("ipv6 route 2001::/120 2000::1")
 
     # Turning on the interfaces
     sw1("set interface 1 user_config:admin=up", shell='vsctl')
@@ -86,7 +86,10 @@ def test_zebra_ct_fib_selection(topology, step):
     # Parse the "ovsdb-client dump" output and extract the lines between
     # "Route table" and "Route_Map table". This section will have all the
     # Route table entries. Then parse line by line to match the contents
-    dump = sw1("ovsdb-client dump", shell='bash')
+    bash = sw1.get_shell('bash')
+    # Increase command wait time to avoid shell timeout
+    bash.send_command("ovsdb-client dump", timeout=240)
+    dump = bash.get_response()
     lines = dump.split('\n')
     check = False
     for line in lines:

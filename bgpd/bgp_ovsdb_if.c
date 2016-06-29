@@ -2325,7 +2325,7 @@ bgp_nbr_timers_ovsdb_apply_changes(const struct ovsrec_bgp_neighbor *ovs_nbr,
          * timer values are not required/used in unsetting case. Only in
          * set case do we check for valid keepalive and hold timer values.
          */
-        if (!set || ((keepalive > 0) && (holdtimer > 0))) {
+        if (!set || ((keepalive >= 0) && (holdtimer >= 0))) {
             daemon_neighbor_timers_cmd_execute(bgp_instance, name,
                                                (u_int32_t)keepalive,
                                                (u_int32_t)holdtimer, set);

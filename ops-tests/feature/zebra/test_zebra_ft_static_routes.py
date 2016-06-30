@@ -27,8 +27,8 @@ from layer3_common import (switch_cfg_iface,
                            host_ping_expect_failure,
                            ZEBRA_DEFAULT_TIMEOUT,
                            ZEBRA_TEST_SLEEP_TIME)
-from time import sleep
 from pytest import mark
+from time import sleep
 
 TOPOLOGY = """
 # +-------+     +--------+     +--------+     +-------+
@@ -49,6 +49,7 @@ ops2:if01 -- hs2:eth1
 
 
 @mark.timeout(ZEBRA_DEFAULT_TIMEOUT)
+@mark.gate
 def test_static_routes(topology, step):
     """
     Test for static routes.

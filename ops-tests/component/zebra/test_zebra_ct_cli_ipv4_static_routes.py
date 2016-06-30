@@ -42,6 +42,7 @@ sw2:if02
 
 
 @mark.timeout(ZEBRA_DEFAULT_TIMEOUT)
+@mark.gate
 def test_ipv4_static_route_config(topology, step):
     '''
     This test verifies various ipv4 static route configurations by validating

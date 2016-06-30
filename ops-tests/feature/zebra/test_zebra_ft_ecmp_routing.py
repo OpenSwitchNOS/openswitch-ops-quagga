@@ -25,8 +25,8 @@ from layer3_common import (switch_cfg_iface,
                            host_ping_expect_failure,
                            ZEBRA_DEFAULT_TIMEOUT,
                            ZEBRA_TEST_SLEEP_TIME)
-from time import sleep
 from pytest import mark
+from time import sleep
 
 TOPOLOGY = """
 # +-------+
@@ -54,6 +54,7 @@ hs3:eth1 -- ops2:if02
 
 
 @mark.timeout(ZEBRA_DEFAULT_TIMEOUT)
+@mark.gate
 def test_ecmp_routing(topology, step):
     """
     Verify ecmp routing.

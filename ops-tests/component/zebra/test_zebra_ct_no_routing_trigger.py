@@ -1268,6 +1268,7 @@ def no_routing_trigger_l3_parent_interfaces(sw1, sw2, step):
 
 
 @mark.timeout(ZEBRA_DEFAULT_TIMEOUT)
+@mark.gate
 def test_zebra_ct_no_routing_trigger(topology, step):
     sw1 = topology.get("sw1")
     assert sw1 is not None

@@ -427,10 +427,10 @@ main (int argc, char **argv)
   /* Needed for BSD routing socket. */
   pid = getpid ();
 
-#ifndef ENABLE_OVSDB
   /* This must be done only after locking pidfile (bug #403). */
   zebra_zserv_socket_init (zserv_path);
 
+#ifndef ENABLE_OVSDB
   /* Make vty server socket. */
   vty_serv_sock (vty_addr, vty_port, ZEBRA_VTYSH_PATH);
 

@@ -25,6 +25,7 @@ from helpers_routing import (
     verify_show_rib
 )
 from time import sleep
+from pytest import mark
 
 
 # Topology definition. the topology contains two back to back switches
@@ -532,6 +533,7 @@ def delete_static_routes(sw1, sw2, step):
                                                         nexthop='4')
 
 
+@mark.gate
 def test_zebra_ct_route_nexthop_delete(topology, step):
     sw1 = topology.get("sw1")
     assert sw1 is not None

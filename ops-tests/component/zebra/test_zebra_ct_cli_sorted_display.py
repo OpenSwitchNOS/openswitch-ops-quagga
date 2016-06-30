@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+from pytest import mark
 from re import match
 from re import findall
 from time import sleep
@@ -76,6 +77,7 @@ def get_prefix_uuid(switch, prefix_value, step):
     assert prefix_uuid is not None
     return prefix_uuid.group(3).rstrip('\r')
 
+@mark.gate
 def test_static_route_config(topology, step):
     '''
     This test cases verifies sorted(lexicographic) retrieval of the ip routes

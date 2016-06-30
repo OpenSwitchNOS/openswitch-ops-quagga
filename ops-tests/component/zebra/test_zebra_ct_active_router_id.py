@@ -17,6 +17,7 @@
 # Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 # 02111-1307, USA.
 
+from pytest import mark
 
 TOPOLOGY = """
 #
@@ -150,6 +151,7 @@ def verify_no_change_for_new_added_interfaces(sw1, step):
     output = sw1("ovsdb-client dump VRF", shell='bash')
     assert active_router_id2 in output
 
+@mark.gate
 def test_zebra_ct_active_router_id(topology, step):
     sw1 = topology.get("sw1")
     assert sw1 is not None

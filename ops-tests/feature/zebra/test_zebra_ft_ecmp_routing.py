@@ -43,6 +43,7 @@ hs3:eth0 -- ops2:if02
 """
 
 
+@mark.gate
 @mark.timeout(500)
 def test_ecmp_routing(topology, step):
     """

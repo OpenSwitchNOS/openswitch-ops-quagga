@@ -17,13 +17,13 @@
 # Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 # 02111-1307, USA.
 
-
 from helpers_routing import (
     verify_show_ip_route,
     verify_show_rib
 )
 from re import match
 from time import sleep
+from pytest import mark
 
 
 # Topology definition. the topology contains two back to back switches
@@ -934,6 +934,7 @@ def delete_static_bgp_routes(sw1, sw2, step):
     verify_show_rib(sw1, aux_route, 'bgp', rib_ipv4_bgp_route2)
 
 
+@mark.gate
 def test_zebra_ct_ipv4_static_bgp_nexthop_selection(topology, step):
     sw1 = topology.get("sw1")
     assert sw1 is not None

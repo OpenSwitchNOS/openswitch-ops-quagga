@@ -17,6 +17,7 @@
 # Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 # 02111-1307, USA.
 
+from pytest import mark
 
 TOPOLOGY = """
 # +-------+      +-------+
@@ -32,6 +33,7 @@ sw1:if01 -- sw2:if01
 """
 
 
+@mark.gate
 def test_zebra_ct_fib_selection(topology, step):
     sw1 = topology.get("sw1")
     sw2 = topology.get("sw2")

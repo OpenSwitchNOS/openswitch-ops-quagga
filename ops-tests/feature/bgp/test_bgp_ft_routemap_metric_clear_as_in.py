@@ -14,7 +14,7 @@
 # under the License.
 
 from time import sleep
-import pytest
+from pytest import mark
 
 TOPOLOGY = """
 #
@@ -360,7 +360,8 @@ def configure(sw1, sw2, sw3):
     configure_neighbor(sw3, AS_NUM3, IP_ADDR2_2, AS_NUM2)
 
 
-@pytest.mark.timeout(600)
+@mark.gate
+@mark.timeout(600)
 def test_bgp_metric_clear_as_in_configuration(topology, step):
     sw1 = topology.get('sw1')
     sw2 = topology.get('sw2')

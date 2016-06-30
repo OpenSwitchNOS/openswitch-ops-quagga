@@ -37,6 +37,7 @@ ops2:if01 -- hs2:eth0
 """
 
 
+@mark.gate
 @mark.timeout(500)
 def test_static_routes(topology, step):
     """

@@ -24,6 +24,7 @@ from helpers_routing import (
     verify_show_rib
 )
 from time import sleep
+from pytest import mark
 
 # Topology definition. the topology contains two back to back switches
 # having four links between them.
@@ -1221,6 +1222,7 @@ def no_routing_trigger_l3_parent_interfaces(sw1, sw2, step):
                                                     nexthop='1.1')
 
 
+@mark.gate
 def test_zebra_ct_no_routing_trigger(topology, step):
     sw1 = topology.get("sw1")
     assert sw1 is not None

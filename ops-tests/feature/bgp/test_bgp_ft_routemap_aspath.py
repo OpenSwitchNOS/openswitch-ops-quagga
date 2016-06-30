@@ -332,6 +332,7 @@ def verify_routemap_match_aspath(step, switch1, switch2):
     step("### \"match as-path\" running succesfully ###\n")
 
 
+@mark.gate
 @mark.timeout(600)
 def test_bgp_ft_routemap_aspath(topology, step):
     ops1 = topology.get('ops1')

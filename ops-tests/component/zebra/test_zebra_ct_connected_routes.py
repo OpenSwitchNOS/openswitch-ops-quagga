@@ -26,6 +26,7 @@ from zebra_routing import (
     verify_show_rib
 )
 from time import sleep
+from pytest import mark
 
 
 TIME_IN_SEC_TO_SLEEP = 20
@@ -3143,6 +3144,7 @@ def no_routing_or_delete_layer3_interfaces(sw1, sw2, step):
                     rib_ipv6_lag_connected_route_secondary)
 
 
+@mark.gate
 def test_zebra_ct_connected_routes(topology, step):
     sw1 = topology.get("sw1")
     sw2 = topology.get("sw2")

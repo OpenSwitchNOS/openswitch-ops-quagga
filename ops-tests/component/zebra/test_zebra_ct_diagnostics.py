@@ -18,6 +18,7 @@
 """
 Component test to verify zebra diagnostic commands.
 """
+from pytest import mark
 
 TOPOLOGY = """
 #
@@ -33,6 +34,7 @@ TOPOLOGY = """
 
 """
 
+@mark.gate
 def test_zebra_diag_dump(topology, step):
     '''
     This test verifies various diagnostic commands related to zebra daemon

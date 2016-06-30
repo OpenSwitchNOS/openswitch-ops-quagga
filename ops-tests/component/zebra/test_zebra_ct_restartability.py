@@ -19,6 +19,7 @@
 # Topology definition. the topology contains two back to back switches
 # having four links between them.
 
+from pytest import mark
 
 from zebra_routing import (
     verify_show_ip_route,
@@ -2738,6 +2739,7 @@ def all_configuration_deleted_before_zebra_restart(sw1, sw2, step):
                                       route_ipv6_kernel_route3, 'zebra')
 
 
+@mark.gate
 def test_zebra_ct_restartability(topology, step):
     sw1 = topology.get("sw1")
     sw2 = topology.get("sw2")

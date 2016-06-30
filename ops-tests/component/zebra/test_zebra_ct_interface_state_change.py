@@ -26,6 +26,7 @@ from zebra_routing import (
     verify_show_rib
 )
 from time import sleep
+from pytest import mark
 
 TOPOLOGY = """
 # +-------+    +-------+
@@ -1742,6 +1743,7 @@ def remove_active_nexthop_from_static_routes(sw1, sw2, step):
     verify_show_rib(sw1, aux_route, 'static', rib_ipv6_static_route)
 
 
+@mark.gate
 def test_zebra_ct_interface_state_change(topology, step):
     sw1 = topology.get("sw1")
     sw2 = topology.get("sw2")

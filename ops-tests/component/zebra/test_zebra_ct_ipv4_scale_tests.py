@@ -17,6 +17,7 @@
 # Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 # 02111-1307, USA.
 
+from pytest import mark
 from route_generator_and_stats_reporter import (
     get_static_route_dict,
     capture_output_samples_and_generate_perf_stats
@@ -320,6 +321,7 @@ def InterfaceNoRouting(sw1, sw2, ipv4_route_list, step):
            actual: " + str(perf_stats_dict['TotalShowRunning'])
 
 
+@mark.gate
 def test_zebra_ct_ipv4_scale_tests(topology, step):
     sw1 = topology.get("sw1")
     sw2 = topology.get("sw2")

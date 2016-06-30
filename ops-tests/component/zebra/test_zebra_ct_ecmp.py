@@ -19,6 +19,7 @@
 
 from time import sleep
 # from re import search
+from pytest import mark
 
 TOPOLOGY = """
 #               +-------+     +-------+
@@ -185,6 +186,7 @@ def _v4_route_delete_ping_test(topology, step):
     assert ping['transmitted'] is 5 and ping['received'] is 0
 
 
+@mark.gate
 def test_zebra_ct_ecmp(topology, step):
     _configure_switches(topology, step)
     _configure_hosts(topology, step)

@@ -22,6 +22,7 @@ OpenSwitch Test for vlan related configurations.
 
 from bgp_config import BgpConfig
 from vtysh_utils import SwitchVtyshUtils
+from pytest import mark
 
 TOPOLOGY = """
 # +-------+
@@ -331,6 +332,7 @@ def reconfigure_neighbor(step):
                   % (network, next_hop, switch.name)
 
 
+@mark.gate
 def test_bgp_ft_filter_list(topology, step):
     global switches
 

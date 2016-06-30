@@ -20,6 +20,7 @@
 from zebra_routing import (
     ZEBRA_DEFAULT_TIMEOUT
 )
+from time import sleep
 from pytest import mark
 
 TOPOLOGY = """
@@ -202,6 +203,7 @@ def _v4_route_delete_ping_test(topology, step):
 
 
 @mark.timeout(ZEBRA_DEFAULT_TIMEOUT)
+@mark.gate
 def test_zebra_ct_ecmp(topology, step):
     _configure_switches(topology, step)
     _configure_hosts(topology, step)

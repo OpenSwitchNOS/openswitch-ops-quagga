@@ -14,15 +14,14 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
-from zebra_routing import (
-    ZEBRA_DEFAULT_TIMEOUT
-)
-from pytest import mark
-
 """
 Component test to verify zebra diagnostic commands.
 """
+
+from pytest import mark
+from zebra_routing import (
+    ZEBRA_DEFAULT_TIMEOUT
+)
 
 TOPOLOGY = """
 #
@@ -40,6 +39,7 @@ TOPOLOGY = """
 
 
 @mark.timeout(ZEBRA_DEFAULT_TIMEOUT)
+@mark.gate
 def test_zebra_diag_dump(topology, step):
     '''
     This test verifies various diagnostic commands related to zebra daemon

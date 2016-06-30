@@ -558,6 +558,7 @@ def delete_static_routes(sw1, sw2, step):
 
 
 @mark.timeout(ZEBRA_DEFAULT_TIMEOUT)
+@mark.gate
 def test_zebra_ct_route_nexthop_delete(topology, step):
     sw1 = topology.get("sw1")
     assert sw1 is not None

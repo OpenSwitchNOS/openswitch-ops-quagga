@@ -17,7 +17,6 @@
 # Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 # 02111-1307, USA.
 
-
 from route_generator_and_stats_reporter import (
     get_static_route_dict,
     capture_output_samples_and_generate_perf_stats
@@ -312,6 +311,7 @@ def interface_no_routing(sw1, sw2, ipv6_route_list, step):
 
 
 @mark.timeout(ZEBRA_DEFAULT_TIMEOUT)
+@mark.gate
 def test_zebra_ct_ipv6_scale_tests(topology, step):
     sw1 = topology.get("sw1")
     sw2 = topology.get("sw2")

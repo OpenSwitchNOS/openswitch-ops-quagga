@@ -302,6 +302,7 @@ def configure(step, switch1, switch2):
     configure_neighbor(switch2, AS_NUM2, IP_ADDR1, AS_NUM1)
 
 
+@mark.gate
 @mark.timeout(600)
 def test_bgp_ft_routemap_weight(topology, step):
     ops1 = topology.get('ops1')

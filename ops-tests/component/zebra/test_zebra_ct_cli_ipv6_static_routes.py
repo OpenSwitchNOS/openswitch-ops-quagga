@@ -18,6 +18,8 @@
 from zebra_routing import (
     ZEBRA_DEFAULT_TIMEOUT
 )
+from re import match
+from re import findall
 from pytest import mark
 
 TOPOLOGY = """
@@ -42,6 +44,7 @@ sw2:if02
 
 
 @mark.timeout(ZEBRA_DEFAULT_TIMEOUT)
+@mark.gate
 def test_ipv6_static_route_config(topology, step):
     '''
     This test verifies various ipv6 static route configurations by validating

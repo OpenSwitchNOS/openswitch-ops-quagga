@@ -17,6 +17,7 @@
 # Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 # 02111-1307, USA.
 
+from pytest import mark
 
 from zebra_routing import (
     verify_active_router_id_in_vrf,
@@ -166,6 +167,7 @@ def verify_no_change_for_new_added_interfaces(sw1, step):
 
 
 @mark.timeout(ZEBRA_DEFAULT_TIMEOUT)
+@mark.gate
 def test_zebra_ct_active_router_id(topology, step):
     sw1 = topology.get("sw1")
     assert sw1 is not None

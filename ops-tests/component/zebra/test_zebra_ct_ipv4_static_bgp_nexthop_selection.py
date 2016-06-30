@@ -17,7 +17,6 @@
 # Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 # 02111-1307, USA.
 
-
 from zebra_routing import (
     verify_show_ip_route,
     verify_show_rib,
@@ -966,6 +965,7 @@ def delete_static_bgp_routes(sw1, sw2, step):
 
 
 @mark.timeout(ZEBRA_DEFAULT_TIMEOUT)
+@mark.gate
 def test_zebra_ct_ipv4_static_bgp_nexthop_selection(topology, step):
     sw1 = topology.get("sw1")
     assert sw1 is not None

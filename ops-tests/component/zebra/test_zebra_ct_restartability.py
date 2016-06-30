@@ -19,7 +19,6 @@
 # Topology definition. the topology contains two back to back switches
 # having four links between them.
 
-
 from zebra_routing import (
     verify_show_ip_route,
     verify_show_ipv6_route,
@@ -28,7 +27,6 @@ from zebra_routing import (
     ZEBRA_DEFAULT_TIMEOUT,
     ZEBRA_TEST_SLEEP_TIME
 )
-from time import sleep
 from pytest import mark
 
 
@@ -2961,6 +2959,7 @@ def all_configuration_deleted_before_zebra_restart(sw1, sw2, step):
 
 
 @mark.timeout(ZEBRA_DEFAULT_TIMEOUT)
+@mark.gate
 def test_zebra_ct_restartability(topology, step):
     sw1 = topology.get("sw1")
     sw2 = topology.get("sw2")

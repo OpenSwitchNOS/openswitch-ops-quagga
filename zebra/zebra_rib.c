@@ -2986,8 +2986,34 @@ rib_delete_ipv4 (int type, int flags, struct prefix_ipv4 *p,
 	}
     }
 
+#ifdef ENABLE_OVSDB
+  /*
+   * If this rib node has onlt one next-hop and that is being
+   * deleted, then mark te node for deletetion.
+   */
+  if (same->nexthop_num == 1)
+    rib_delnode (rn, same);
+  else
+    {
+      /*
+       * If we find a valid next-hop for delettion, then uninstall
+       * the fib entry if the route is in kerenl, remove
+       * the next-hop from the rib node and schedule the worker
+       * thread.
+       */
+      if (nexthop)
+        {
+          if (CHECK_FLAG (nexthop->flags, NEXTHOP_FLAG_FIB))
+            rib_uninstall(rn, same);
+          nexthop_delete(same, nexthop);
+          nexthop_free(nexthop);
+          rib_queue_add(&zebrad, rn);
+        }
+    }
+#else
   if (same)
     rib_delnode (rn, same);
+#endif
 
   route_unlock_node (rn);
   return 0;
@@ -3561,8 +3587,34 @@ rib_delete_ipv6 (int type, int flags, struct prefix_ipv6 *p,
 	}
     }
 
+#ifdef ENABLE_OVSDB
+  /*
+   * If this rib node has onlt one next-hop and that is being
+   * deleted, then mark te node for deletetion.
+   */
+  if (same->nexthop_num == 1)
+    rib_delnode (rn, same);
+  else
+    {
+      /*
+       * If we find a valid next-hop for delettion, then uninstall
+       * the fib entry if the route is in kerenl, remove
+       * the next-hop from the rib node and schedule the worker
+       * thread.
+       */
+      if (nexthop)
+        {
+          if (CHECK_FLAG (nexthop->flags, NEXTHOP_FLAG_FIB))
+            rib_uninstall(rn, same);
+          nexthop_delete(same, nexthop);
+          nexthop_free(nexthop);
+          rib_queue_add(&zebrad, rn);
+        }
+    }
+#else
   if (same)
     rib_delnode (rn, same);
+#endif
 
   route_unlock_node (rn);
   return 0;

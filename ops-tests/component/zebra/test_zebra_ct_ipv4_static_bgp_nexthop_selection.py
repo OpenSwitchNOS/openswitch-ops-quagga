@@ -86,6 +86,26 @@ def get_vrf_uuid(switch, vrf_name, step):
     return vrf_uuid.group(3).rstrip('\r')
 
 
+def get_uuid_from_nexthop_table(switch, nexthop_ip, step):
+    """
+    This function takes a switch and nexthop IPv4 address and retruns
+    the uuid for the next-hop
+    """
+    step("Getting uuid for the nexthop {}".format(nexthop_ip))
+
+    ovsdb_nexthop_command = "ovsdb-client dump Nexthop"
+    output = switch(ovsdb_nexthop_command, shell='bash')
+    lines = output.splitlines()
+    nexthop_uuid = None
+    nexthop_regex = "(.*) {}(.*)%s(.*)" %(nexthop_ip)
+    for line in lines:
+        nexthop_uuid = match(nexthop_regex, line)
+        if nexthop_uuid is not None:
+            break
+    assert nexthop_uuid is not None
+    return nexthop_uuid.group(1).rstrip('\r')
+
+
 # This test configures IPv4 static/BGP routes and checks if the
 # routes and next-hops show correctly selected in the output of
 # "show ip route/show rib".
@@ -546,8 +566,268 @@ def no_shutdown_static_bgp_routes_next_hop_interfaces(sw1, sw2, step):
     verify_show_rib(sw1, aux_route, 'bgp', rib_ipv4_bgp_route2)
 
 
+# This test case adds a next-hop to the BGP routes to makes IPv4 BGP routes
+# multi-path and checks if the routes and next-hops show correctly selected
+# in the output of "show ip route/show rib".
+def add_nexthop_to_make_bgp_route_ecmp(sw1, sw2, step):
+
+    step("Configuring another next-hop for IPv4 BGP route 123.0.0.1/32 on \
+         switch 1")
+
+    nexthop_uuid = get_uuid_from_nexthop_table(sw1, "3.3.3.5", step)
+
+    # Prepare string to add another BGP next-hop for route  123.0.0.1/32
+    # using ovsdb-client.
+    bpg_route_cmd_ipv4_route1 = """ovsdb-client transact '[ "OpenSwitch",
+         {
+             "op" : "insert",
+             "table" : "Nexthop",
+             "row" : {
+                 "ip_address" : "4.4.4.9",
+                 "weight" : 3,
+                 "selected": true
+             },
+             "uuid-name" : "nh01"
+         },
+         {
+            "op" : "update",
+            "table" : "Route",
+            "where":[["prefix","==","123.0.0.1/32"],["from","==","bgp"]],
+            "row" : {
+                     "nexthops" : [
+                     "set",
+                     [["uuid", "%s"],
+                      ["named-uuid", "nh01"]
+                     ]]
+                    }
+         }
+    ]'""" % nexthop_uuid
+
+    # Configure the BGP next-hop for prefix 123.0.0.1/32 using ovsdb-client
+    # interface
+    sw1(bpg_route_cmd_ipv4_route1, shell='bash')
+
+    # Populate the expected RIB ("show rib") route dictionary for the route
+    # 123.0.0.1/32 and its next-hops.
+    rib_ipv4_static_route1 = dict()
+    rib_ipv4_static_route1['Route'] = '123.0.0.1/32'
+    rib_ipv4_static_route1['NumberNexthops'] = '4'
+    rib_ipv4_static_route1['1.1.1.2'] = dict()
+    rib_ipv4_static_route1['1.1.1.2']['Distance'] = '10'
+    rib_ipv4_static_route1['1.1.1.2']['Metric'] = '0'
+    rib_ipv4_static_route1['1.1.1.2']['RouteType'] = 'static'
+    rib_ipv4_static_route1['2'] = dict()
+    rib_ipv4_static_route1['2']['Distance'] = '10'
+    rib_ipv4_static_route1['2']['Metric'] = '0'
+    rib_ipv4_static_route1['2']['RouteType'] = 'static'
+    rib_ipv4_static_route1['3'] = dict()
+    rib_ipv4_static_route1['3']['Distance'] = '10'
+    rib_ipv4_static_route1['3']['Metric'] = '0'
+    rib_ipv4_static_route1['3']['RouteType'] = 'static'
+    rib_ipv4_static_route1['4.4.4.1'] = dict()
+    rib_ipv4_static_route1['4.4.4.1']['Distance'] = '10'
+    rib_ipv4_static_route1['4.4.4.1']['Metric'] = '0'
+    rib_ipv4_static_route1['4.4.4.1']['RouteType'] = 'static'
+
+    # Populate the expected FIB ("show ip route") route dictionary for the
+    # route 123.0.0.1/32 and its next-hops.
+    route_ipv4_static_route1 = dict()
+    route_ipv4_static_route1['Route'] = '123.0.0.1/32'
+
+    # Configure IPv4 route 143.0.0.1/32 with 1 next-hop.
+    # Populate the expected RIB ("show rib") route dictionary for the
+    # route 143.0.0.1/32 and its next-hops.
+    rib_ipv4_static_route2 = dict()
+    rib_ipv4_static_route2['Route'] = '143.0.0.1/32'
+    rib_ipv4_static_route2['NumberNexthops'] = '1'
+    rib_ipv4_static_route2['4.4.4.1'] = dict()
+    rib_ipv4_static_route2['4.4.4.1']['Distance'] = '1'
+    rib_ipv4_static_route2['4.4.4.1']['Metric'] = '0'
+    rib_ipv4_static_route2['4.4.4.1']['RouteType'] = 'static'
+
+    # Populate the expected FIB ("show ip route") route dictionary for the
+    # route 143.0.0.1/32 and its next-hops.
+    route_ipv4_static_route2 = rib_ipv4_static_route2
+
+    # Populate the expected RIB ("show rib") route dictionary for the BGP route
+    # 123.0.0.1/32 and its next-hops.
+    rib_ipv4_bgp_route1 = dict()
+    rib_ipv4_bgp_route1['Route'] = '123.0.0.1/32'
+    rib_ipv4_bgp_route1['NumberNexthops'] = '2'
+    rib_ipv4_bgp_route1['3.3.3.5'] = dict()
+    rib_ipv4_bgp_route1['3.3.3.5']['Distance'] = '6'
+    rib_ipv4_bgp_route1['3.3.3.5']['Metric'] = '0'
+    rib_ipv4_bgp_route1['3.3.3.5']['RouteType'] = 'bgp'
+    rib_ipv4_bgp_route1['4.4.4.9'] = dict()
+    rib_ipv4_bgp_route1['4.4.4.9']['Distance'] = '6'
+    rib_ipv4_bgp_route1['4.4.4.9']['Metric'] = '0'
+    rib_ipv4_bgp_route1['4.4.4.9']['RouteType'] = 'bgp'
+
+    # Populate the expected FIB ("show ip route") route dictionary for the BGP
+    # route 143.0.0.1/32 and its next-hops.
+    route_ipv4_bgp_route1 = rib_ipv4_bgp_route1
+
+    # Populate the expected RIB ("show rib") route dictionary for the BGP route
+    # 143.0.0.1/32 and its next-hops.
+    rib_ipv4_bgp_route2 = dict()
+    rib_ipv4_bgp_route2['Route'] = '143.0.0.1/32'
+    rib_ipv4_bgp_route2['NumberNexthops'] = '1'
+    rib_ipv4_bgp_route2['1.1.1.5'] = dict()
+    rib_ipv4_bgp_route2['1.1.1.5']['Distance'] = '6'
+    rib_ipv4_bgp_route2['1.1.1.5']['Metric'] = '0'
+    rib_ipv4_bgp_route2['1.1.1.5']['RouteType'] = 'bgp'
+
+    # Populate the expected FIB ("show ip route") route dictionary for the
+    # route 123.0.0.1/32 and its next-hops.
+    route_ipv4_bgp_route2 = dict()
+    route_ipv4_bgp_route2['Route'] = '143.0.0.1/32'
+
+    sleep(15)
+
+    step("Verifying the IPv4 static and BGP routes on switch 1")
+    aux_route = route_ipv4_static_route1['Route']
+    verify_show_ip_route(sw1, aux_route, 'static', route_ipv4_static_route1)
+    aux_route = rib_ipv4_static_route1['Route']
+    verify_show_rib(sw1, aux_route, 'static', rib_ipv4_static_route1)
+    aux_route = route_ipv4_bgp_route1['Route']
+    verify_show_ip_route(sw1, aux_route, 'bgp', route_ipv4_bgp_route1)
+    aux_route = rib_ipv4_bgp_route1['Route']
+    verify_show_rib(sw1, aux_route, 'bgp', rib_ipv4_bgp_route1)
+    aux_route = route_ipv4_static_route2["Route"]
+    verify_show_ip_route(sw1, aux_route, 'static', route_ipv4_static_route2)
+    aux_route = rib_ipv4_static_route2['Route']
+    verify_show_rib(sw1, aux_route, 'static', rib_ipv4_static_route2)
+    aux_route = route_ipv4_bgp_route2["Route"]
+    verify_show_ip_route(sw1, aux_route, 'bgp', route_ipv4_bgp_route2)
+    aux_route = rib_ipv4_bgp_route2['Route']
+    verify_show_rib(sw1, aux_route, 'bgp', rib_ipv4_bgp_route2)
+
+
+# This test case removes a next-hop to the BGP routes to makes IPv4 BGP routes
+# single path and checks if the routes and next-hops show correctly selected
+# in the output of "show ip route/show rib".
+def remove_nexthop_to_make_bgp_route_single(sw1, sw2, step):
+
+    step("Removing a next-hop for IPv4 BGP route 123.0.0.1/32 on \
+         switch 1")
+
+    nexthop_uuid = get_uuid_from_nexthop_table(sw1, "3.3.3.5", step)
+
+    # Prepare string to remove a BGP next-hop for route  123.0.0.1/32
+    # using ovsdb-client.
+    bpg_route_cmd_ipv4_route1 = """ovsdb-client transact '[ "OpenSwitch",
+         {
+            "op" : "update",
+            "table" : "Route",
+            "where":[["prefix","==","123.0.0.1/32"],["from","==","bgp"]],
+            "row" : {
+                     "nexthops" : [
+                     "set",
+                     [["uuid", "%s"]
+                     ]]
+                    }
+         }
+    ]'""" % nexthop_uuid
+
+    # Configure the BGP next-hop for prefix 123.0.0.1/32 using ovsdb-client
+    # interface
+    sw1(bpg_route_cmd_ipv4_route1, shell='bash')
+
+    # Populate the expected RIB ("show rib") route dictionary for the route
+    # 123.0.0.1/32 and its next-hops.
+    rib_ipv4_static_route1 = dict()
+    rib_ipv4_static_route1['Route'] = '123.0.0.1/32'
+    rib_ipv4_static_route1['NumberNexthops'] = '4'
+    rib_ipv4_static_route1['1.1.1.2'] = dict()
+    rib_ipv4_static_route1['1.1.1.2']['Distance'] = '10'
+    rib_ipv4_static_route1['1.1.1.2']['Metric'] = '0'
+    rib_ipv4_static_route1['1.1.1.2']['RouteType'] = 'static'
+    rib_ipv4_static_route1['2'] = dict()
+    rib_ipv4_static_route1['2']['Distance'] = '10'
+    rib_ipv4_static_route1['2']['Metric'] = '0'
+    rib_ipv4_static_route1['2']['RouteType'] = 'static'
+    rib_ipv4_static_route1['3'] = dict()
+    rib_ipv4_static_route1['3']['Distance'] = '10'
+    rib_ipv4_static_route1['3']['Metric'] = '0'
+    rib_ipv4_static_route1['3']['RouteType'] = 'static'
+    rib_ipv4_static_route1['4.4.4.1'] = dict()
+    rib_ipv4_static_route1['4.4.4.1']['Distance'] = '10'
+    rib_ipv4_static_route1['4.4.4.1']['Metric'] = '0'
+    rib_ipv4_static_route1['4.4.4.1']['RouteType'] = 'static'
+
+    # Populate the expected FIB ("show ip route") route dictionary for the
+    # route 123.0.0.1/32 and its next-hops.
+    route_ipv4_static_route1 = dict()
+    route_ipv4_static_route1['Route'] = '123.0.0.1/32'
+
+    # Configure IPv4 route 143.0.0.1/32 with 1 next-hop.
+    # Populate the expected RIB ("show rib") route dictionary for the
+    # route 143.0.0.1/32 and its next-hops.
+    rib_ipv4_static_route2 = dict()
+    rib_ipv4_static_route2['Route'] = '143.0.0.1/32'
+    rib_ipv4_static_route2['NumberNexthops'] = '1'
+    rib_ipv4_static_route2['4.4.4.1'] = dict()
+    rib_ipv4_static_route2['4.4.4.1']['Distance'] = '1'
+    rib_ipv4_static_route2['4.4.4.1']['Metric'] = '0'
+    rib_ipv4_static_route2['4.4.4.1']['RouteType'] = 'static'
+
+    # Populate the expected FIB ("show ip route") route dictionary for the
+    # route 143.0.0.1/32 and its next-hops.
+    route_ipv4_static_route2 = rib_ipv4_static_route2
+
+    # Populate the expected RIB ("show rib") route dictionary for the BGP route
+    # 123.0.0.1/32 and its next-hops.
+    rib_ipv4_bgp_route1 = dict()
+    rib_ipv4_bgp_route1['Route'] = '123.0.0.1/32'
+    rib_ipv4_bgp_route1['NumberNexthops'] = '1'
+    rib_ipv4_bgp_route1['3.3.3.5'] = dict()
+    rib_ipv4_bgp_route1['3.3.3.5']['Distance'] = '6'
+    rib_ipv4_bgp_route1['3.3.3.5']['Metric'] = '0'
+    rib_ipv4_bgp_route1['3.3.3.5']['RouteType'] = 'bgp'
+
+    # Populate the expected FIB ("show ip route") route dictionary for the BGP
+    # route 143.0.0.1/32 and its next-hops.
+    route_ipv4_bgp_route1 = rib_ipv4_bgp_route1
+
+    # Populate the expected RIB ("show rib") route dictionary for the BGP route
+    # 143.0.0.1/32 and its next-hops.
+    rib_ipv4_bgp_route2 = dict()
+    rib_ipv4_bgp_route2['Route'] = '143.0.0.1/32'
+    rib_ipv4_bgp_route2['NumberNexthops'] = '1'
+    rib_ipv4_bgp_route2['1.1.1.5'] = dict()
+    rib_ipv4_bgp_route2['1.1.1.5']['Distance'] = '6'
+    rib_ipv4_bgp_route2['1.1.1.5']['Metric'] = '0'
+    rib_ipv4_bgp_route2['1.1.1.5']['RouteType'] = 'bgp'
+
+    # Populate the expected FIB ("show ip route") route dictionary for the
+    # route 123.0.0.1/32 and its next-hops.
+    route_ipv4_bgp_route2 = dict()
+    route_ipv4_bgp_route2['Route'] = '143.0.0.1/32'
+
+    sleep(15)
+
+    step("Verifying the IPv4 static and BGP routes on switch 1")
+    aux_route = route_ipv4_static_route1['Route']
+    verify_show_ip_route(sw1, aux_route, 'static', route_ipv4_static_route1)
+    aux_route = rib_ipv4_static_route1['Route']
+    verify_show_rib(sw1, aux_route, 'static', rib_ipv4_static_route1)
+    aux_route = route_ipv4_bgp_route1['Route']
+    verify_show_ip_route(sw1, aux_route, 'bgp', route_ipv4_bgp_route1)
+    aux_route = rib_ipv4_bgp_route1['Route']
+    verify_show_rib(sw1, aux_route, 'bgp', rib_ipv4_bgp_route1)
+    aux_route = route_ipv4_static_route2["Route"]
+    verify_show_ip_route(sw1, aux_route, 'static', route_ipv4_static_route2)
+    aux_route = rib_ipv4_static_route2['Route']
+    verify_show_rib(sw1, aux_route, 'static', rib_ipv4_static_route2)
+    aux_route = route_ipv4_bgp_route2["Route"]
+    verify_show_ip_route(sw1, aux_route, 'bgp', route_ipv4_bgp_route2)
+    aux_route = rib_ipv4_bgp_route2['Route']
+    verify_show_rib(sw1, aux_route, 'bgp', rib_ipv4_bgp_route2)
+
+
 # This test deletes IPv4 static/BGP routes and checks if the
 # routes and next-hops show correctly selected in the output of
+# "show ip route/show rib".
 def delete_static_bgp_routes(sw1, sw2, step):
 
     step("Testing the BGP and static route deletion on sw1")
@@ -662,4 +942,6 @@ def test_zebra_ct_ipv4_static_bgp_nexthop_selection(topology, step):
     add_static_bgp_routes(sw1, sw2, step)
     shutdown_static_bgp_routes_next_hop_interfaces(sw1, sw2, step)
     no_shutdown_static_bgp_routes_next_hop_interfaces(sw1, sw2, step)
+    add_nexthop_to_make_bgp_route_ecmp(sw1, sw2, step)
+    remove_nexthop_to_make_bgp_route_single(sw1, sw2, step)
     delete_static_bgp_routes(sw1, sw2, step)

@@ -109,10 +109,6 @@ rib_add_ipv6_multipath (struct prefix_ipv6 *p, struct rib *rib, safi_t safi);
 
 #define HASH_BUCKET_SIZE 32768
 
-#define OVSDB_ROUTE_MIN     0
-#define OVSDB_ROUTE_ADD     1
-#define OVSDB_ROUTE_DELETE  2
-
 #ifdef VRF_ENABLE
 char *zebra_vrf = NULL;
 
@@ -4485,29 +4481,6 @@ zebra_handle_static_route_change (const struct ovsrec_route *route)
 }
 
 /*
- * This function is called when a route is added/modified.
- * Determine the final action to take based on the current state
- * of the route
- */
-static int
-zebra_route_action_calculate (const struct ovsrec_route *route)
-{
-  /*
-   * Logic:
-   * If public route inserted, add the route
-   * If public row is modified, add the route
-   * If private route is inserted, ignore
-   * If private row is modified, ignore
-   */
-  if (OVSREC_IDL_IS_ROW_MODIFIED(route, idl_seqno)
-      || OVSREC_IDL_IS_ROW_INSERTED(route, idl_seqno))
-    {
-        return OVSDB_ROUTE_ADD;
-    }
-  return OVSDB_ROUTE_MIN;
-}
-
-/*
  * This function handles route update from routing protocols
  */
 static void
@@ -4517,7 +4490,6 @@ zebra_handle_proto_route_change (const struct ovsrec_route *route,
   int safi = ovsdb_safi_to_zebra_safi(route->sub_address_family);
   int ret;
   struct prefix p;
-  bool is_ipv6 = false;
 
   VLOG_DBG("Route change for %s", route->prefix);
   ret = str2prefix (route->prefix, &p);
@@ -4526,6 +4498,7 @@ zebra_handle_proto_route_change (const struct ovsrec_route *route,
       VLOG_ERR("Malformed Dest address=%s", route->prefix);
       return;
     }
+
   apply_mask(&p);
 
   /*
@@ -4533,41 +4506,16 @@ zebra_handle_proto_route_change (const struct ovsrec_route *route,
    */
   if (!strcmp(route->address_family, OVSREC_ROUTE_ADDRESS_FAMILY_IPV4))
     {
-      /* This is a IPv4 route update */
-      switch (zebra_route_action_calculate(route))
-        {
-	case OVSDB_ROUTE_ADD:
-	  VLOG_DBG("Got ipv4 add route");
-	  zebra_add_route(is_ipv6, &p, from, safi, route);
-	  break;
-	case OVSDB_ROUTE_DELETE:
-	  /* Delete is handled in process_delete */
-	  break;
-	default:
-	  break;
-	}
-
-#ifdef HAVE_IPV6
+      VLOG_DBG("Got ipv4 add route");
+      zebra_add_route(false, &p, from, safi, route);
     }
+#ifdef HAVE_IPV6
   else if (!strcmp(route->address_family, OVSREC_ROUTE_ADDRESS_FAMILY_IPV6))
     {
-      is_ipv6 = true;
-      /* This is a IPv6 route update */
-      switch (zebra_route_action_calculate(route))
-        {
-	case OVSDB_ROUTE_ADD:
-	  /* Handle v6 single or multiple nexthop routes. */
-	  VLOG_DBG("Got ipv6 add route");
-	  zebra_add_route(is_ipv6, &p, from, safi, route);
-	  break;
-	case OVSDB_ROUTE_DELETE:
-	  /* Delete is handled in process_delete */
-	  break;
-	default:
-	  break;
-	}
-#endif
+     VLOG_DBG("Got ipv6 add route");
+      zebra_add_route(true, &p, from, safi, route);
     }
+#endif
 }
 
 /*
@@ -6619,55 +6567,63 @@ zebra_add_route (bool is_ipv6, struct prefix *p, int type, safi_t safi,
 
   rib->ovsdb_route_row_uuid_ptr = (void*) route_uuid;
 
-  VLOG_DBG("Going through %d next-hops", route->n_nexthops);
+  VLOG_DBG("Processing prefix %s for %d next-hops",
+           route->prefix, route->n_nexthops);
+
   for (count = 0; count < route->n_nexthops; count++)
     {
       idl_nexthop = route->nexthops[count];
 
-      /* If valid and selected nexthop */
-      if ( (idl_nexthop == NULL) ||
-           ( (idl_nexthop->selected != NULL) &&
-             (idl_nexthop->selected[0] != true) ) )
-        continue;
+      /* If invalid next-hop then do not process that */
+      if ((idl_nexthop == NULL))
+        {
+          VLOG_DBG("Found next-hop number %d is NULL");
+          continue;
+        }
 
       /* If next hop is port */
       if(idl_nexthop->ports != NULL)
         {
           VLOG_DBG("Processing %d-next-hop %s", count,
-                     idl_nexthop->ports[0]->name);
+                   idl_nexthop->ports[0]->name);
+
           log_event("ZEBRA_ROUTE_ADD_NEXTHOP_EVENTS", EV_KV("prefix", "%s",
                    route->prefix),EV_KV("nexthop", "%s",
                    idl_nexthop->ports[0]->name));
+
           nexthop_ifname_add(rib, idl_nexthop->ports[0]->name);
         }
       else
         {
           memset(&ipv4_dest_addr, 0, sizeof(struct in_addr));
           memset(&ipv6_dest_addr, 0, sizeof(struct in6_addr));
-          /* Check if ipv4 or ipv6 */
+
+          /*
+           * Check if next-hop is ipv4 or ipv6
+           */
           if (inet_pton(AF_INET, idl_nexthop->ip_address,
                         &ipv4_dest_addr) != 1)
-	    {
-               if (inet_pton(AF_INET6, idl_nexthop->ip_address,
-                             &ipv6_dest_addr) != 1)
-	         {
-                   VLOG_DBG("Invalid next-hop ip %s",idl_nexthop->ip_address);
-                   continue;
-                 }
-	       else
-	         {
-                   VLOG_DBG("Processing %d-next-hop ipv6 %s",
-                             count, idl_nexthop->ip_address);
-                   log_event("ZEBRA_ROUTE_ADD_NEXTHOP_EVENTS", EV_KV("prefix", "%s",
-                             route->prefix),EV_KV("nexthop", "%s",
-                             idl_nexthop->ip_address));
-                   nexthop_ipv6_add(rib, &ipv6_dest_addr);
-                 }
+            {
+              if (inet_pton(AF_INET6, idl_nexthop->ip_address,
+                            &ipv6_dest_addr) != 1)
+                {
+                  VLOG_DBG("Invalid next-hop ip %s",idl_nexthop->ip_address);
+                  continue;
+                }
+              else
+                {
+                  VLOG_DBG("Processing %d-next-hop ipv6 %s",
+                           count, idl_nexthop->ip_address);
+                  log_event("ZEBRA_ROUTE_ADD_NEXTHOP_EVENTS", EV_KV("prefix", "%s",
+                            route->prefix),EV_KV("nexthop", "%s",
+                            idl_nexthop->ip_address));
+                  nexthop_ipv6_add(rib, &ipv6_dest_addr);
+                }
             }
-	  else
-	    {
+          else
+            {
               VLOG_DBG("Processing ipv4 %d-next-hop ipv4 %s",
-                        count, idl_nexthop->ip_address);
+                       count, idl_nexthop->ip_address);
               log_event("ZEBRA_ROUTE_ADD_NEXTHOP_EVENTS", EV_KV("prefix", "%s",
                         route->prefix),EV_KV("nexthop", "%s",
                         idl_nexthop->ip_address));

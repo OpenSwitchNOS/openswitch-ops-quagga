@@ -21,6 +21,7 @@
 from time import sleep
 from re import match
 from operator import itemgetter
+from pprint import pprint
 
 
 IPV4_STATIC_ROUTE = "ipv4_static_route"
@@ -522,6 +523,212 @@ def route_and_nexthop_in_show_running_config(**kwargs):
                                            nexthop=nexthop,
                                            distance=distance)
 
+
+def get_route_from_show_kernel_route(**kwargs):
+    """
+    Library function to get the show dump for a route in the linux
+    command "ip -6 route/ip -6 route" in swns namespace.
+
+    :param switch : Device object
+    :type  switch : topology.platforms.base.BaseNode
+    :param if_ipv4   : If the route passed is IPv4 or IPv6 route. If
+                       the route passed in IPv4, then if_ipv4 should
+                       be 'True' otherwise it should be 'False'
+    :type  if_ipv4   : boolean
+    :param route     : Route which is of the format "Prefix/Masklen"
+    :type  route     : string
+    :param route_type : Route type which can be "static/BGP"
+    :type  route_type : string
+    :return: returnStruct Object
+            buffer
+            data keys
+                Route - string set to route which is of the format
+                        "Prefix/Masklen"
+                NumberNexthops - string set to the number of next-hops
+                                 of the route
+                Next-hop - string set to the next-hop port or IP/IPv6
+                           address as the key and a dictionary as value
+                data keys
+                    Distance - String whose numeric value is the administration
+                               distance of the next-hop
+                    Metric - String whose numeric value is the metric of the
+                             next-hop
+                    RouteType - String which is the route type of the next-hop
+                                which is among "static/BGP"
+    :returnType: dictionary
+    """
+    sw = kwargs.get('switch', None)
+    if_ipv4 = kwargs.get('if_ipv4', True)
+    route = kwargs.get('route', None)
+    route_type = kwargs.get('route_type', None)
+
+    # checks if device is passed, if not, assertion will fail
+    assert sw is not None, "Switch object not passed"
+
+    # checks if route is passed, if not, assertion will fail
+    assert route is not None, "Route not passed"
+
+    # checks if route_type is passed, if not, assertion will fail
+    assert route_type is not None, "Route type not passed"
+
+    # if 'if_ipv4' is 'True', then the command to be executed is
+    # "ip route list <route>" otherwise the command is
+    # "ip -6 route list <route>"
+    if if_ipv4 is True:
+        kernel_route_command = "ip netns exec swns ip route list " + route
+    else:
+        kernel_route_command = "ip netns exec swns ip -6 route list " + route
+
+    # Execute the "command" on the Linux bash interface
+    kernel_route_buffer = sw(kernel_route_command, shell="bash")
+
+    # Initialize the return route dictionary
+    RouteDict = dict()
+
+    # Add the prefix and the mask length of the route in the return
+    # dictionary
+    RouteDict['Route'] = route
+
+    # Split the route into prefix and mask length
+    [prefix, masklen] = route.split('/')
+
+    # If the route is 10.0.0.0/32 or 123::1/128, then it appears in
+    # kernel "ip route/ip -6 route" as:-
+    # 10.0.0.0/32 -> 10.0.0.0
+    # 123::1/128 -> 123::1
+    #
+    # If the route is 10.0.0.0/34 or 123:1::/64, then it appears in
+    # kernel "ip route/ip -6 route" as:-
+    # 10.0.0.0/24 -> 10.0.0.0/24
+    # 123:1::/64 -> 123:1::/64
+    #
+    #That's why the logic below is put to handle this case.
+    route_string = ""
+    if if_ipv4 == True:
+        if int(masklen) >= 32:
+            route_string = prefix
+        else:
+            route_string = route
+    else:
+        if int(masklen) >= 128:
+            route_string = prefix
+        else:
+            route_string = route
+
+    lines = kernel_route_buffer.split('\n')
+
+    nexthop_number = 0
+    if_route_found = False
+
+    # populate the return route distionary
+    for line in lines:
+
+        commandLine = match("ip netns exec swns ip", line)
+
+        if commandLine:
+            continue
+
+        routeline = match("(%s)(.*)(proto %s)" %(route_string, route_type), line)
+
+        nexthop_string = ""
+
+        if routeline:
+
+            if_route_found = True
+
+            nexthopipline = match("(.*)via (.*)( )dev(.*)", line)
+
+            if nexthopipline:
+                nexthop_string = nexthopipline.group(2)
+            else :
+                nexthopifline = match("(.*)dev (\d+) (.*)", line)
+
+                if nexthopifline:
+                    nexthop_string = nexthopifline.group(2)
+
+        nexthopipline = match("(.*)nexthop via (.*)( )dev(.*)", line)
+
+        if nexthopipline:
+            nexthop_string = nexthopipline.group(2)
+
+        nexthopifline = match("(.*)nexthop dev (\d+) (.*)", line)
+
+        if nexthopifline:
+            nexthop_string = nexthopifline.group(2)
+
+        if len(nexthop_string) > 0 and if_route_found == True:
+
+            RouteDict[nexthop_string.rstrip(' ')] = dict()
+            RouteDict[nexthop_string.rstrip(' ')]['Distance'] = ""
+            RouteDict[nexthop_string.rstrip(' ')]['Metric'] = ""
+            RouteDict[nexthop_string.rstrip(' ')]['RouteType'] = route_type
+
+            nexthop_number = nexthop_number + 1
+
+    if nexthop_number > 0:
+        RouteDict['NumberNexthops'] = str(nexthop_number)
+
+    # Return the kernel route dictionary
+    return RouteDict
+
+
+def verify_route_in_show_kernel_route(sw, if_ipv4, expected_route_dict,
+                                      route_type):
+    """
+    Library function tests whether a route ("prefix/mask-length") in the
+    linux command "ip route/ip -6 route" exactly matches an expected route
+    dictionary that is passed to this function. In case the route dictionary
+    returned by 'get_route_from_show_kernel_route()' is not same as the
+    expected route dictionary, then this function will fail the test case by
+    calling assert().
+
+    :param sw : Device object
+    :type  sw : topology.platforms.base.BaseNode
+    :param if_ipv4   : If the route passed is IPv4 or IPv6 route. If
+                       the route passed in IPv4, then if_ipv4 should
+                       be 'True' otherwise it should be 'False'
+    :type  if_ipv4   : boolean
+    :param expected_route_dict: Expected route dictionary
+    :type  expected_route_dict: dictionary
+    :param route_type : Route type which is zebra
+    :type  route_type : string
+    """
+
+    print("\nCheck kernel route table for "
+          + expected_route_dict['Route'])
+
+    # Get the actual route dictionary for the route
+    actual_route_dict = get_route_from_show_kernel_route(
+                                           switch=sw,
+                                           if_ipv4=if_ipv4,
+                                           route=expected_route_dict['Route'],
+                                           route_type=route_type)
+
+    # If there was error getting the actual route dictionary, then assert and
+    # fail the test case
+    if actual_route_dict is None:
+       assert False,  "Failed to get the dictionary for route " + \
+                      expected_route_dict['Route'] + " and route type " \
+                      + route_type
+
+    # Sort the actual route dictionary
+    actual_route_dict = sorted(actual_route_dict.items(), key=itemgetter(0))
+
+    # Sort the expected route dictionary
+    expected_route_dict = sorted(expected_route_dict.items(), key=itemgetter(0))
+
+    # Print the actual and expected route dictionaries for debugging purposes
+    print("\nThe expected kernel route dictionary is:")
+    pprint(expected_route_dict, width=1)
+
+    print("\nThe actual kernel route dictionary is:")
+    pprint(actual_route_dict, width=1)
+
+    # Comparing dictionaries, if not equals, assertion will fail
+    assert actual_route_dict == expected_route_dict
+
+
 __all__ = ["wait_for_route", "verify_show_ip_route",
            "verify_show_ipv6_route", "verify_show_rib",
-           "route_and_nexthop_in_show_running_config"]
+           "route_and_nexthop_in_show_running_config",
+           "verify_route_in_show_kernel_route"]

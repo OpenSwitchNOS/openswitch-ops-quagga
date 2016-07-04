@@ -306,11 +306,11 @@ main (int argc, char **argv)
   cmd_init (1);
   debug_init ();
   vty_init (master);
-#endif
   memory_init ();
 
   access_list_init ();
   prefix_list_init ();
+#endif
 
   /* OSPFd inits. */
   ospf_if_init ();
@@ -320,9 +320,10 @@ main (int argc, char **argv)
   /* OSPF vty inits. */
   ospf_vty_init ();
   ospf_vty_show_init ();
-#endif
 
   ospf_route_map_init ();
+#endif
+
 #ifdef HAVE_SNMP
   ospf_snmp_init ();
 #endif /* HAVE_SNMP */

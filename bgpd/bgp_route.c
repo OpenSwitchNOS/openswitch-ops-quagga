@@ -997,14 +997,18 @@ bgp_announce_check (struct bgp_info *ri, struct peer *peer, struct prefix *p,
     {
       /* NEXT-HOP Unchanged. */
     }
-  else if (CHECK_FLAG (peer->af_flags[afi][safi], PEER_FLAG_NEXTHOP_SELF)
-	   || (p->family == AF_INET && attr->nexthop.s_addr == 0)
+    else if (CHECK_FLAG (peer->af_flags[afi][safi], PEER_FLAG_NEXTHOP_SELF)
+            || (p->family == AF_INET && (attr->nexthop.s_addr == 0
+            || (peer->sort == BGP_PEER_EBGP &&
+                 bgp_multiaccess_check_v4 (attr->nexthop, peer->host) == 0)))
 #ifdef HAVE_IPV6
-	   || (p->family == AF_INET6 &&
-               IN6_IS_ADDR_UNSPECIFIED(&attr->extra->mp_nexthop_global))
+            || (p->family == AF_INET6 &&
+               (IN6_IS_ADDR_UNSPECIFIED(&attr->extra->mp_nexthop_global)
+            || (peer->sort == BGP_PEER_EBGP &&
+                bgp_multiaccess_check_ipv6(attr->extra->mp_nexthop_global,
+                peer->host) == 0)))
 #endif /* HAVE_IPV6 */
-	   || (peer->sort == BGP_PEER_EBGP
-	       && bgp_multiaccess_check_v4 (attr->nexthop, peer->host) == 0))
+            )
     {
       /* Set IPv4 nexthop. */
       if (p->family == AF_INET)
@@ -2216,6 +2220,17 @@ bgp_update_main (struct peer *peer, struct prefix *p, struct attr *attr,
 	  goto filtered;
 	}
     }
+#ifdef HAVE_IPV6
+  else if(afi == AFI_IP6 && safi == SAFI_UNICAST)
+    {
+        /* Next hop must not be self */
+        if(if_lookup_by_ipv6_exact (&new_attr.extra->mp_nexthop_global)) {
+            reason = "Next hop ipv6 is self";
+            bgp_attr_flush (&new_attr);
+            goto filtered;
+        }
+    }
+#endif
 
   attr_new = bgp_attr_intern (&new_attr);
 
@@ -2425,7 +2440,7 @@ bgp_update_main (struct peer *peer, struct prefix *p, struct attr *attr,
     bgp_rib_remove (rn, ri, peer, afi, safi);
 
   bgp_unlock_node (rn);
-
+  VLOG_DBG("%s exited due to ERR %s",__func__, reason);
   return 0;
 }
 

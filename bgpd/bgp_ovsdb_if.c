@@ -1283,6 +1283,37 @@ delete_bgp_router_config (struct ovsdb_idl *idl)
         }
     }
 }
+static void
+delete_redistribute_rmap(struct ovsdb_idl *idl,
+                           const struct ovsrec_bgp_router *bgp_mod_row,
+                           struct bgp *bgp, int afi, int type)
+{
+    bool match_found = false;
+    int i, ret = 0;
+    if (bgp->redist[afi][type] && type != ZEBRA_ROUTE_BGP) {
+        OVSREC_BGP_ROUTER_FOR_EACH(bgp_mod_row, idl) {
+            for (i=0; i< bgp_mod_row->n_redistribute_route_map; i++) {
+                if (strcmp(bgp_mod_row->key_redistribute_route_map[i],
+                           zebra_route_string(type)) ==0 &&
+                    strcmp(bgp_mod_row->value_redistribute_route_map[i]->name,
+                           bgp->rmap[afi][type].name) == 0) {
+                    match_found = true;
+                    break;
+                }
+            }
+            if (match_found == true) {
+                break;
+            }
+        }
+        if ( match_found == false && bgp->rmap[afi][type].name) {
+            ret = bgp_redistribute_unset (bgp, afi, type);
+            if (!ret) {
+                VLOG_DBG("Deleted redistribute %s",
+                          zebra_route_string(type));
+            }
+        }
+    }
+}
 
 void
 delete_redistribute_rmap_config(struct ovsdb_idl *idl,
@@ -1290,36 +1321,44 @@ delete_redistribute_rmap_config(struct ovsdb_idl *idl,
                            struct bgp *bgp)
 {
     const struct ovsrec_bgp_router *ovs_first;
-    int i,j,type;
+    int j,type, afi_type;
     int ret = 0;
-    bool match_found = false;
     for (j = 0; j < ZEBRA_ROUTE_MAX; j++) {
-        match_found = false;
-        if (bgp->redist[AFI_IP][j] && j != ZEBRA_ROUTE_BGP) {
-            OVSREC_BGP_ROUTER_FOR_EACH(bgp_mod_row, idl) {
-                for (i=0; i< bgp_mod_row->n_redistribute_route_map; i++) {
-                    if (strcmp(bgp_mod_row->key_redistribute_route_map[i],
-                               zebra_route_string(j)) ==0 &&
-                        strcmp(bgp_mod_row->value_redistribute_route_map[i]->name,
-                               bgp->rmap[AFI_IP][j].name) == 0) {
-                        match_found = true;
-                        break;
-                    }
-                }
-                if (match_found == true) {
+        for (afi_type = AFI_IP; afi_type < AFI_MAX; afi_type++) {
+            delete_redistribute_rmap(idl, bgp_mod_row, bgp, afi_type, j);
+        }
+    }
+}
+
+static void
+delete_redistribute(struct ovsdb_idl *idl,
+                           const struct ovsrec_bgp_router *bgp_mod_row,
+                           struct bgp *bgp, int afi, int type)
+{
+    bool match_found = false;
+    int i, ret = 0;
+    if (bgp->redist[afi][type] && type != ZEBRA_ROUTE_BGP) {
+        OVSREC_BGP_ROUTER_FOR_EACH(bgp_mod_row, idl) {
+            for (i=0; i< bgp_mod_row->n_redistribute; i++) {
+                if (strcmp(bgp_mod_row->redistribute[i],
+                           zebra_route_string(type)) == 0 &&
+                    bgp->rmap[afi][type].name == NULL)  {
+                    match_found = true;
                     break;
                 }
             }
-            if ( match_found == false && bgp->rmap[AFI_IP][j].name) {
-                    ret = bgp_redistribute_unset (bgp, AFI_IP, j);
-                    if (!ret) {
-                        VLOG_DBG("Deleted redistribute %s",
-                                  zebra_route_string(j));
-                    }
+            if (match_found == true) {
+                break;
+            }
+        }
+        if ( match_found == false  && bgp->rmap[afi][type].name == NULL) {
+            ret = bgp_redistribute_unset (bgp, afi, type);
+            if (!ret) {
+                VLOG_DBG("Deleted redistribute %s",
+                         zebra_route_string(type));
             }
         }
     }
-    return;
 }
 
 void
@@ -1328,44 +1367,21 @@ delete_redistribute_config(struct ovsdb_idl *idl,
                            struct bgp *bgp)
 {
     const struct ovsrec_bgp_router *ovs_first;
-    int i,j,type;
+    int j, afi_type;
     int ret = 0;
-    bool match_found = false;
     for (j = 0; j < ZEBRA_ROUTE_MAX; j++) {
-        match_found = false;
-        if (bgp->redist[AFI_IP][j] && j != ZEBRA_ROUTE_BGP) {
-            OVSREC_BGP_ROUTER_FOR_EACH(bgp_mod_row, idl) {
-                for (i=0; i< bgp_mod_row->n_redistribute; i++) {
-                    if (strcmp(bgp_mod_row->redistribute[i],
-                               zebra_route_string(j)) == 0 &&
-                        bgp->rmap[AFI_IP][j].name == NULL)  {
-                        match_found = true;
-                        break;
-                    }
-                }
-                if (match_found == true) {
-                    break;
-                }
-            }
-            if ( match_found == false  && bgp->rmap[AFI_IP][j].name == NULL) {
-                    ret = bgp_redistribute_unset (bgp, AFI_IP, j);
-                    if (!ret) {
-                        VLOG_DBG("Deleted redistribute %s",
-                                  zebra_route_string(j));
-                    }
-            }
+        for (afi_type = AFI_IP; afi_type < AFI_MAX; afi_type++) {
+            delete_redistribute(idl, bgp_mod_row, bgp, afi_type, j);
         }
     }
-    return;
 }
-
 
 void
 modify_bgp_redistribute_rmap_config(struct ovsdb_idl *idl,struct bgp *bgp_cfg,
     const struct ovsrec_bgp_router *bgp_mod_row)
 {
     int i=0;
-    int type;
+    int type, afi_type;
     int rmap;
     int ret_status = -1;
 
@@ -1381,14 +1397,15 @@ modify_bgp_redistribute_rmap_config(struct ovsdb_idl *idl,struct bgp *bgp_cfg,
                 VLOG_DBG("Invalid route type");
                 continue;
             }
-
-            rmap=bgp_redistribute_rmap_set (bgp_cfg, AFI_IP, type,
+            for (afi_type = AFI_IP; afi_type < AFI_MAX; afi_type++) {
+                rmap = bgp_redistribute_rmap_set (bgp_cfg, afi_type, type,
                                   bgp_mod_row->value_redistribute_route_map[i]->name);
-            ret_status = bgp_redistribute_set(bgp_cfg, AFI_IP, type);
-            if (!rmap && !ret_status) {
-                VLOG_DBG("redistribute %s route-map %s is set",
+                ret_status = bgp_redistribute_set(bgp_cfg, afi_type, type);
+                if (!rmap && !ret_status) {
+                    VLOG_DBG("Redistribute %s route-map %s is set",
                           bgp_mod_row->key_redistribute_route_map[i],
                           bgp_mod_row->value_redistribute_route_map[i]->name);
+                }
             }
         }
     }
@@ -1399,7 +1416,7 @@ modify_bgp_redistribute_config(struct ovsdb_idl *idl,struct bgp *bgp_cfg,
     const struct ovsrec_bgp_router *bgp_mod_row)
 {
     int i=0;
-    int type;
+    int type, afi_type;
     int ret_status = -1;
 
     /* Handle redistribute deletions. */
@@ -1414,10 +1431,12 @@ modify_bgp_redistribute_config(struct ovsdb_idl *idl,struct bgp *bgp_cfg,
                 VLOG_DBG("Invalid route type");
                 continue;
             }
-            ret_status = bgp_redistribute_set(bgp_cfg, AFI_IP, type);
-            if (!ret_status) {
-                VLOG_DBG("redistribute %s is set",
-                          bgp_mod_row->redistribute[i]);
+            for (afi_type = AFI_IP; afi_type < AFI_MAX; afi_type++) {
+                ret_status = bgp_redistribute_set(bgp_cfg, afi_type, type);
+                if (!ret_status) {
+                   VLOG_DBG("Redistribute %s is set, afi %d",
+                             bgp_mod_row->redistribute[i], afi_type);
+                }
             }
         }
     }
@@ -1553,6 +1572,7 @@ modify_bgp_router_id_config (struct bgp *bgp_cfg,
         bgp_cfg->router_id_static.s_addr = 0;
         return bgp_router_id_unset(bgp_cfg, &addr);
     }
+
 }
 
 void

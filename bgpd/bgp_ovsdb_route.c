@@ -65,6 +65,7 @@
 
 #define MAX_ARGC         10
 #define MAX_ARG_LEN     256
+#define MAX_TXN_COUNT   20
 
 extern unsigned int idl_seqno;
 extern const char *bgp_origin_str[];
@@ -117,10 +118,17 @@ struct bgp_ovsdb_txn {
     time_t update_time;
 };
 
+struct bgp_ovsdb_txn_txn {
+    struct hmap_node hmap_node;
+    struct ovsdb_idl_txn *txn;
+};
+
 void bgp_txn_init(void);
 void bgp_txn_destroy(void);
 void bgp_txn_insert(struct hmap_node *txn_node);
 void bgp_txn_remove(struct hmap_node *txn_node);
+void bgp_txn_insert_txn(struct hmap_node *txn_node);
+void bgp_txn_remove_txn(struct hmap_node *txn_node);
 int route_map_action_str_to_enum(const char *action_str, int *action);
 int
 policy_rt_map_apply_changes (struct route_map *map,
@@ -130,6 +138,13 @@ policy_rt_map_apply_changes (struct route_map *map,
 
 static bool bgp_review(struct bgp_ovsdb_txn *txn, enum txn_op_type op, bgp_table_type_t table_type);
 static uint32_t get_lookup_key(char *prefix, char *table_name);
+void bgp_txn_complete_txn(
+        struct ovsdb_idl_txn *complete_txn,
+        enum ovsdb_idl_txn_status status);
+
+// global
+static struct ovsdb_idl_txn *current_txn = NULL;
+static int current_txn_count = 0;
 
 static int
 txn_command_result(enum ovsdb_idl_txn_status status, char *msg, char *pr)
@@ -153,12 +168,6 @@ txn_command_result(enum ovsdb_idl_txn_status status, char *msg, char *pr)
         char p_str[PREFIX_MAXLEN];                                      \
         struct bgp_ovsdb_txn *txn_rec = NULL;                           \
         txn_rec = xzalloc(sizeof (*txn_rec));                           \
-        if (txn_rec == NULL) {                                          \
-            VLOG_ERR("%s: %s\n",                                        \
-                     __FUNCTION__, "Failed to insert txn to hash");     \
-            ovsdb_idl_txn_destroy(txn);                                 \
-            return -1;                                                  \
-        }                                                               \
         txn_rec->request = req;                                         \
         txn_rec->txn = txn;                                             \
         memcpy (&txn_rec->prefix, p, sizeof (*p));                      \
@@ -177,30 +186,47 @@ txn_command_result(enum ovsdb_idl_txn_status status, char *msg, char *pr)
 #define START_DB_TXN(txn, msg, req, p, info, asn, safi)                 \
     do {                                                                \
         enum ovsdb_idl_txn_status status;                               \
-        txn = ovsdb_idl_txn_create(idl);                                \
-        if (txn == NULL) {                                              \
-            VLOG_ERR("%s: %s\n",                                        \
-                     __FUNCTION__, msg);                                \
-            return -1;                                                  \
+        if (current_txn == NULL) {                                      \
+            current_txn = ovsdb_idl_txn_create(idl);                    \
+            VLOG_DBG("%s: created txn %p", __FUNCTION__, current_txn);  \
+            current_txn_count = 0;                                      \
         }                                                               \
+        txn = current_txn;                                              \
         HASH_DB_TXN(txn, req, p, info, asn, safi);                      \
     } while (0)
 
-#define END_DB_TXN(txn, msg, pr)                          \
-    do {                                                  \
-        enum ovsdb_idl_txn_status status;                 \
-        status = ovsdb_idl_txn_commit(txn);               \
-        return txn_command_result(status, msg, pr);       \
+#define END_DB_TXN(txn, msg, pr)                              \
+    do {                                                      \
+        enum ovsdb_idl_txn_status status = TXN_INCOMPLETE;    \
+        ++current_txn_count;                                  \
+        if (current_txn_count >= MAX_TXN_COUNT) {             \
+            struct bgp_ovsdb_txn_txn *txn_txn = NULL;         \
+            VLOG_DBG("%s: commit txn %p", __FUNCTION__, txn); \
+            status = ovsdb_idl_txn_commit(txn);               \
+            txn_txn = xzalloc(sizeof (*txn_txn));             \
+            txn_txn->txn = txn;                               \
+            bgp_txn_insert_txn(&txn_txn->hmap_node);          \
+            current_txn_count = 0;                            \
+            current_txn = NULL;                               \
+        }                                                     \
+        return txn_command_result(status, msg, pr);           \
     } while (0)
 
-
-/* used when NO error is detected but still need to terminate */
-#define ABORT_DB_TXN(txn, msg)                                      \
-    do {                                                            \
-        ovsdb_idl_txn_destroy(txn);                                 \
-        VLOG_ERR("%s: Aborting txn: %s\n", __FUNCTION__, msg);      \
-        return CMD_SUCCESS;                                         \
-    } while (0)
+#define FINISH_DB_TXN()                                               \
+    do {                                                              \
+        enum ovsdb_idl_txn_status status = TXN_INCOMPLETE;            \
+        if (current_txn_count != 0) {                                 \
+            struct bgp_ovsdb_txn_txn *txn_txn = NULL;                 \
+            VLOG_DBG("%s: commit txn %p", __FUNCTION__, current_txn); \
+            status = ovsdb_idl_txn_commit(current_txn);               \
+            txn_txn = xzalloc(sizeof (*txn_txn));                     \
+            txn_txn->txn = current_txn;                               \
+            bgp_txn_insert_txn(&txn_txn->hmap_node);                  \
+            current_txn_count = 0;                                    \
+            current_txn = NULL;                                       \
+        }                                                             \
+    }                                                     \
+    while (0)
 
 static const char *
 get_str_from_afi(u_char family)
@@ -917,7 +943,7 @@ bgp_ovsdb_announce_rib_entry(struct prefix *p,
         VLOG_DBG("Inserting route %s\n", pr);
         rib = ovsrec_route_insert(txn);
         ovsrec_route_set_prefix(rib, pr);
-        VLOG_INFO("%s: setting prefix %s\n", __FUNCTION__, pr);
+        VLOG_DBG("%s: setting prefix %s\n", __FUNCTION__, pr);
         ovsrec_route_set_address_family(rib, afi);
         ovsrec_route_set_sub_address_family(rib, safi_str);
         ovsrec_route_set_from(rib, "bgp");
@@ -1036,7 +1062,7 @@ bgp_ovsdb_add_local_rib_entry(struct prefix *p,
     rib = ovsrec_bgp_route_insert(txn);
 
     ovsrec_bgp_route_set_prefix(rib, pr);
-    VLOG_INFO("%s: setting prefix %s\n", __FUNCTION__, pr);
+    VLOG_DBG("%s: setting prefix %s\n", __FUNCTION__, pr);
     ovsrec_bgp_route_set_address_family(rib, afi);
     ovsrec_bgp_route_set_sub_address_family(rib, safi_str);
 
@@ -1147,14 +1173,19 @@ bgp_ovsdb_update_local_rib_entry_attributes(struct prefix *p,
 static struct hmap bgp_ovsdb_txn_hmap =
               HMAP_INITIALIZER(&bgp_ovsdb_txn_hmap);
 
+static struct hmap bgp_ovsdb_txn_hmap_txn =
+              HMAP_INITIALIZER(&bgp_ovsdb_txn_hmap_txn);
+
 void
 bgp_txn_init(void) {
     hmap_init(&bgp_ovsdb_txn_hmap);
+    hmap_init(&bgp_ovsdb_txn_hmap_txn);
 }
 
 void
 bgp_txn_destroy(void) {
     hmap_destroy(&bgp_ovsdb_txn_hmap);
+    hmap_destroy(&bgp_ovsdb_txn_hmap_txn);
 }
 
 void
@@ -1163,8 +1194,18 @@ bgp_txn_insert(struct hmap_node *txn_node) {
 }
 
 void
+bgp_txn_insert_txn(struct hmap_node *txn_node) {
+    hmap_insert(&bgp_ovsdb_txn_hmap_txn, txn_node, hash_pointer(txn_node, 0));
+}
+
+void
 bgp_txn_remove(struct hmap_node *txn_node) {
     hmap_remove(&bgp_ovsdb_txn_hmap, txn_node);
+}
+
+void
+bgp_txn_remove_txn(struct hmap_node *txn_node) {
+    hmap_remove(&bgp_ovsdb_txn_hmap_txn, txn_node);
 }
 
 /*
@@ -1241,8 +1282,15 @@ bgp_info_found(struct bgp *bgp, struct bgp_ovsdb_txn *txn)
 static void
 bgp_txn_free(struct bgp_ovsdb_txn *txn)
 {
-    ovsdb_idl_txn_destroy(txn->txn);
     bgp_txn_remove (&txn->hmap_node);
+    free(txn);
+}
+
+static void
+bgp_txn_free_txn(struct bgp_ovsdb_txn_txn *txn)
+{
+    bgp_txn_remove_txn (&txn->hmap_node);
+    ovsdb_idl_txn_destroy(txn->txn);
     free(txn);
 }
 
@@ -1257,6 +1305,34 @@ bgp_txn_log(struct bgp_ovsdb_txn *txn, int status)
     prefix2str(&txn->prefix, prefix_str, sizeof(prefix_str));
     VLOG_DBG("Active Transaction for route %s at time %lld status=%d",
               prefix_str, txn->update_time, status);
+}
+
+void
+bgp_txn_finish(void)
+{
+    FINISH_DB_TXN();
+}
+
+void
+bgp_txn_complete_processing(void)
+{
+    struct bgp_ovsdb_txn_txn *txn;
+    struct bgp_ovsdb_txn_txn *next;
+    enum   ovsdb_idl_txn_status status;
+
+    bgp_txn_finish();
+
+    HMAP_FOR_EACH_SAFE (txn, next, hmap_node, &bgp_ovsdb_txn_hmap_txn) {
+
+        VLOG_DBG("%s: commit txn complete processing %p", __FUNCTION__, txn->txn);
+        status = ovsdb_idl_txn_commit(txn->txn);
+
+        if (status != TXN_INCOMPLETE) {
+            bgp_txn_complete_txn(txn->txn, status);
+            bgp_txn_finish();
+            bgp_txn_free_txn(txn);
+        }
+    }
 }
 
 /*
@@ -1293,13 +1369,14 @@ bgp_txn_log(struct bgp_ovsdb_txn *txn, int status)
  *
  */
 
-static int skip_txn=0;
 void
-bgp_txn_complete_processing(void)
+bgp_txn_complete_txn(
+        struct ovsdb_idl_txn *complete_txn,
+        enum ovsdb_idl_txn_status status)
 {
     struct bgp_ovsdb_txn *txn;
+    struct bgp_ovsdb_txn *next;
     struct bgp *bgp;
-    enum   ovsdb_idl_txn_status status;
     char prefix_str[PREFIX_MAXLEN];
     struct lookup_hmap_element *hmap_entry = NULL;
     uint32_t lookup_hash;
@@ -1307,9 +1384,12 @@ bgp_txn_complete_processing(void)
     int needs_review;
     enum txn_op_type op_type;
 
-    HMAP_FOR_EACH (txn, hmap_node, &bgp_ovsdb_txn_hmap) {
+    HMAP_FOR_EACH_SAFE (txn, next, hmap_node, &bgp_ovsdb_txn_hmap) {
         /* Get commit status for transaction */
-        status = ovsdb_idl_txn_commit(txn->txn);
+        if (txn->txn != complete_txn) {
+            continue;
+        }
+
         prefix2str(&txn->prefix, prefix_str, sizeof(prefix_str));
 
         /* log transaction */
@@ -1371,13 +1451,6 @@ bgp_txn_complete_processing(void)
                 }
             }
             bgp_txn_free(txn);
-            continue;
-        }
-
-        /* If incomplete allow more time to complete */
-        if (status == TXN_INCOMPLETE){
-            VLOG_DBG("Route transaction incomplete as=%d prefix=%s time=%lld",
-                     txn->as_no, prefix_str, txn->update_time);
             continue;
         }
 
@@ -1448,8 +1521,6 @@ bgp_txn_complete_processing(void)
         }
     }
 }
-
-
 
 struct lookup_entry {
    int index;
@@ -1548,7 +1619,7 @@ policy_rt_map_read_ovsdb_apply_deletion (struct ovsdb_idl *idl)
     /* route map */
     ovs_first = ovsrec_route_map_first(idl);
     if (ovs_first && !OVSREC_IDL_ANY_TABLE_ROWS_DELETED(ovs_first, idl_seqno)) {
-        VLOG_DBG("No route map rows were deleted");
+        VLOG_DBG("%s: no route-map rows were deleted", __FUNCTION__);
         return;
     }
 
@@ -1581,7 +1652,7 @@ policy_rt_map_entry_read_ovsdb_apply_deletion (struct ovsdb_idl *idl)
     /* route map entry */
     ovs_first = ovsrec_route_map_entry_first(idl);
     if (ovs_first && !OVSREC_IDL_ANY_TABLE_ROWS_DELETED(ovs_first, idl_seqno)) {
-        VLOG_DBG("No route map entry deletions detected.");
+        VLOG_DBG("%s: No route map entry deletions detected", __FUNCTION__);
         return;
     }
 

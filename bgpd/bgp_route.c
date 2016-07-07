@@ -63,6 +63,11 @@ extern const char *bgp_origin_str[];
 extern const char *bgp_origin_long_str[];
 VLOG_DEFINE_THIS_MODULE(bgp_route);
 
+extern void bgp_txn_finish(void);
+extern int peer_route_count;
+extern int local_route_count;
+static bool peer_route_count_set = false;
+static bool local_route_count_set = false;
 static struct bgp_node *
 bgp_afi_node_get (struct bgp_table *table, afi_t afi, safi_t safi, struct prefix *p,
 		  struct prefix_rd *prd)
@@ -189,7 +194,7 @@ void
 bgp_info_add (struct bgp_node *rn, struct bgp_info *ri, safi_t safi)
 {
   struct bgp_info *top;
-
+  bool static_route_sent = false;
   top = rn->info;
 
   ri->next = rn->info;
@@ -202,7 +207,28 @@ bgp_info_add (struct bgp_node *rn, struct bgp_info *ri, safi_t safi)
   bgp_lock_node (rn);
   peer_lock (ri->peer); /* bgp_info peer reference */
 #ifdef ENABLE_OVSDB
-  bgp_ovsdb_add_local_rib_entry(&rn->p, ri, ri->peer->bgp, safi);
+    if (ri) {
+        if (ri->peer) {
+            if (ri->peer->host) {
+                if (!strcmp(ri->peer->host, "Static announcement")) {
+                    ++local_route_count;
+                    bgp_ovsdb_add_local_rib_entry(&rn->p, ri, ri->peer->bgp, safi);
+                    if (local_route_count == 1) {
+                        local_route_count_set = true;
+                    }
+                    static_route_sent = true;
+                }
+            }
+        }
+    }
+    if (static_route_sent == false) {
+        ++peer_route_count;
+        if (peer_route_count == 1) {
+            bgp_ovsdb_add_local_rib_entry(&rn->p, ri, ri->peer->bgp, safi);
+            bgp_txn_finish();
+            peer_route_count_set = true;
+        }
+    }
 #endif
 }
 
@@ -1563,6 +1589,8 @@ bgp_process_rsclient (struct work_queue *wq, void *data)
   if (old_select && CHECK_FLAG (old_select->flags, BGP_INFO_REMOVED))
       bgp_info_reap (rn, old_select, safi);
 
+  bgp_txn_finish();
+
   UNSET_FLAG (rn->flags, BGP_NODE_PROCESS_SCHEDULED);
   return WQ_SUCCESS;
 }
@@ -1581,6 +1609,7 @@ bgp_process_main (struct work_queue *wq, void *data)
   struct bgp_info_pair old_and_new;
   struct listnode *node, *nnode;
   struct peer *peer;
+  bool local_update_sent = false;
 
   /* Best path selection. */
   bgp_best_selection (bgp, rn, &bgp->maxpaths[afi][safi], &old_and_new, safi);
@@ -1599,7 +1628,15 @@ bgp_process_main (struct work_queue *wq, void *data)
           UNSET_FLAG (old_select->flags, BGP_INFO_MULTIPATH_CHG);
           UNSET_FLAG (rn->flags, BGP_NODE_PROCESS_SCHEDULED);
 #ifdef ENABLE_OVSDB
-          bgp_ovsdb_update_local_rib_entry_attributes (p, old_select, bgp, safi);
+          if (! CHECK_FLAG (old_select->flags, BGP_INFO_REMOVED)) {
+              if (old_select->peer) {
+                  if (old_select->peer->host) {
+                      if (!strcmp(old_select->peer->host, "Static announcement")) {
+                           bgp_ovsdb_update_local_rib_entry_attributes (p, old_select, bgp, safi);
+                      }
+                  }
+              }
+          }
 #endif
           return WQ_SUCCESS;
         }
@@ -1640,12 +1677,31 @@ bgp_process_main (struct work_queue *wq, void *data)
 	}
     }
 #ifdef ENABLE_OVSDB
-  if (old_select) {
-      bgp_ovsdb_update_local_rib_entry_attributes (p, old_select, bgp, safi);
-  }
-  if (new_select) {
-      bgp_ovsdb_update_local_rib_entry_attributes (p, new_select, bgp, safi);
-  }
+    if (new_select) {
+        if (! CHECK_FLAG (new_select->flags, BGP_INFO_REMOVED)) {
+            if (new_select->peer) {
+                if (new_select->peer->host) {
+                    if (!strcmp(new_select->peer->host, "Static announcement")) {
+                        local_update_sent = true;
+                         bgp_ovsdb_update_local_rib_entry_attributes (p, new_select, bgp, safi);
+                         if (local_route_count_set) {
+                            bgp_txn_finish();
+                            local_route_count_set = false;
+                         }
+                    }
+                }
+            }
+            if (local_update_sent == false) {
+                 if (peer_route_count_set) {
+                      bgp_ovsdb_update_local_rib_entry_attributes (p, new_select, bgp, safi);
+                      peer_route_count_set = false;
+                      bgp_txn_finish();
+                 } else {
+                      bgp_ovsdb_add_local_rib_entry(p, new_select, bgp, safi);
+                 }
+            }
+        }
+    }
 #endif
 
   /* Reap old select bgp_info, it it has been removed */
@@ -2805,6 +2861,9 @@ bgp_clear_route_node (struct work_queue *wq, void *data)
           bgp_rib_remove (rn, ri, peer, afi, safi);
         break;
       }
+
+  bgp_txn_finish();
+
   return WQ_SUCCESS;
 }
 

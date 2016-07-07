@@ -41,9 +41,12 @@ Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 #include "bgpd/bgp_route.h"
 #include "bgpd/bgp_dump.h"
 #include "bgpd/bgp_open.h"
+#include "openvswitch/vlog.h"
 #ifdef HAVE_SNMP
 #include "bgpd/bgp_snmp.h"
 #endif /* HAVE_SNMP */
+
+VLOG_DEFINE_THIS_MODULE(bgp_fsm);
 
 /* BGP FSM (finite state machine) has three types of functions.  Type
    one is thread functions.  Type two is event functions.  Type three
@@ -61,6 +64,7 @@ static int bgp_keepalive_timer (struct thread *);
 
 /* BGP FSM functions. */
 static int bgp_start (struct peer *);
+extern void bgp_reset_route_count(void);
 
 /* BGP start timer jitter. */
 static int
@@ -583,6 +587,8 @@ bgp_stop (struct peer *peer)
   peer->pcount[AFI_IP6][SAFI_MULTICAST] = 0;
 #endif /* 0 */
 
+  bgp_reset_route_count();
+  VLOG_DBG("BGP STOP UNSET PEER ROUTE COUNT\n");
   return 0;
 }
 

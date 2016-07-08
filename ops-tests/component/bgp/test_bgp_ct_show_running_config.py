@@ -18,6 +18,8 @@
 # 02111-1307, USA.
 
 
+from pytest import mark
+
 TOPOLOGY = """
 # +-------+
 # |       |     +-------+
@@ -34,6 +36,7 @@ hsw1:if01 -- sw1:if01
 """
 
 
+@mark.gate
 def test_bgp_ct_show_running_config(topology, step):
     sw1 = topology.get("sw1")
     assert sw1 is not None

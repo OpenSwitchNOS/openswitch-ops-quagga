@@ -20,6 +20,7 @@
 from bgp_config import BgpConfig
 from bgp_config import PrefixList
 from helpers_routing import wait_for_route
+from pytest import mark
 
 # Topology definition. the topology contains two back to back switches
 # having four links between them.
@@ -516,6 +517,7 @@ def verify_no_ip_prefix_list(step, bgp_config1):
         assert cfg not in output
 
 
+@mark.gate
 def test_bgp_ct_routemap_set_commit(topology, step):
     sw1 = topology.get("sw1")
     sw2 = topology.get("sw2")

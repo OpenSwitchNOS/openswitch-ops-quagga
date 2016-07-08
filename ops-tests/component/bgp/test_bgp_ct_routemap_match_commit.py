@@ -18,6 +18,8 @@
 # 02111-1307, USA.
 
 
+from pytest import mark
+
 TOPOLOGY = """
 # +-------+
 # |  sw1  |
@@ -236,6 +238,7 @@ def unconfigure_routemap_match(sw1, step):
         not match_ipv6_nexthop_flag and not match_probability_flag
 
 
+@mark.gate
 def test_bgp_ct_routemap_match_commit(topology, step):
     sw1 = topology.get("sw1")
     assert sw1 is not None

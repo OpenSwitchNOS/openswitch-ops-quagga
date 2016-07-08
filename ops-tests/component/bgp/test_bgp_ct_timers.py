@@ -18,6 +18,8 @@
 # 02111-1307, USA.
 
 
+from pytest import mark
+
 TOPOLOGY = """
 # +-------+
 # |       |     +-------+
@@ -33,33 +35,33 @@ TOPOLOGY = """
 hsw1:if01 -- sw1:if01
 """
 
-
-def test_bgp_ct_router_id(topology, step):
+@mark.gate
+def test_bgp_ct_timers(topology, step):
     sw1 = topology.get("sw1")
     assert sw1 is not None
-    bgp_asn = "1"
-    bgp_router_id = "9.0.0.1"
-    bgp_network = "11.0.0.0"
-    bgp_pl = "8"
-
     step("1-Verifying bgp processes...")
     pid = sw1("pgrep -f bgpd", shell='bash')
     pid = pid.strip()
     assert pid != "" and pid is not None
-
-    step("2-Applying BGP configurations")
+    step("2-Applying BGP configurations...")
+    bgp_asn = "1"
+    timers_bgp_keepalive = 5
+    timers_bgp_holdtime = 10
+    router_ = "router bgp {bgp_asn}".format(**locals())
+    timer_ = "timers bgp {} {}".format(timers_bgp_keepalive,
+                                       timers_bgp_holdtime)
     sw1("configure terminal")
-    sw1("router bgp {}".format(bgp_asn))
-    sw1("bgp router-id {}".format(bgp_router_id))
-    sw1("network {}/{}".format(bgp_network, bgp_pl))
-
-    step("3-Verifying BGP Router-ID...")
-    output = sw1("do show ip bgp")
-    assert bgp_router_id in output
-
-    step("4-Unconfiguring BGP Router-ID")
-    sw1("no bgp router-id {}".format(bgp_router_id))
-
-    step("5-Verifying BGP Router-ID is unconfigured...")
-    output = sw1("do show ip bgp")
-    assert bgp_router_id not in output
+    sw1(router_)
+    sw1(timer_)
+    step("3-Verifying all configurations...")
+    output = sw1("do show running-config")
+    assert router_ in output and timer_ in output
+    step("4-Verifying no timers bgp...")
+    sw1("no timers bgp")
+    output = sw1("do show running-config")
+    assert timer_ not in output
+    step("4-Verifying no router bgp...")
+    sw1("exit")
+    sw1("no {router_}".format(**locals()))
+    output = sw1("do show running-config")
+    assert router_ not in output

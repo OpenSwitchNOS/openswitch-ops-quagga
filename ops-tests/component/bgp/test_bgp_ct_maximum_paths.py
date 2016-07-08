@@ -18,7 +18,7 @@
 # 02111-1307, USA.
 
 from time import sleep
-import pytest
+from pytest import mark
 
 TOPOLOGY = """
 #                +-------+
@@ -356,9 +356,7 @@ def loop_test(loop, switches):
         run_test(switches)
 
 
-@pytest.mark.skipif(True, reason="Failing in both frameworks when verifying"
-                                 "'verify_bgp_route(sw1, bgp4_network,"
-                                 "                  bgp1_neighbor3)'")
+@mark.gate
 def test_bgp_ct_maximum_paths(topology, step):
     switches = []
     for index in range(1, 6):

@@ -18,6 +18,7 @@
 # 02111-1307, USA.
 
 from helpers_routing import wait_for_route
+from pytest import mark
 
 TOPOLOGY = """
 # +-------+      +-------+
@@ -65,6 +66,7 @@ def process_verification(switches, step):
         assert pid != "" and pid is not None
 
 
+@mark.gate
 def test_bgp_ct_show_ip_bgp(topology, step):  # noqa
     sw1 = topology.get("sw1")
     sw2 = topology.get("sw2")

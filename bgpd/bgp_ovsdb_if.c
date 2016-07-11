@@ -86,6 +86,7 @@ static bgp_ovsdb_t glob_bgp_ovs;
 #define MAX_BUF_LEN 10
 #define BUF_LEN 16000
 #define MAX_ERR_STR_LEN 256
+#define PEER_DOWN_TRIGGER_LEN 100
 
 COVERAGE_DEFINE(bgp_ovsdb_cnt);
 VLOG_DEFINE_THIS_MODULE(bgp_ovsdb_if);
@@ -648,7 +649,7 @@ bgp_dump_peer(struct ds *ds, struct peer *p)
     char timebuf[BGP_UPTIME_LEN];
     afi_t afi;
     safi_t safi;
-
+    char peer_down_reason[PEER_DOWN_TRIGGER_LEN] = {0};
     if(!p || !ds) {
         VLOG_ERR("Invalid Entry\n");
         return;
@@ -748,9 +749,15 @@ bgp_dump_peer(struct ds *ds, struct peer *p)
     if (!p->dropped) {
         ds_put_format(ds, "  Last reset never\n");
     } else {
+        snprintf(peer_down_reason,  PEER_DOWN_TRIGGER_LEN, "%s",
+                 peer_down_str[(int) p->last_reset]);
+        if ((peer_down_reason[0] == '\0') ||
+             (!p->su_local)) {
+            p->last_reset = LOCAL_INTERFACE_DOWN;
+        }
         ds_put_format(ds, "  Last reset %s, due to %s\n",
-              peer_uptime (p->resettime, timebuf, BGP_UPTIME_LEN),
-              peer_down_str[(int) p->last_reset]);
+        peer_uptime (p->resettime, timebuf, BGP_UPTIME_LEN),
+        peer_down_str[(int) p->last_reset]);
     }
 
     if(CHECK_FLAG (p->sflags, PEER_STATUS_PREFIX_OVERFLOW)) {

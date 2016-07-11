@@ -566,7 +566,7 @@ struct peer
 #define PEER_DOWN_PASSIVE_CHANGE        20 /* neighbor passive command */
 #define PEER_DOWN_MULTIHOP_CHANGE       21 /* neighbor multihop command */
 #define PEER_DOWN_NSF_CLOSE_SESSION     22 /* NSF tcp session close */
-
+#define LOCAL_INTERFACE_DOWN            23 /* Local interface link state down */
   /* The kind of route-map Flags.*/
   u_char rmap_type;
 #define PEER_RMAP_TYPE_IN             (1 << 0) /* neighbor route-map in */

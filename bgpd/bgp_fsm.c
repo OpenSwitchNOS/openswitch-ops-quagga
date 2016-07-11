@@ -341,7 +341,8 @@ const char *peer_down_str[] =
   "Capability changed",
   "Passive config change",
   "Multihop config change",
-  "NSF peer closed the session"
+  "NSF peer closed the session",
+  "Local interface down"
 };
 
 static int

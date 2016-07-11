@@ -71,10 +71,9 @@ def verify_loopback_interface(sw1, step):
     interface_addr1 = "9.0.0.1"
     masklen1 = "8"
     masklen2 = "24"
+    step("4-Verifying Loopback IP gets higher priority")
     loopback_ip = "10.0.1.3"
     active_router_id3 = "10.0.1.3"
-
-    step("4-Verifying Loopback IP gets higher priority")
     sw1("configure terminal")
     sw1("interface 1")
     sw1("shutdown")

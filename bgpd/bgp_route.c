@@ -63,6 +63,8 @@ extern const char *bgp_origin_str[];
 extern const char *bgp_origin_long_str[];
 VLOG_DEFINE_THIS_MODULE(bgp_route);
 
+extern void bgp_txn_finish(void);
+
 static struct bgp_node *
 bgp_afi_node_get (struct bgp_table *table, afi_t afi, safi_t safi, struct prefix *p,
 		  struct prefix_rd *prd)
@@ -218,7 +220,7 @@ bgp_info_reap (struct bgp_node *rn, struct bgp_info *ri, safi_t safi)
   else
     rn->info = ri->next;
 #ifdef ENABLE_OVSDB
-  bgp_ovsdb_delete_local_rib_entry(&rn->p, ri, ri->peer->bgp, safi);
+  bgp_ovsdb_delete_local_rib_entry(&rn->p, ri, ri->peer->bgp, safi, ri->peer->host);
 #endif
 
   bgp_info_mpath_dequeue (ri);
@@ -995,14 +997,18 @@ bgp_announce_check (struct bgp_info *ri, struct peer *peer, struct prefix *p,
     {
       /* NEXT-HOP Unchanged. */
     }
-  else if (CHECK_FLAG (peer->af_flags[afi][safi], PEER_FLAG_NEXTHOP_SELF)
-	   || (p->family == AF_INET && attr->nexthop.s_addr == 0)
+    else if (CHECK_FLAG (peer->af_flags[afi][safi], PEER_FLAG_NEXTHOP_SELF)
+            || (p->family == AF_INET && (attr->nexthop.s_addr == 0
+            || (peer->sort == BGP_PEER_EBGP &&
+                 bgp_multiaccess_check_v4 (attr->nexthop, peer->host) == 0)))
 #ifdef HAVE_IPV6
-	   || (p->family == AF_INET6 &&
-               IN6_IS_ADDR_UNSPECIFIED(&attr->extra->mp_nexthop_global))
+            || (p->family == AF_INET6 &&
+               (IN6_IS_ADDR_UNSPECIFIED(&attr->extra->mp_nexthop_global)
+            || (peer->sort == BGP_PEER_EBGP &&
+                bgp_multiaccess_check_ipv6(attr->extra->mp_nexthop_global,
+                peer->host) == 0)))
 #endif /* HAVE_IPV6 */
-	   || (peer->sort == BGP_PEER_EBGP
-	       && bgp_multiaccess_check_v4 (attr->nexthop, peer->host) == 0))
+            )
     {
       /* Set IPv4 nexthop. */
       if (p->family == AF_INET)
@@ -1563,6 +1569,8 @@ bgp_process_rsclient (struct work_queue *wq, void *data)
   if (old_select && CHECK_FLAG (old_select->flags, BGP_INFO_REMOVED))
       bgp_info_reap (rn, old_select, safi);
 
+  bgp_txn_finish();
+
   UNSET_FLAG (rn->flags, BGP_NODE_PROCESS_SCHEDULED);
   return WQ_SUCCESS;
 }
@@ -1599,7 +1607,10 @@ bgp_process_main (struct work_queue *wq, void *data)
           UNSET_FLAG (old_select->flags, BGP_INFO_MULTIPATH_CHG);
           UNSET_FLAG (rn->flags, BGP_NODE_PROCESS_SCHEDULED);
 #ifdef ENABLE_OVSDB
+    if (! CHECK_FLAG (old_select->flags, BGP_INFO_REMOVED)) {
           bgp_ovsdb_update_local_rib_entry_attributes (p, old_select, bgp, safi);
+          bgp_txn_finish();
+    }
 #endif
           return WQ_SUCCESS;
         }
@@ -1641,10 +1652,16 @@ bgp_process_main (struct work_queue *wq, void *data)
     }
 #ifdef ENABLE_OVSDB
   if (old_select) {
-      bgp_ovsdb_update_local_rib_entry_attributes (p, old_select, bgp, safi);
+      if (! CHECK_FLAG (old_select->flags, BGP_INFO_REMOVED)) {
+          bgp_ovsdb_update_local_rib_entry_attributes (p, old_select, bgp, safi);
+          bgp_txn_finish();
+      }
   }
   if (new_select) {
-      bgp_ovsdb_update_local_rib_entry_attributes (p, new_select, bgp, safi);
+      if (! CHECK_FLAG (new_select->flags, BGP_INFO_REMOVED)) {
+          bgp_ovsdb_update_local_rib_entry_attributes (p, new_select, bgp, safi);
+          bgp_txn_finish();
+      }
   }
 #endif
 
@@ -1652,6 +1669,8 @@ bgp_process_main (struct work_queue *wq, void *data)
   if (old_select && CHECK_FLAG (old_select->flags, BGP_INFO_REMOVED)) {
       bgp_info_reap (rn, old_select, safi);
   }
+
+  bgp_txn_finish();
 
   UNSET_FLAG (rn->flags, BGP_NODE_PROCESS_SCHEDULED);
   return WQ_SUCCESS;
@@ -2201,6 +2220,17 @@ bgp_update_main (struct peer *peer, struct prefix *p, struct attr *attr,
 	  goto filtered;
 	}
     }
+#ifdef HAVE_IPV6
+  else if(afi == AFI_IP6 && safi == SAFI_UNICAST)
+    {
+        /* Next hop must not be self */
+        if(if_lookup_by_ipv6_exact (&new_attr.extra->mp_nexthop_global)) {
+            reason = "Next hop ipv6 is self";
+            bgp_attr_flush (&new_attr);
+            goto filtered;
+        }
+    }
+#endif
 
   attr_new = bgp_attr_intern (&new_attr);
 
@@ -2410,7 +2440,7 @@ bgp_update_main (struct peer *peer, struct prefix *p, struct attr *attr,
     bgp_rib_remove (rn, ri, peer, afi, safi);
 
   bgp_unlock_node (rn);
-
+  VLOG_DBG("%s exited due to ERR %s",__func__, reason);
   return 0;
 }
 
@@ -2805,6 +2835,9 @@ bgp_clear_route_node (struct work_queue *wq, void *data)
           bgp_rib_remove (rn, ri, peer, afi, safi);
         break;
       }
+
+  bgp_txn_finish();
+
   return WQ_SUCCESS;
 }
 

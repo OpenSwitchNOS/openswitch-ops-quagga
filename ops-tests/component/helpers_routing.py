@@ -298,26 +298,42 @@ def verify_show(sw1, route, route_type, p_dict, show):
     :type  route_type : string
     :param show : type of show to be checked
     :type show : string
+    :param routes_found : list of routes if found
+    :type routes_found : bool
+    :param num_of_iterations : number of iterations of while loop executed
+    :type num_of_iterations : integer
     """
-    # Get the actual route dictionary for the route
-    dict_from_show = get_route_from_show(sw1,
-                                         route,
-                                         route_type,
-                                         show)
-
-    # Parsing the obtained dictionary so we can compare it easily
-    dict_from_show = sorted(dict_from_show.items(), key=itemgetter(0))
-
     # Parsing the received dictionary so we can compare it easily
     p_dict = sorted(p_dict.items(), key=itemgetter(0))
 
-    # Prints for debug purposes
-    print("Actual: {}\n".format(str(dict_from_show)))
+    # Get the actual route dictionary for the route. Execute the show command
+    # until the routes are seen in the show output, else sleep for a second in
+    # every iteration to allow processing by zebra.
+    routes_found = False
+    num_of_iterations = 0
+    while routes_found != True:
+        dict_from_show = get_route_from_show(sw1,
+                                             route,
+                                             route_type,
+                                             show)
 
-    print("Expected: {}\n".format(str(p_dict)))
+        # Parsing the obtained dictionary so we can compare it easily
+        dict_from_show = sorted(dict_from_show.items(), key=itemgetter(0))
 
-    # Comparing dictionaries, if not equals, assertion will fail
-    assert p_dict == dict_from_show
+        # Prints for debug purposes
+        num_of_iterations = num_of_iterations + 1
+        print("number of iterations = %d\n" % num_of_iterations)
+        print("Actual: {}\n".format(str(dict_from_show)))
+
+        print("Expected: {}\n".format(str(p_dict)))
+
+        # Comparing dictionaries, if not equals, assertion will fail
+        print("******************************************************************")
+        if p_dict == dict_from_show:
+            routes_found = True
+            break
+
+        sleep(1)
 
 
 def verify_show_ip_route(sw1, route, route_type, p_dict):

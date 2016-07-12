@@ -22,7 +22,7 @@ from route_generator_and_stats_reporter import (
     get_static_route_dict,
     capture_output_samples_and_generate_perf_stats
 )
-from time import sleep
+from pytest import mark
 
 TOPOLOGY = """
 # +-------+    +-------+
@@ -93,8 +93,6 @@ def ConfigureIpv6StaticRoutes(sw1, sw2, ipv6_route_list, step):
     # Start ops-zebra process on sw1
     sw1(zebra_start_command_string, shell='bash')
 
-    sleep(TRIGGER_SLEEP)
-
     perf_stats_dict = capture_output_samples_and_generate_perf_stats(
                                        sw1, ipv6_route_list,
                                        "Config", False,
@@ -132,8 +130,6 @@ def InterfaceDown(sw1, sw2, ipv6_route_list, step):
     sw1("exit")
 
     sw1("exit")
-
-    sleep(TRIGGER_SLEEP)
 
     perf_stats_dict= capture_output_samples_and_generate_perf_stats(
                                      sw1, ipv6_route_list,
@@ -173,8 +169,6 @@ def InterfaceUp(sw1, sw2, ipv6_route_list, step):
 
     sw1("exit")
 
-    sleep(TRIGGER_SLEEP)
-
     perf_stats_dict = capture_output_samples_and_generate_perf_stats(
                                      sw1, ipv6_route_list,
                                      "Interface un-shutdown", False,
@@ -212,8 +206,6 @@ def InterfaceAddrChange(sw1, sw2, ipv6_route_list, step):
     sw1("exit")
 
     sw1("exit")
-
-    sleep(TRIGGER_SLEEP)
 
     perf_stats_dict = capture_output_samples_and_generate_perf_stats(
                                      sw1, ipv6_route_list,
@@ -253,8 +245,6 @@ def InterfaceAddrRestore(sw1, sw2, ipv6_route_list, step):
 
     sw1("exit")
 
-    sleep(TRIGGER_SLEEP)
-
     perf_stats_dict = capture_output_samples_and_generate_perf_stats(
                                      sw1, ipv6_route_list,
                                      "Interface address restore", False,
@@ -293,8 +283,6 @@ def InterfaceNoRouting(sw1, sw2, ipv6_route_list, step):
 
     sw1("exit")
 
-    sleep(TRIGGER_SLEEP)
-
     perf_stats_dict = capture_output_samples_and_generate_perf_stats(
                                      sw1, ipv6_route_list,
                                      "Interface no routing", False,
@@ -320,6 +308,7 @@ def InterfaceNoRouting(sw1, sw2, ipv6_route_list, step):
            actual: " + str(perf_stats_dict['TotalShowRunning'])
 
 
+@mark.timeout(300)
 def test_zebra_ct_ipv6_scale_tests(topology, step):
     sw1 = topology.get("sw1")
     sw2 = topology.get("sw2")

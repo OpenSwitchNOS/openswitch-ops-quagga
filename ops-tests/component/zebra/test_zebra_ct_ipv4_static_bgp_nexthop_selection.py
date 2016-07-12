@@ -18,12 +18,12 @@
 # 02111-1307, USA.
 
 
-from helpers_routing import (
+from zebra_routing import (
     verify_show_ip_route,
     verify_show_rib
 )
 from re import match
-from time import sleep
+from pytest import mark
 
 
 # Topology definition. the topology contains two back to back switches
@@ -309,8 +309,6 @@ def add_static_bgp_routes(sw1, sw2, step):
     route_ipv4_bgp_route2 = dict()
     route_ipv4_bgp_route2['Route'] = '143.0.0.1/32'
 
-    sleep(15)
-
     step("Verifying the IPv4 static and BGP routes on switch 1")
     aux_route = route_ipv4_static_route1['Route']
     verify_show_ip_route(sw1, aux_route, 'static', route_ipv4_static_route1)
@@ -432,8 +430,6 @@ def shutdown_static_bgp_routes_next_hop_interfaces(sw1, sw2, step):
     # in FIB.
     route_ipv4_bgp_route2 = rib_ipv4_bgp_route2
 
-    sleep(15)
-
     step("Verifying the IPv4 static and BGP routes on switch 1")
     aux_route = route_ipv4_static_route1['Route']
     verify_show_ip_route(sw1, aux_route, 'static', route_ipv4_static_route1)
@@ -544,8 +540,6 @@ def no_shutdown_static_bgp_routes_next_hop_interfaces(sw1, sw2, step):
     # in FIB.
     route_ipv4_bgp_route2 = dict()
     route_ipv4_bgp_route2['Route'] = '143.0.0.1/32'
-
-    sleep(15)
 
     step("Verifying the IPv4 static and BGP routes on switch 1")
     aux_route = route_ipv4_static_route1['Route']
@@ -682,8 +676,6 @@ def add_nexthop_to_make_bgp_route_ecmp(sw1, sw2, step):
     route_ipv4_bgp_route2 = dict()
     route_ipv4_bgp_route2['Route'] = '143.0.0.1/32'
 
-    sleep(15)
-
     step("Verifying the IPv4 static and BGP routes on switch 1")
     aux_route = route_ipv4_static_route1['Route']
     verify_show_ip_route(sw1, aux_route, 'static', route_ipv4_static_route1)
@@ -804,8 +796,6 @@ def remove_nexthop_to_make_bgp_route_single(sw1, sw2, step):
     route_ipv4_bgp_route2 = dict()
     route_ipv4_bgp_route2['Route'] = '143.0.0.1/32'
 
-    sleep(15)
-
     step("Verifying the IPv4 static and BGP routes on switch 1")
     aux_route = route_ipv4_static_route1['Route']
     verify_show_ip_route(sw1, aux_route, 'static', route_ipv4_static_route1)
@@ -912,7 +902,6 @@ def delete_static_bgp_routes(sw1, sw2, step):
     # Populate the expected FIB ("show ip route") route dictionary for the BGP
     # route 123.0.0.1/32 and its next-hops.
     route_ipv4_bgp_route2 = rib_ipv4_bgp_route2
-    sleep(15)
     step("Verifying the IPv4 static and BGP "
          "routes on switch 1 after route deletes")
     # Verify the static/BGP routes in RIB and FIB
@@ -934,6 +923,7 @@ def delete_static_bgp_routes(sw1, sw2, step):
     verify_show_rib(sw1, aux_route, 'bgp', rib_ipv4_bgp_route2)
 
 
+@mark.timeout(300)
 def test_zebra_ct_ipv4_static_bgp_nexthop_selection(topology, step):
     sw1 = topology.get("sw1")
     assert sw1 is not None

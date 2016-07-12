@@ -20,13 +20,14 @@
 # having four links between them.
 
 
-from helpers_routing import (
+from zebra_routing import (
     verify_show_ip_route,
     verify_show_ipv6_route,
     verify_show_rib,
     verify_route_in_show_kernel_route
 )
 from time import sleep
+from pytest import mark
 
 
 zebra_stop_command_string = "systemctl stop ops-zebra"
@@ -2738,6 +2739,7 @@ def all_configuration_deleted_before_zebra_restart(sw1, sw2, step):
                                       route_ipv6_kernel_route3, 'zebra')
 
 
+@mark.timeout(300)
 def test_zebra_ct_restartability(topology, step):
     sw1 = topology.get("sw1")
     sw2 = topology.get("sw2")

@@ -18,6 +18,10 @@
 # 02111-1307, USA.
 
 
+from zebra_routing import (
+    verify_active_router_id_in_vrf
+)
+from pytest import mark
 TOPOLOGY = """
 #
 # +-------+
@@ -29,7 +33,6 @@ TOPOLOGY = """
 [type=openswitch name="Switch 1"] sw1
 
 """
-from time import sleep
 
 #  This is basic configuration required for the test, it verifies zebra
 #  deamon is running and configures one interface with IPv4 address.
@@ -48,15 +51,13 @@ def configure_interface(sw1, step):
     sw1("no shutdown")
     sw1("ip address {}/{}".format(interface_addr1, masklen))
     sw1("exit")
-    sleep(5)
 
 #  This test verifies active_router_id column in VRF table is same
 #  as the interface 1 IPv4 address.
 def verify_active_router_id(sw1, step):
     step("3-Verifying Active Router-ID is one of the interface ip")
     active_router_id1 = "9.0.0.1"
-    output = sw1("ovsdb-client dump VRF", shell='bash')
-    assert active_router_id1 in output
+    verify_active_router_id_in_vrf(sw1, active_router_id1)
 
 #  This test configures the loopback interface and verifies that
 #  loopback IPv4 address is used as active_router_id.
@@ -75,9 +76,7 @@ def verify_loopback_interface(sw1, step):
     sw1("interface loopback 3")
     sw1("ip address {}/{}".format(loopback_ip, masklen2))
     sw1("exit")
-    sleep(5)
-    output = sw1("ovsdb-client dump VRF", shell='bash')
-    assert active_router_id3 in output
+    verify_active_router_id_in_vrf(sw1, active_router_id3)
 
 #  This test verifies that unconfiguring the loopback interface which
 #  was used as active_router_id will change it to any other L3
@@ -97,9 +96,7 @@ def verify_unconfigure_loopback_interface(sw1, step):
     sw1("interface loopback 3")
     sw1("no ip address {}/{}".format(loopback_ip, masklen2))
     sw1("exit")
-    sleep(5)
-    output = sw1("ovsdb-client dump VRF", shell='bash')
-    assert active_router_id1 in output
+    verify_active_router_id_in_vrf(sw1, active_router_id1)
 
 #  This test verifies that unconfiguring the L3 interface which was
 #  used as an active_router_id changes it to any other available L3
@@ -119,9 +116,7 @@ def verify_unconfigure_interface(sw1, step):
     sw1("no shutdown")
     sw1("ip address {}/{}".format(interface_addr2, masklen))
     sw1("exit")
-    sleep(5)
-    output = sw1("ovsdb-client dump VRF", shell='bash')
-    assert active_router_id2 in output
+    verify_active_router_id_in_vrf(sw1, active_router_id2)
 
 #  This test verifies that if an active_router_id already present then
 #  configuring aditional L3 interface will not change the active_router_id,
@@ -146,10 +141,9 @@ def verify_no_change_for_new_added_interfaces(sw1, step):
     sw1("interface loopback 5")
     sw1("ip address {}/{}".format(interface_lo_addr3, masklen2))
     sw1("exit")
-    sleep(5)
-    output = sw1("ovsdb-client dump VRF", shell='bash')
-    assert active_router_id2 in output
+    verify_active_router_id_in_vrf(sw1, active_router_id2)
 
+@mark.timeout(300)
 def test_zebra_ct_active_router_id(topology, step):
     sw1 = topology.get("sw1")
     assert sw1 is not None

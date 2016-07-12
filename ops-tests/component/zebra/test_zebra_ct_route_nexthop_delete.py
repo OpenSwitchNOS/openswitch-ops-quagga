@@ -18,13 +18,13 @@
 # 02111-1307, USA.
 
 
-from helpers_routing import (
+from zebra_routing import (
     route_and_nexthop_in_show_running_config,
     verify_show_ip_route,
     verify_show_ipv6_route,
     verify_show_rib
 )
-from time import sleep
+from pytest import mark
 
 
 # Topology definition. the topology contains two back to back switches
@@ -251,8 +251,6 @@ def add_static_routes(sw1, sw2, step):
     # route 3234:3234::1/128 and its next-hops.
     route_ipv6_static_route3 = rib_ipv6_static_route3
 
-    sleep(15)
-
     step("Verifying the IPv4 static routes on switch 1")
     # Verify route 123.0.0.1/32 and next-hops in RIB, FIB and verify the
     # presence of all next-hops in running-config
@@ -440,8 +438,6 @@ def delete_static_routes(sw1, sw2, step):
     # route 2234:2234::1/128 and its remaining next-hops.
     route_ipv6_static_route2 = rib_ipv6_static_route2
 
-    sleep(15)
-
     step("Verifying the IPv4 static routes on switch 1")
     # Verify route 123.0.0.1/32 and next-hops in RIB, FIB and verify the
     # presence of active next-hops in running-config and absence of deleted
@@ -532,6 +528,7 @@ def delete_static_routes(sw1, sw2, step):
                                                         nexthop='4')
 
 
+@mark.timeout(300)
 def test_zebra_ct_route_nexthop_delete(topology, step):
     sw1 = topology.get("sw1")
     assert sw1 is not None

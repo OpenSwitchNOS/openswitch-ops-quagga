@@ -143,6 +143,7 @@ def get_route_and_nexthops_from_output(output, route, route_type):
     :return: string
     """
 
+    print("inside get_route_and_nexthops_from_output")
     found_route = False
     found_nexthop = False
 
@@ -217,6 +218,7 @@ def get_route_from_show(sw1=None, route=None, route_type=None, show=None):
                               which is among "static/BGP"
     :returntype: dictionary
     """
+    print("inside get_route_from_show")
     # checks if device is passed, if not, assertion will fail
     assert sw1 is not None
 
@@ -298,26 +300,43 @@ def verify_show(sw1, route, route_type, p_dict, show):
     :type  route_type : string
     :param show : type of show to be checked
     :type show : string
+    :param routes_found : list of routes if found
+    :type routes_found : bool
+    :param num_of_iterations : number of iterations of while loop executed
+    :type num_of_iterations : integer
     """
-    # Get the actual route dictionary for the route
-    dict_from_show = get_route_from_show(sw1,
-                                         route,
-                                         route_type,
-                                         show)
-
-    # Parsing the obtained dictionary so we can compare it easily
-    dict_from_show = sorted(dict_from_show.items(), key=itemgetter(0))
-
+    print("inside verify_show")
     # Parsing the received dictionary so we can compare it easily
     p_dict = sorted(p_dict.items(), key=itemgetter(0))
 
-    # Prints for debug purposes
-    print("Actual: {}\n".format(str(dict_from_show)))
+    # Get the actual route dictionary for the route. Execute the show command
+    # until the routes are seen in the show output, else sleep for a second in
+    # every iteration to allow processing by zebra.
+    routes_found = False
+    num_of_iterations = 0
+    while routes_found != True:
+        dict_from_show = get_route_from_show(sw1,
+                                             route,
+                                             route_type,
+                                             show)
 
-    print("Expected: {}\n".format(str(p_dict)))
+        # Parsing the obtained dictionary so we can compare it easily
+        dict_from_show = sorted(dict_from_show.items(), key=itemgetter(0))
 
-    # Comparing dictionaries, if not equals, assertion will fail
-    assert p_dict == dict_from_show
+        # Prints for debug purposes
+        num_of_iterations = num_of_iterations + 1
+        print("number of iterations = %d\n" % num_of_iterations)
+        print("Actual: {}\n".format(str(dict_from_show)))
+
+        print("Expected: {}\n".format(str(p_dict)))
+
+        # Comparing dictionaries, if not equals, assertion will fail
+        print("******************************************************************")
+        if p_dict == dict_from_show:
+            routes_found = True
+            break
+
+        sleep(1)
 
 
 def verify_show_ip_route(sw1, route, route_type, p_dict):
@@ -336,6 +355,7 @@ def verify_show_ip_route(sw1, route, route_type, p_dict):
     :param route_type : Route type which can be "static/BGP"
     :type  route_type : string
     """
+    print("inside verify_show_ip_route")
     verify_show(sw1, route, route_type, p_dict, IPV4_ROUTE)
 
 
@@ -355,6 +375,7 @@ def verify_show_ipv6_route(sw1, route, route_type, p_dict):
     :param route_type : Route type which can be "static/BGP"
     :type  route_type : string
     """
+    print("inside verify_show_ipv6_route")
     verify_show(sw1, route, route_type, p_dict, IPV6_ROUTE)
 
 
@@ -374,6 +395,7 @@ def verify_show_rib(sw1, route, route_type, p_dict):
     :param route_type : Route type which can be "static/BGP"
     :type  route_type : string
     """
+    print("inside verify_show_rib")
     verify_show(sw1, route, route_type, p_dict, RIB)
 
 
@@ -407,6 +429,7 @@ def if_config_in_running_config(**kwargs):
     config_type = kwargs.get('config_type', None)
     running_config_string = ''
 
+    print("inside if_config_in_running_config")
     # checks if device is passed, if not, assertion will fail
     assert sw1 is not None
 
@@ -505,6 +528,7 @@ def route_and_nexthop_in_show_running_config(**kwargs):
     nexthop = kwargs.get('nexthop', None)
     distance = kwargs.get('distance', None)
 
+    print("inside route_and_nexthop_in_show_running_config")
     # If the route is a IPv4 route call if_config_in_running_config() with
     # IPV4_STATIC_ROUTE else call if_config_in_running_config() with
     # IPV6_STATIC_ROUTE
@@ -560,6 +584,7 @@ def get_route_from_show_kernel_route(**kwargs):
     route = kwargs.get('route', None)
     route_type = kwargs.get('route_type', None)
 
+    print("inside get_route_from_show_kernel_route")
     # checks if device is passed, if not, assertion will fail
     assert sw is not None, "Switch object not passed"
 
@@ -695,6 +720,7 @@ def verify_route_in_show_kernel_route(sw, if_ipv4, expected_route_dict,
     print("\nCheck kernel route table for "
           + expected_route_dict['Route'])
 
+    print("inside verify_route_in_show_kernel_route")
     # Get the actual route dictionary for the route
     actual_route_dict = get_route_from_show_kernel_route(
                                            switch=sw,
@@ -723,6 +749,8 @@ def verify_route_in_show_kernel_route(sw, if_ipv4, expected_route_dict,
     pprint(actual_route_dict, width=1)
 
     # Comparing dictionaries, if not equals, assertion will fail
+#    routes_found = False
+#    while routes_found != True:
     assert actual_route_dict == expected_route_dict
 
 

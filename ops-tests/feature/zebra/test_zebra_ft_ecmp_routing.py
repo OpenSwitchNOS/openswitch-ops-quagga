@@ -14,7 +14,17 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-import layer3_common as lib
+from layer3_common import (switch_cfg_iface,
+                           switch_add_ipv4_route,
+                           switch_remove_ipv4_route,
+                           switch_add_ipv6_route,
+                           switch_remove_ipv6_route,
+                           host_cfg_iface,
+                           host_add_route,
+                           host_ping_expect_success,
+                           host_ping_expect_failure,
+                           ZEBRA_DEFAULT_TIMEOUT,
+                           ZEBRA_TEST_SLEEP_TIME)
 from time import sleep
 from pytest import mark
 
@@ -37,13 +47,13 @@ TOPOLOGY = """
 # Links
 ops1:if01 -- ops2:if01
 ops1:if04 -- ops2:if03
-hs1:eth0 -- ops1:if02
-hs2:eth0 -- ops1:if03
-hs3:eth0 -- ops2:if02
+hs1:eth1 -- ops1:if02
+hs2:eth1 -- ops1:if03
+hs3:eth1 -- ops2:if02
 """
 
 
-@mark.timeout(500)
+@mark.timeout(ZEBRA_DEFAULT_TIMEOUT)
 def test_ecmp_routing(topology, step):
     """
     Verify ecmp routing.
@@ -64,83 +74,83 @@ def test_ecmp_routing(topology, step):
     # ----------Configure Switches and Hosts----------
 
     step('Configure Switches and Hosts')
-    lib.switch_cfg_iface(ops1, 'if01', '10.0.30.1/24', '1030::1/120')
-    lib.switch_cfg_iface(ops1, 'if02', '10.0.10.2/24', '1010::2/120')
-    lib.switch_cfg_iface(ops1, 'if03', '10.0.20.2/24', '1020::2/120')
-    lib.switch_cfg_iface(ops1, 'if04', '10.0.50.1/24', '1050::1/120')
-    lib.switch_cfg_iface(ops2, 'if01', '10.0.30.2/24', '1030::2/120')
-    lib.switch_cfg_iface(ops2, 'if02', '10.0.40.2/24', '1040::2/120')
-    lib.switch_cfg_iface(ops2, 'if03', '10.0.50.2/24', '1050::2/120')
-    sleep(15)
+    switch_cfg_iface(ops1, 'if01', '10.0.30.1/24', '1030::1/120')
+    switch_cfg_iface(ops1, 'if02', '10.0.10.2/24', '1010::2/120')
+    switch_cfg_iface(ops1, 'if03', '10.0.20.2/24', '1020::2/120')
+    switch_cfg_iface(ops1, 'if04', '10.0.50.1/24', '1050::1/120')
+    switch_cfg_iface(ops2, 'if01', '10.0.30.2/24', '1030::2/120')
+    switch_cfg_iface(ops2, 'if02', '10.0.40.2/24', '1040::2/120')
+    switch_cfg_iface(ops2, 'if03', '10.0.50.2/24', '1050::2/120')
+    sleep(ZEBRA_TEST_SLEEP_TIME)
 
-    lib.switch_add_ipv4_route(ops1, '10.0.40.0/24', '10.0.30.2')
-    lib.switch_add_ipv4_route(ops1, '10.0.40.0/24', '10.0.50.2')
-    lib.switch_add_ipv6_route(ops1, '1040::/120', '1030::2')
-    lib.switch_add_ipv6_route(ops1, '1040::/120', '1050::2')
-    lib.switch_add_ipv4_route(ops2, '10.0.10.0/24', '10.0.30.1')
-    lib.switch_add_ipv4_route(ops2, '10.0.20.0/24', '10.0.30.1')
-    lib.switch_add_ipv4_route(ops2, '10.0.10.0/24', '10.0.50.1')
-    lib.switch_add_ipv4_route(ops2, '10.0.20.0/24', '10.0.50.1')
-    lib.switch_add_ipv6_route(ops2, '1010::/120', '1030::1')
-    lib.switch_add_ipv6_route(ops2, '1020::/120', '1030::1')
-    lib.switch_add_ipv6_route(ops2, '1010::/120', '1050::1')
-    lib.switch_add_ipv6_route(ops2, '1020::/120', '1050::1')
+    switch_add_ipv4_route(ops1, '10.0.40.0/24', '10.0.30.2')
+    switch_add_ipv4_route(ops1, '10.0.40.0/24', '10.0.50.2')
+    switch_add_ipv6_route(ops1, '1040::/120', '1030::2')
+    switch_add_ipv6_route(ops1, '1040::/120', '1050::2')
+    switch_add_ipv4_route(ops2, '10.0.10.0/24', '10.0.30.1')
+    switch_add_ipv4_route(ops2, '10.0.20.0/24', '10.0.30.1')
+    switch_add_ipv4_route(ops2, '10.0.10.0/24', '10.0.50.1')
+    switch_add_ipv4_route(ops2, '10.0.20.0/24', '10.0.50.1')
+    switch_add_ipv6_route(ops2, '1010::/120', '1030::1')
+    switch_add_ipv6_route(ops2, '1020::/120', '1030::1')
+    switch_add_ipv6_route(ops2, '1010::/120', '1050::1')
+    switch_add_ipv6_route(ops2, '1020::/120', '1050::1')
 
-    lib.host_cfg_iface(hs1, 'eth0', '10.0.10.1/24', '1010::1/120')
-    lib.host_cfg_iface(hs2, 'eth0', '10.0.20.1/24', '1020::1/120')
-    lib.host_cfg_iface(hs3, 'eth0', '10.0.40.1/24', '1040::1/120')
+    host_cfg_iface(hs1, 'eth1', '10.0.10.1/24', '1010::1/120')
+    host_cfg_iface(hs2, 'eth1', '10.0.20.1/24', '1020::1/120')
+    host_cfg_iface(hs3, 'eth1', '10.0.40.1/24', '1040::1/120')
 
-    lib.host_add_route(hs1, '10.0.30.0/24', '10.0.10.2')
-    lib.host_add_route(hs1, '10.0.40.0/24', '10.0.10.2')
-    lib.host_add_route(hs1, '10.0.50.0/24', '10.0.10.2')
-    lib.host_add_route(hs1, '1030::/120', '1010::2')
-    lib.host_add_route(hs1, '1040::/120', '1010::2')
-    lib.host_add_route(hs1, '1050::/120', '1010::2')
-    lib.host_add_route(hs2, '10.0.30.0/24', '10.0.20.2')
-    lib.host_add_route(hs2, '10.0.40.0/24', '10.0.20.2')
-    lib.host_add_route(hs2, '10.0.50.0/24', '10.0.20.2')
-    lib.host_add_route(hs2, '1030::/120', '1020::2')
-    lib.host_add_route(hs2, '1040::/120', '1020::2')
-    lib.host_add_route(hs2, '1050::/120', '1020::2')
-    lib.host_add_route(hs3, '10.0.10.0/24', '10.0.40.2')
-    lib.host_add_route(hs3, '10.0.20.0/24', '10.0.40.2')
-    lib.host_add_route(hs3, '10.0.30.0/24', '10.0.40.2')
-    lib.host_add_route(hs3, '10.0.50.0/24', '10.0.40.2')
-    lib.host_add_route(hs3, '1010::/120', '1040::2')
-    lib.host_add_route(hs3, '1020::/120', '1040::2')
-    lib.host_add_route(hs3, '1030::/120', '1040::2')
-    lib.host_add_route(hs3, '1050::/120', '1040::2')
-    sleep(15)
+    host_add_route(hs1, '10.0.30.0/24', '10.0.10.2')
+    host_add_route(hs1, '10.0.40.0/24', '10.0.10.2')
+    host_add_route(hs1, '10.0.50.0/24', '10.0.10.2')
+    host_add_route(hs1, '1030::/120', '1010::2')
+    host_add_route(hs1, '1040::/120', '1010::2')
+    host_add_route(hs1, '1050::/120', '1010::2')
+    host_add_route(hs2, '10.0.30.0/24', '10.0.20.2')
+    host_add_route(hs2, '10.0.40.0/24', '10.0.20.2')
+    host_add_route(hs2, '10.0.50.0/24', '10.0.20.2')
+    host_add_route(hs2, '1030::/120', '1020::2')
+    host_add_route(hs2, '1040::/120', '1020::2')
+    host_add_route(hs2, '1050::/120', '1020::2')
+    host_add_route(hs3, '10.0.10.0/24', '10.0.40.2')
+    host_add_route(hs3, '10.0.20.0/24', '10.0.40.2')
+    host_add_route(hs3, '10.0.30.0/24', '10.0.40.2')
+    host_add_route(hs3, '10.0.50.0/24', '10.0.40.2')
+    host_add_route(hs3, '1010::/120', '1040::2')
+    host_add_route(hs3, '1020::/120', '1040::2')
+    host_add_route(hs3, '1030::/120', '1040::2')
+    host_add_route(hs3, '1050::/120', '1040::2')
+    sleep(ZEBRA_TEST_SLEEP_TIME)
 
     # ----------Do ping tests before removing routes----------
 
     step('Do ping tests before removing routes')
-    lib.host_ping_expect_success(10, hs1, hs3, '10.0.40.1')
-    lib.host_ping_expect_success(10, hs1, hs3, '1040::1')
-    lib.host_ping_expect_success(10, hs2, hs3, '10.0.40.1')
-    lib.host_ping_expect_success(10, hs2, hs3, '1040::1')
+    host_ping_expect_success(10, hs1, hs3, '10.0.40.1')
+    host_ping_expect_success(10, hs1, hs3, '1040::1')
+    host_ping_expect_success(10, hs2, hs3, '10.0.40.1')
+    host_ping_expect_success(10, hs2, hs3, '1040::1')
 
     # ----------Remove Routes----------
 
     step('Remove Routes')
-    lib.switch_remove_ipv4_route(ops1, '10.0.40.0/24', '10.0.30.2')
-    lib.switch_remove_ipv4_route(ops1, '10.0.40.0/24', '10.0.50.2')
-    lib.switch_remove_ipv6_route(ops1, '1040::/120', '1030::2')
-    lib.switch_remove_ipv6_route(ops1, '1040::/120', '1050::2')
-    lib.switch_remove_ipv4_route(ops2, '10.0.10.0/24', '10.0.30.1')
-    lib.switch_remove_ipv4_route(ops2, '10.0.20.0/24', '10.0.30.1')
-    lib.switch_remove_ipv4_route(ops2, '10.0.10.0/24', '10.0.50.1')
-    lib.switch_remove_ipv4_route(ops2, '10.0.20.0/24', '10.0.50.1')
-    lib.switch_remove_ipv6_route(ops2, '1010::/120', '1030::1')
-    lib.switch_remove_ipv6_route(ops2, '1020::/120', '1030::1')
-    lib.switch_remove_ipv6_route(ops2, '1010::/120', '1050::1')
-    lib.switch_remove_ipv6_route(ops2, '1020::/120', '1050::1')
-    sleep(15)
+    switch_remove_ipv4_route(ops1, '10.0.40.0/24', '10.0.30.2')
+    switch_remove_ipv4_route(ops1, '10.0.40.0/24', '10.0.50.2')
+    switch_remove_ipv6_route(ops1, '1040::/120', '1030::2')
+    switch_remove_ipv6_route(ops1, '1040::/120', '1050::2')
+    switch_remove_ipv4_route(ops2, '10.0.10.0/24', '10.0.30.1')
+    switch_remove_ipv4_route(ops2, '10.0.20.0/24', '10.0.30.1')
+    switch_remove_ipv4_route(ops2, '10.0.10.0/24', '10.0.50.1')
+    switch_remove_ipv4_route(ops2, '10.0.20.0/24', '10.0.50.1')
+    switch_remove_ipv6_route(ops2, '1010::/120', '1030::1')
+    switch_remove_ipv6_route(ops2, '1020::/120', '1030::1')
+    switch_remove_ipv6_route(ops2, '1010::/120', '1050::1')
+    switch_remove_ipv6_route(ops2, '1020::/120', '1050::1')
+    sleep(ZEBRA_TEST_SLEEP_TIME)
 
     # ----------Do ping tests after removing routes----------
 
     step('Do ping tests before after routes')
-    lib.host_ping_expect_failure(10, hs1, hs3, '10.0.40.1')
-    lib.host_ping_expect_failure(10, hs1, hs3, '1040::1')
-    lib.host_ping_expect_failure(10, hs2, hs3, '10.0.40.1')
-    lib.host_ping_expect_failure(10, hs2, hs3, '1040::1')
+    host_ping_expect_failure(10, hs1, hs3, '10.0.40.1')
+    host_ping_expect_failure(10, hs1, hs3, '1040::1')
+    host_ping_expect_failure(10, hs2, hs3, '10.0.40.1')
+    host_ping_expect_failure(10, hs2, hs3, '1040::1')

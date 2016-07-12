@@ -20,10 +20,11 @@
 
 from zebra_routing import (
     verify_show_ip_route,
-    verify_show_rib
+    verify_show_rib,
+    ZEBRA_DEFAULT_TIMEOUT
 )
 from re import match
-from time import sleep
+from pytest import mark
 
 
 # Topology definition. the topology contains two back to back switches
@@ -97,7 +98,7 @@ def get_uuid_from_nexthop_table(switch, nexthop_ip, step):
     output = switch(ovsdb_nexthop_command, shell='bash')
     lines = output.splitlines()
     nexthop_uuid = None
-    nexthop_regex = "(.*) {}(.*)%s(.*)" %(nexthop_ip)
+    nexthop_regex = "(.*) {}(.*)%s(.*)" % (nexthop_ip)
     for line in lines:
         nexthop_uuid = match(nexthop_regex, line)
         if nexthop_uuid is not None:
@@ -111,6 +112,9 @@ def get_uuid_from_nexthop_table(switch, nexthop_ip, step):
 # "show ip route/show rib".
 def add_static_bgp_routes(sw1, sw2, step):
 
+    sw1_intf2 = format(sw1.ports["if02"])
+    sw1_intf3 = format(sw1.ports["if03"])
+
     # Interfaces to configure
     sw1_interfaces = []
 
@@ -120,7 +124,7 @@ def add_static_bgp_routes(sw1, sw2, step):
 
     # Adding interfaces to configure
     for i in range(size):
-        sw1_interfaces.append(sw1.ports["if0{}".format(i+1)])
+        sw1_interfaces.append(sw1.ports["if0{}".format(i + 1)])
     sw1_mask = 24
 
     step("Configuring interfaces and IPs on SW1")
@@ -137,7 +141,8 @@ def add_static_bgp_routes(sw1, sw2, step):
     step("Cofiguring sw1 IPV4 static routes")
 
     # Routes to configure
-    nexthops = ["1.1.1.2", "2", "3", "4.4.4.1"]
+    nexthops = ["1.1.1.2", sw1_interfaces[1],
+                sw1_interfaces[2], "4.4.4.1"]
     for i in range(size):
         sw1("ip route 123.0.0.1/32 {} 10".format(nexthops[i]))
         output = sw1("do show running-config")
@@ -152,14 +157,16 @@ def add_static_bgp_routes(sw1, sw2, step):
     rib_ipv4_static_route1['1.1.1.2']['Distance'] = '10'
     rib_ipv4_static_route1['1.1.1.2']['Metric'] = '0'
     rib_ipv4_static_route1['1.1.1.2']['RouteType'] = 'static'
-    rib_ipv4_static_route1['2'] = dict()
-    rib_ipv4_static_route1['2']['Distance'] = '10'
-    rib_ipv4_static_route1['2']['Metric'] = '0'
-    rib_ipv4_static_route1['2']['RouteType'] = 'static'
-    rib_ipv4_static_route1['3'] = dict()
-    rib_ipv4_static_route1['3']['Distance'] = '10'
-    rib_ipv4_static_route1['3']['Metric'] = '0'
-    rib_ipv4_static_route1['3']['RouteType'] = 'static'
+    rib_ipv4_static_route1[sw1_intf2] = dict()
+    rib_ipv4_static_route1[sw1_intf2]['Distance'] = '10'
+    rib_ipv4_static_route1[sw1_intf2]['Metric'] = '0'
+    rib_ipv4_static_route1[sw1_intf2]['RouteType'] = \
+        'static'
+    rib_ipv4_static_route1[sw1_intf3] = dict()
+    rib_ipv4_static_route1[sw1_intf3]['Distance'] = '10'
+    rib_ipv4_static_route1[sw1_intf3]['Metric'] = '0'
+    rib_ipv4_static_route1[sw1_intf3]['RouteType'] = \
+        'static'
     rib_ipv4_static_route1['4.4.4.1'] = dict()
     rib_ipv4_static_route1['4.4.4.1']['Distance'] = '10'
     rib_ipv4_static_route1['4.4.4.1']['Metric'] = '0'
@@ -309,9 +316,8 @@ def add_static_bgp_routes(sw1, sw2, step):
     route_ipv4_bgp_route2 = dict()
     route_ipv4_bgp_route2['Route'] = '143.0.0.1/32'
 
-    sleep(15)
-
     step("Verifying the IPv4 static and BGP routes on switch 1")
+    sw1("configure terminal")
     aux_route = route_ipv4_static_route1['Route']
     verify_show_ip_route(sw1, aux_route, 'static', route_ipv4_static_route1)
     aux_route = rib_ipv4_static_route1['Route']
@@ -334,19 +340,24 @@ def add_static_bgp_routes(sw1, sw2, step):
 # Zebra should re-compute the best protocol next-hop and set/unset the
 # selected bits.
 def shutdown_static_bgp_routes_next_hop_interfaces(sw1, sw2, step):
+
+    sw1_intf2 = format(sw1.ports["if02"])
+    sw1_intf3 = format(sw1.ports["if03"])
+    sw1_intf4 = format(sw1.ports["if04"])
+
     step("Testing the BGP and static route selection on shutting nexthop \
          interfaces on sw1")
 
     # sHutdown next-hop interface 3
-    step("Shut down interface 3");
+    step("Shut down interface 3")
     sw1("configure terminal")
-    sw1("interface 3")
+    sw1("interface %s" % sw1_intf3)
     sw1("shutdown")
 
     # Shutdown next-hop interface 4
-    step("Shut down interface 4");
+    step("Shut down interface 4")
     sw1("configure terminal")
-    sw1("interface 4")
+    sw1("interface %s" % sw1_intf4)
     sw1("shutdown")
 
     # Populate the expected RIB ("show rib") route dictionary for the route
@@ -358,14 +369,16 @@ def shutdown_static_bgp_routes_next_hop_interfaces(sw1, sw2, step):
     rib_ipv4_static_route1['1.1.1.2']['Distance'] = '10'
     rib_ipv4_static_route1['1.1.1.2']['Metric'] = '0'
     rib_ipv4_static_route1['1.1.1.2']['RouteType'] = 'static'
-    rib_ipv4_static_route1['2'] = dict()
-    rib_ipv4_static_route1['2']['Distance'] = '10'
-    rib_ipv4_static_route1['2']['Metric'] = '0'
-    rib_ipv4_static_route1['2']['RouteType'] = 'static'
-    rib_ipv4_static_route1['3'] = dict()
-    rib_ipv4_static_route1['3']['Distance'] = '10'
-    rib_ipv4_static_route1['3']['Metric'] = '0'
-    rib_ipv4_static_route1['3']['RouteType'] = 'static'
+    rib_ipv4_static_route1[sw1_intf2] = dict()
+    rib_ipv4_static_route1[sw1_intf2]['Distance'] = '10'
+    rib_ipv4_static_route1[sw1_intf2]['Metric'] = '0'
+    rib_ipv4_static_route1[sw1_intf2]['RouteType'] = \
+        'static'
+    rib_ipv4_static_route1[sw1_intf3] = dict()
+    rib_ipv4_static_route1[sw1_intf3]['Distance'] = '10'
+    rib_ipv4_static_route1[sw1_intf3]['Metric'] = '0'
+    rib_ipv4_static_route1[sw1_intf3]['RouteType'] = \
+        'static'
     rib_ipv4_static_route1['4.4.4.1'] = dict()
     rib_ipv4_static_route1['4.4.4.1']['Distance'] = '10'
     rib_ipv4_static_route1['4.4.4.1']['Metric'] = '0'
@@ -380,10 +393,11 @@ def shutdown_static_bgp_routes_next_hop_interfaces(sw1, sw2, step):
     route_ipv4_static_route1['1.1.1.2']['Distance'] = '10'
     route_ipv4_static_route1['1.1.1.2']['Metric'] = '0'
     route_ipv4_static_route1['1.1.1.2']['RouteType'] = 'static'
-    route_ipv4_static_route1['2'] = dict()
-    route_ipv4_static_route1['2']['Distance'] = '10'
-    route_ipv4_static_route1['2']['Metric'] = '0'
-    route_ipv4_static_route1['2']['RouteType'] = 'static'
+    route_ipv4_static_route1[sw1_intf2] = dict()
+    route_ipv4_static_route1[sw1_intf2]['Distance'] = '10'
+    route_ipv4_static_route1[sw1_intf2]['Metric'] = '0'
+    route_ipv4_static_route1[sw1_intf2]['RouteType'] = \
+        'static'
 
     # Configure IPv4 route 143.0.0.1/32 with 1 next-hop.
     # Populate the expected RIB ("show rib") route dictionary for the
@@ -432,8 +446,6 @@ def shutdown_static_bgp_routes_next_hop_interfaces(sw1, sw2, step):
     # in FIB.
     route_ipv4_bgp_route2 = rib_ipv4_bgp_route2
 
-    sleep(15)
-
     step("Verifying the IPv4 static and BGP routes on switch 1")
     aux_route = route_ipv4_static_route1['Route']
     verify_show_ip_route(sw1, aux_route, 'static', route_ipv4_static_route1)
@@ -457,19 +469,24 @@ def shutdown_static_bgp_routes_next_hop_interfaces(sw1, sw2, step):
 # Zebra should re-compute the best protocol next-hop and set/unset the
 # selected bits.
 def no_shutdown_static_bgp_routes_next_hop_interfaces(sw1, sw2, step):
+
+    sw1_intf2 = format(sw1.ports["if02"])
+    sw1_intf3 = format(sw1.ports["if03"])
+    sw1_intf4 = format(sw1.ports["if04"])
+
     step("Testing the BGP and static route selection on no-shutting nexthop \
          interfaces on sw1")
 
     # sHutdown next-hop interface 3
-    step("Shut down interface 3");
+    step("Shut down interface 3")
     sw1("configure terminal")
-    sw1("interface 3")
+    sw1("interface %s" % sw1_intf3)
     sw1("no shutdown")
 
     # Shutdown next-hop interface 4
-    step("Shut down interface 4");
+    step("Shut down interface 4")
     sw1("configure terminal")
-    sw1("interface 4")
+    sw1("interface %s" % sw1_intf4)
     sw1("no shutdown")
 
     # Populate the expected RIB ("show rib") route dictionary for the route
@@ -481,14 +498,16 @@ def no_shutdown_static_bgp_routes_next_hop_interfaces(sw1, sw2, step):
     rib_ipv4_static_route1['1.1.1.2']['Distance'] = '10'
     rib_ipv4_static_route1['1.1.1.2']['Metric'] = '0'
     rib_ipv4_static_route1['1.1.1.2']['RouteType'] = 'static'
-    rib_ipv4_static_route1['2'] = dict()
-    rib_ipv4_static_route1['2']['Distance'] = '10'
-    rib_ipv4_static_route1['2']['Metric'] = '0'
-    rib_ipv4_static_route1['2']['RouteType'] = 'static'
-    rib_ipv4_static_route1['3'] = dict()
-    rib_ipv4_static_route1['3']['Distance'] = '10'
-    rib_ipv4_static_route1['3']['Metric'] = '0'
-    rib_ipv4_static_route1['3']['RouteType'] = 'static'
+    rib_ipv4_static_route1[sw1_intf2] = dict()
+    rib_ipv4_static_route1[sw1_intf2]['Distance'] = '10'
+    rib_ipv4_static_route1[sw1_intf2]['Metric'] = '0'
+    rib_ipv4_static_route1[sw1_intf2]['RouteType'] = \
+        'static'
+    rib_ipv4_static_route1[sw1_intf3] = dict()
+    rib_ipv4_static_route1[sw1_intf3]['Distance'] = '10'
+    rib_ipv4_static_route1[sw1_intf3]['Metric'] = '0'
+    rib_ipv4_static_route1[sw1_intf3]['RouteType'] = \
+        'static'
     rib_ipv4_static_route1['4.4.4.1'] = dict()
     rib_ipv4_static_route1['4.4.4.1']['Distance'] = '10'
     rib_ipv4_static_route1['4.4.4.1']['Metric'] = '0'
@@ -545,8 +564,6 @@ def no_shutdown_static_bgp_routes_next_hop_interfaces(sw1, sw2, step):
     route_ipv4_bgp_route2 = dict()
     route_ipv4_bgp_route2['Route'] = '143.0.0.1/32'
 
-    sleep(15)
-
     step("Verifying the IPv4 static and BGP routes on switch 1")
     aux_route = route_ipv4_static_route1['Route']
     verify_show_ip_route(sw1, aux_route, 'static', route_ipv4_static_route1)
@@ -570,6 +587,9 @@ def no_shutdown_static_bgp_routes_next_hop_interfaces(sw1, sw2, step):
 # multi-path and checks if the routes and next-hops show correctly selected
 # in the output of "show ip route/show rib".
 def add_nexthop_to_make_bgp_route_ecmp(sw1, sw2, step):
+
+    sw1_intf2 = format(sw1.ports["if02"])
+    sw1_intf3 = format(sw1.ports["if03"])
 
     step("Configuring another next-hop for IPv4 BGP route 123.0.0.1/32 on \
          switch 1")
@@ -616,14 +636,16 @@ def add_nexthop_to_make_bgp_route_ecmp(sw1, sw2, step):
     rib_ipv4_static_route1['1.1.1.2']['Distance'] = '10'
     rib_ipv4_static_route1['1.1.1.2']['Metric'] = '0'
     rib_ipv4_static_route1['1.1.1.2']['RouteType'] = 'static'
-    rib_ipv4_static_route1['2'] = dict()
-    rib_ipv4_static_route1['2']['Distance'] = '10'
-    rib_ipv4_static_route1['2']['Metric'] = '0'
-    rib_ipv4_static_route1['2']['RouteType'] = 'static'
-    rib_ipv4_static_route1['3'] = dict()
-    rib_ipv4_static_route1['3']['Distance'] = '10'
-    rib_ipv4_static_route1['3']['Metric'] = '0'
-    rib_ipv4_static_route1['3']['RouteType'] = 'static'
+    rib_ipv4_static_route1[sw1_intf2] = dict()
+    rib_ipv4_static_route1[sw1_intf2]['Distance'] = '10'
+    rib_ipv4_static_route1[sw1_intf2]['Metric'] = '0'
+    rib_ipv4_static_route1[sw1_intf2]['RouteType'] = \
+        'static'
+    rib_ipv4_static_route1[sw1_intf3] = dict()
+    rib_ipv4_static_route1[sw1_intf3]['Distance'] = '10'
+    rib_ipv4_static_route1[sw1_intf3]['Metric'] = '0'
+    rib_ipv4_static_route1[sw1_intf3]['RouteType'] = \
+        'static'
     rib_ipv4_static_route1['4.4.4.1'] = dict()
     rib_ipv4_static_route1['4.4.4.1']['Distance'] = '10'
     rib_ipv4_static_route1['4.4.4.1']['Metric'] = '0'
@@ -682,9 +704,8 @@ def add_nexthop_to_make_bgp_route_ecmp(sw1, sw2, step):
     route_ipv4_bgp_route2 = dict()
     route_ipv4_bgp_route2['Route'] = '143.0.0.1/32'
 
-    sleep(15)
-
     step("Verifying the IPv4 static and BGP routes on switch 1")
+    sw1("configure terminal")
     aux_route = route_ipv4_static_route1['Route']
     verify_show_ip_route(sw1, aux_route, 'static', route_ipv4_static_route1)
     aux_route = rib_ipv4_static_route1['Route']
@@ -707,6 +728,9 @@ def add_nexthop_to_make_bgp_route_ecmp(sw1, sw2, step):
 # single path and checks if the routes and next-hops show correctly selected
 # in the output of "show ip route/show rib".
 def remove_nexthop_to_make_bgp_route_single(sw1, sw2, step):
+
+    sw1_intf2 = format(sw1.ports["if02"])
+    sw1_intf3 = format(sw1.ports["if03"])
 
     step("Removing a next-hop for IPv4 BGP route 123.0.0.1/32 on \
          switch 1")
@@ -742,14 +766,16 @@ def remove_nexthop_to_make_bgp_route_single(sw1, sw2, step):
     rib_ipv4_static_route1['1.1.1.2']['Distance'] = '10'
     rib_ipv4_static_route1['1.1.1.2']['Metric'] = '0'
     rib_ipv4_static_route1['1.1.1.2']['RouteType'] = 'static'
-    rib_ipv4_static_route1['2'] = dict()
-    rib_ipv4_static_route1['2']['Distance'] = '10'
-    rib_ipv4_static_route1['2']['Metric'] = '0'
-    rib_ipv4_static_route1['2']['RouteType'] = 'static'
-    rib_ipv4_static_route1['3'] = dict()
-    rib_ipv4_static_route1['3']['Distance'] = '10'
-    rib_ipv4_static_route1['3']['Metric'] = '0'
-    rib_ipv4_static_route1['3']['RouteType'] = 'static'
+    rib_ipv4_static_route1[sw1_intf2] = dict()
+    rib_ipv4_static_route1[sw1_intf2]['Distance'] = '10'
+    rib_ipv4_static_route1[sw1_intf2]['Metric'] = '0'
+    rib_ipv4_static_route1[sw1_intf2]['RouteType'] = \
+        'static'
+    rib_ipv4_static_route1[sw1_intf3] = dict()
+    rib_ipv4_static_route1[sw1_intf3]['Distance'] = '10'
+    rib_ipv4_static_route1[sw1_intf3]['Metric'] = '0'
+    rib_ipv4_static_route1[sw1_intf3]['RouteType'] = \
+        'static'
     rib_ipv4_static_route1['4.4.4.1'] = dict()
     rib_ipv4_static_route1['4.4.4.1']['Distance'] = '10'
     rib_ipv4_static_route1['4.4.4.1']['Metric'] = '0'
@@ -804,9 +830,8 @@ def remove_nexthop_to_make_bgp_route_single(sw1, sw2, step):
     route_ipv4_bgp_route2 = dict()
     route_ipv4_bgp_route2['Route'] = '143.0.0.1/32'
 
-    sleep(15)
-
     step("Verifying the IPv4 static and BGP routes on switch 1")
+    sw1("configure terminal")
     aux_route = route_ipv4_static_route1['Route']
     verify_show_ip_route(sw1, aux_route, 'static', route_ipv4_static_route1)
     aux_route = rib_ipv4_static_route1['Route']
@@ -830,6 +855,9 @@ def remove_nexthop_to_make_bgp_route_single(sw1, sw2, step):
 # "show ip route/show rib".
 def delete_static_bgp_routes(sw1, sw2, step):
 
+    sw1_intf2 = format(sw1.ports["if02"])
+    sw1_intf3 = format(sw1.ports["if03"])
+
     step("Testing the BGP and static route deletion on sw1")
     step("Deleting 123.0.0.0.1/32 BGP route on sw1")
 
@@ -849,6 +877,7 @@ def delete_static_bgp_routes(sw1, sw2, step):
     # Delete the static route for 143.0.0.1/32 so that BGP route becomes the
     # more preferable route in RIB.
     step("Deleting 143.0.0.0.1/32 static route on sw1")
+    sw1("configure terminal")
     sw1("no ip route 143.0.0.1/32 4.4.4.1")
 
     # Populate the expected RIB ("show rib") route dictionary for the route
@@ -860,14 +889,16 @@ def delete_static_bgp_routes(sw1, sw2, step):
     rib_ipv4_static_route1['1.1.1.2']['Distance'] = '10'
     rib_ipv4_static_route1['1.1.1.2']['Metric'] = '0'
     rib_ipv4_static_route1['1.1.1.2']['RouteType'] = 'static'
-    rib_ipv4_static_route1['2'] = dict()
-    rib_ipv4_static_route1['2']['Distance'] = '10'
-    rib_ipv4_static_route1['2']['Metric'] = '0'
-    rib_ipv4_static_route1['2']['RouteType'] = 'static'
-    rib_ipv4_static_route1['3'] = dict()
-    rib_ipv4_static_route1['3']['Distance'] = '10'
-    rib_ipv4_static_route1['3']['Metric'] = '0'
-    rib_ipv4_static_route1['3']['RouteType'] = 'static'
+    rib_ipv4_static_route1[sw1_intf2] = dict()
+    rib_ipv4_static_route1[sw1_intf2]['Distance'] = '10'
+    rib_ipv4_static_route1[sw1_intf2]['Metric'] = '0'
+    rib_ipv4_static_route1[sw1_intf2]['RouteType'] = \
+        'static'
+    rib_ipv4_static_route1[sw1_intf3] = dict()
+    rib_ipv4_static_route1[sw1_intf3]['Distance'] = '10'
+    rib_ipv4_static_route1[sw1_intf3]['Metric'] = '0'
+    rib_ipv4_static_route1[sw1_intf3]['RouteType'] = \
+        'static'
     rib_ipv4_static_route1['4.4.4.1'] = dict()
     rib_ipv4_static_route1['4.4.4.1']['Distance'] = '10'
     rib_ipv4_static_route1['4.4.4.1']['Metric'] = '0'
@@ -912,10 +943,10 @@ def delete_static_bgp_routes(sw1, sw2, step):
     # Populate the expected FIB ("show ip route") route dictionary for the BGP
     # route 123.0.0.1/32 and its next-hops.
     route_ipv4_bgp_route2 = rib_ipv4_bgp_route2
-    sleep(15)
     step("Verifying the IPv4 static and BGP "
          "routes on switch 1 after route deletes")
     # Verify the static/BGP routes in RIB and FIB
+    sw1("configure terminal")
     aux_route = route_ipv4_static_route1["Route"]
     verify_show_ip_route(sw1, aux_route, 'static', route_ipv4_static_route1)
     aux_route = rib_ipv4_static_route1["Route"]
@@ -934,6 +965,7 @@ def delete_static_bgp_routes(sw1, sw2, step):
     verify_show_rib(sw1, aux_route, 'bgp', rib_ipv4_bgp_route2)
 
 
+@mark.timeout(ZEBRA_DEFAULT_TIMEOUT)
 def test_zebra_ct_ipv4_static_bgp_nexthop_selection(topology, step):
     sw1 = topology.get("sw1")
     assert sw1 is not None

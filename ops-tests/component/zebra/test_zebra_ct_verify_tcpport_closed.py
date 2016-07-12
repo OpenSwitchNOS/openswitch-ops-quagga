@@ -16,6 +16,8 @@
 # under the License.
 
 
+from pytest import mark
+
 TOPOLOGY = """
 #
 #
@@ -31,6 +33,7 @@ TOPOLOGY = """
 """
 
 
+@mark.timeout(300)
 def test_zebra_ct_verify_tcpport_closed(topology, step):
     '''
     This test verifies if the TCP port: 2601 used by OpenSource Zebra protocol
@@ -46,6 +49,6 @@ def test_zebra_ct_verify_tcpport_closed(topology, step):
          ' to get the open TCP ports ###')
 
     ret = sw1("ip netns exec swns netstat -pant", shell='bash')
-    assert not "2601" in ret, "TCP port: 2601 is detected open"
+    assert "2601" not in ret, "TCP port: 2601 is detected open"
 
     step('### TCP port: 2601 not detected open, Test passed ###')

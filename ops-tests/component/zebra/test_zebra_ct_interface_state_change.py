@@ -20,12 +20,12 @@
 # having four links between them.
 
 
-from helpers_routing import (
+from zebra_routing import (
     verify_show_ip_route,
     verify_show_ipv6_route,
     verify_show_rib
 )
-from time import sleep
+from pytest import mark
 
 TOPOLOGY = """
 # +-------+    +-------+
@@ -83,8 +83,8 @@ def configure_static_routes(sw1, sw2, step):
     # configured within the same interface
     size = len(sw1_ifs_ips)
     for i in range(size):
-        if i is not size-1:
-            sw1_interfaces.append(sw1.ports["if0{}".format(i+1)])
+        if i is not size - 1:
+            sw1_interfaces.append(sw1.ports["if0{}".format(i + 1)])
         else:
             sw1_interfaces.append(sw1.ports["if0{}".format(i)])
     sw1_mask = 24
@@ -96,7 +96,7 @@ def configure_static_routes(sw1, sw2, step):
     sw1("configure terminal")
     for i in range(size):
         sw1("interface {}".format(sw1_interfaces[i]))
-        if i is not size-1:
+        if i is not size - 1:
             sw1("ip address {}/{}".format(sw1_ifs_ips[i], sw1_mask))
             sw1("ipv6 address {}/{}".format(sw1_ifs_ipv6s[i], sw1_ipv6_mask))
         else:
@@ -114,10 +114,11 @@ def configure_static_routes(sw1, sw2, step):
     step("Cofiguring sw1 IPV4 static routes")
 
     # Routes to configure
-    nexthops = ["1.1.1.2", "2", "3", "5.5.5.1"]
+    nexthops = ["1.1.1.2", "{}".format(sw1_interfaces[1]),
+                "{}".format(sw1_interfaces[2]), "5.5.5.1"]
 
     # COnfiguring IP routes
-    for i in range(size-1):
+    for i in range(size - 1):
         sw1("ip route 123.0.0.1/32 {}".format(nexthops[i]))
         output = sw1("do show running-config")
         assert "ip route 123.0.0.1/32 {}".format(nexthops[i]) in output
@@ -131,14 +132,16 @@ def configure_static_routes(sw1, sw2, step):
     rib_ipv4_static_route1['1.1.1.2']['Distance'] = '1'
     rib_ipv4_static_route1['1.1.1.2']['Metric'] = '0'
     rib_ipv4_static_route1['1.1.1.2']['RouteType'] = 'static'
-    rib_ipv4_static_route1['2'] = dict()
-    rib_ipv4_static_route1['2']['Distance'] = '1'
-    rib_ipv4_static_route1['2']['Metric'] = '0'
-    rib_ipv4_static_route1['2']['RouteType'] = 'static'
-    rib_ipv4_static_route1['3'] = dict()
-    rib_ipv4_static_route1['3']['Distance'] = '1'
-    rib_ipv4_static_route1['3']['Metric'] = '0'
-    rib_ipv4_static_route1['3']['RouteType'] = 'static'
+    rib_ipv4_static_route1['{}'.format(nexthops[1])] = dict()
+    rib_ipv4_static_route1['{}'.format(nexthops[1])]['Distance'] = '1'
+    rib_ipv4_static_route1['{}'.format(nexthops[1])]['Metric'] = '0'
+    rib_ipv4_static_route1['{}'.format(nexthops[1])]['RouteType'] = \
+        'static'
+    rib_ipv4_static_route1['{}'.format(nexthops[2])] = dict()
+    rib_ipv4_static_route1['{}'.format(nexthops[2])]['Distance'] = '1'
+    rib_ipv4_static_route1['{}'.format(nexthops[2])]['Metric'] = '0'
+    rib_ipv4_static_route1['{}'.format(nexthops[2])]['RouteType'] = \
+        'static'
     rib_ipv4_static_route1['5.5.5.1'] = dict()
     rib_ipv4_static_route1['5.5.5.1']['Distance'] = '1'
     rib_ipv4_static_route1['5.5.5.1']['Metric'] = '0'
@@ -168,19 +171,20 @@ def configure_static_routes(sw1, sw2, step):
     route_ipv4_static_route2 = rib_ipv4_static_route2
 
     # Configure IPv4 route 163.0.0.1/32 with 1 next-hop.
-    sw1("ip route 163.0.0.1/32 2")
+    sw1("ip route 163.0.0.1/32 {}".format(sw1_interfaces[1]))
     output = sw1("do show running-config")
-    assert "ip route 163.0.0.1/32 2" in output
+    assert "ip route 163.0.0.1/32 {}".format(sw1_interfaces[1]) in output
 
     # Populate the expected RIB ("show rib") route dictionary for the
     # route 163.0.0.1/32 and its next-hops.
     rib_ipv4_static_route3 = dict()
     rib_ipv4_static_route3['Route'] = '163.0.0.1/32'
     rib_ipv4_static_route3['NumberNexthops'] = '1'
-    rib_ipv4_static_route3['2'] = dict()
-    rib_ipv4_static_route3['2']['Distance'] = '1'
-    rib_ipv4_static_route3['2']['Metric'] = '0'
-    rib_ipv4_static_route3['2']['RouteType'] = 'static'
+    rib_ipv4_static_route3['{}'.format(sw1_interfaces[1])] = dict()
+    rib_ipv4_static_route3['{}'.format(sw1_interfaces[1])]['Distance'] = '1'
+    rib_ipv4_static_route3['{}'.format(sw1_interfaces[1])]['Metric'] = '0'
+    rib_ipv4_static_route3['{}'.format(sw1_interfaces[1])]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ip route") route dictionary for the
     # route 163.0.0.1/32 and its next-hops.
@@ -190,75 +194,82 @@ def configure_static_routes(sw1, sw2, step):
 
     # Configure IPv6 route 1234:1234::1/128 with 4 ECMP next-hops.
     for i in range(4):
-        sw1("ipv6 route 1234:1234::1/128 {}".format(i+1))
+        sw1("ipv6 route 1234:1234::1/128 {}".format(sw1_interfaces[i]))
         output = sw1("do show running-config")
-        assert "ipv6 route 1234:1234::1/128 {}".format(i+1) in output
+        assert "ipv6 route 1234:1234::1/128 {}".format(
+            sw1_interfaces[i]) in output
 
     # Populate the expected RIB ("show rib") route dictionary for the
     # route 1234:1234::1/128 and its next-hops.
     rib_ipv6_static_route1 = dict()
     rib_ipv6_static_route1['Route'] = '1234:1234::1/128'
     rib_ipv6_static_route1['NumberNexthops'] = '4'
-    rib_ipv6_static_route1['1'] = dict()
-    rib_ipv6_static_route1['1']['Distance'] = '1'
-    rib_ipv6_static_route1['1']['Metric'] = '0'
-    rib_ipv6_static_route1['1']['RouteType'] = 'static'
-    rib_ipv6_static_route1['2'] = dict()
-    rib_ipv6_static_route1['2']['Distance'] = '1'
-    rib_ipv6_static_route1['2']['Metric'] = '0'
-    rib_ipv6_static_route1['2']['RouteType'] = 'static'
-    rib_ipv6_static_route1['3'] = dict()
-    rib_ipv6_static_route1['3']['Distance'] = '1'
-    rib_ipv6_static_route1['3']['Metric'] = '0'
-    rib_ipv6_static_route1['3']['RouteType'] = 'static'
-    rib_ipv6_static_route1['4'] = dict()
-    rib_ipv6_static_route1['4']['Distance'] = '1'
-    rib_ipv6_static_route1['4']['Metric'] = '0'
-    rib_ipv6_static_route1['4']['RouteType'] = 'static'
+    rib_ipv6_static_route1['{}'.format(sw1_interfaces[0])] = dict()
+    rib_ipv6_static_route1['{}'.format(sw1_interfaces[0])]['Distance'] = '1'
+    rib_ipv6_static_route1['{}'.format(sw1_interfaces[0])]['Metric'] = '0'
+    rib_ipv6_static_route1['{}'.format(sw1_interfaces[0])]['RouteType'] = \
+        'static'
+    rib_ipv6_static_route1['{}'.format(sw1_interfaces[1])] = dict()
+    rib_ipv6_static_route1['{}'.format(sw1_interfaces[1])]['Distance'] = '1'
+    rib_ipv6_static_route1['{}'.format(sw1_interfaces[1])]['Metric'] = '0'
+    rib_ipv6_static_route1['{}'.format(sw1_interfaces[1])]['RouteType'] = \
+        'static'
+    rib_ipv6_static_route1['{}'.format(sw1_interfaces[2])] = dict()
+    rib_ipv6_static_route1['{}'.format(sw1_interfaces[2])]['Distance'] = '1'
+    rib_ipv6_static_route1['{}'.format(sw1_interfaces[2])]['Metric'] = '0'
+    rib_ipv6_static_route1['{}'.format(sw1_interfaces[2])]['RouteType'] = \
+        'static'
+    rib_ipv6_static_route1['{}'.format(sw1_interfaces[3])] = dict()
+    rib_ipv6_static_route1['{}'.format(sw1_interfaces[3])]['Distance'] = '1'
+    rib_ipv6_static_route1['{}'.format(sw1_interfaces[3])]['Metric'] = '0'
+    rib_ipv6_static_route1['{}'.format(sw1_interfaces[3])]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ipv6 route") route dictionary for the
     # route 1234:1234::1/128 and its next-hops.
     route_ipv6_static_route1 = rib_ipv6_static_route1
 
-    # Configure IPv4 route 2234:2234::1/128 with 1 next-hop.
-    sw1("ipv6 route 2234:2234::1/128 4")
+    # Configure IPv6 route 2234:2234::1/128 with 1 next-hop.
+    sw1("ipv6 route 2234:2234::1/128 {}".format(sw1_interfaces[3]))
     output = sw1("do show running-config")
-    assert "ipv6 route 2234:2234::1/128 4" in output
+    assert "ipv6 route 2234:2234::1/128 {}".format(sw1_interfaces[3]) in \
+        output
 
     # Populate the expected RIB ("show rib") route dictionary for the
     # route 2234:2234::1/128 and its next-hops.
     rib_ipv6_static_route2 = dict()
     rib_ipv6_static_route2['Route'] = '2234:2234::1/128'
     rib_ipv6_static_route2['NumberNexthops'] = '1'
-    rib_ipv6_static_route2['4'] = dict()
-    rib_ipv6_static_route2['4']['Distance'] = '1'
-    rib_ipv6_static_route2['4']['Metric'] = '0'
-    rib_ipv6_static_route2['4']['RouteType'] = 'static'
+    rib_ipv6_static_route2['{}'.format(sw1_interfaces[3])] = dict()
+    rib_ipv6_static_route2['{}'.format(sw1_interfaces[3])]['Distance'] = '1'
+    rib_ipv6_static_route2['{}'.format(sw1_interfaces[3])]['Metric'] = '0'
+    rib_ipv6_static_route2['{}'.format(sw1_interfaces[3])]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ipv6 route") route dictionary for the
     # route 2234:2234::1/128 and its next-hops.
     route_ipv6_static_route2 = rib_ipv6_static_route2
 
-    # Configure IPv4 route 3234:3234::1/128 with 1 next-hop.
-    sw1("ipv6 route 3234:3234::1/128 2")
+    # Configure IPv6 route 3234:3234::1/128 with 1 next-hop.
+    sw1("ipv6 route 3234:3234::1/128 {}".format(sw1_interfaces[1]))
     output = sw1("do show running-config")
-    assert "ipv6 route 3234:3234::1/128 2" in output
+    assert "ipv6 route 3234:3234::1/128 {}".format(sw1_interfaces[1]) in \
+        output
 
     # Populate the expected RIB ("show rib") route dictionary for the
     # route 3234:3234::1/128 and its next-hops.
     rib_ipv6_static_route3 = dict()
     rib_ipv6_static_route3['Route'] = '3234:3234::1/128'
     rib_ipv6_static_route3['NumberNexthops'] = '1'
-    rib_ipv6_static_route3['2'] = dict()
-    rib_ipv6_static_route3['2']['Distance'] = '1'
-    rib_ipv6_static_route3['2']['Metric'] = '0'
-    rib_ipv6_static_route3['2']['RouteType'] = 'static'
+    rib_ipv6_static_route3['{}'.format(sw1_interfaces[1])] = dict()
+    rib_ipv6_static_route3['{}'.format(sw1_interfaces[1])]['Distance'] = '1'
+    rib_ipv6_static_route3['{}'.format(sw1_interfaces[1])]['Metric'] = '0'
+    rib_ipv6_static_route3['{}'.format(sw1_interfaces[1])]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ipv6 route") route dictionary for the
     # route 3234:3234::1/128 and its next-hops.
     route_ipv6_static_route3 = rib_ipv6_static_route3
-
-    sleep(15)
 
     step("Verifying the IPv4 static routes onswitch 1")
 
@@ -318,15 +329,15 @@ def interface_shut_trigger_static_routes(sw1, sw2, step):
 
     # Add a new IPv4 static route 193.0.0.1/32 via interface 4
     step("Add a ipv4 static route via shut interface4 on SW1")
-    sw1("ip route 193.0.0.1/32 4")
+    sw1("ip route 193.0.0.1/32 {}".format(sw1.ports["if04"]))
     output = sw1("do show running-config")
-    assert "ip route 193.0.0.1/32 4" in output
+    assert "ip route 193.0.0.1/32 {}".format(sw1.ports["if04"]) in output
 
     # Add a new IPv6 static route 4234:4234::1/128 via interface 4
     step("Add a ipv6 static route via shut interface4 on SW1")
-    sw1("ipv6 route 4234:4234::1/128 4")
+    sw1("ipv6 route 4234:4234::1/128 {}".format(sw1.ports["if04"]))
     output = sw1("do show running-config")
-    assert "ipv6 route 4234:4234::1/128 4" in output
+    assert "ipv6 route 4234:4234::1/128 {}".format(sw1.ports["if04"]) in output
 
     # Populate the expected FIB ("show ip route") route dictionary for the
     # route 123.0.0.1/32 and its next-hops. The next-hops via interfaces 2 and
@@ -338,10 +349,11 @@ def interface_shut_trigger_static_routes(sw1, sw2, step):
     route_ipv4_static_route1['1.1.1.2']['Distance'] = '1'
     route_ipv4_static_route1['1.1.1.2']['Metric'] = '0'
     route_ipv4_static_route1['1.1.1.2']['RouteType'] = 'static'
-    route_ipv4_static_route1['3'] = dict()
-    route_ipv4_static_route1['3']['Distance'] = '1'
-    route_ipv4_static_route1['3']['Metric'] = '0'
-    route_ipv4_static_route1['3']['RouteType'] = 'static'
+    route_ipv4_static_route1['{}'.format(sw1.ports["if03"])] = dict()
+    route_ipv4_static_route1['{}'.format(sw1.ports["if03"])]['Distance'] = '1'
+    route_ipv4_static_route1['{}'.format(sw1.ports["if03"])]['Metric'] = '0'
+    route_ipv4_static_route1['{}'.format(sw1.ports["if03"])]['RouteType'] = \
+        'static'
 
     # Populate the expected RIB ("show rib") route dictionary for the route
     # 123.0.0.1/32 and its next-hops. All four next-hops of the route should
@@ -353,14 +365,16 @@ def interface_shut_trigger_static_routes(sw1, sw2, step):
     rib_ipv4_static_route1['1.1.1.2']['Distance'] = '1'
     rib_ipv4_static_route1['1.1.1.2']['Metric'] = '0'
     rib_ipv4_static_route1['1.1.1.2']['RouteType'] = 'static'
-    rib_ipv4_static_route1['2'] = dict()
-    rib_ipv4_static_route1['2']['Distance'] = '1'
-    rib_ipv4_static_route1['2']['Metric'] = '0'
-    rib_ipv4_static_route1['2']['RouteType'] = 'static'
-    rib_ipv4_static_route1['3'] = dict()
-    rib_ipv4_static_route1['3']['Distance'] = '1'
-    rib_ipv4_static_route1['3']['Metric'] = '0'
-    rib_ipv4_static_route1['3']['RouteType'] = 'static'
+    rib_ipv4_static_route1['{}'.format(sw1.ports["if02"])] = dict()
+    rib_ipv4_static_route1['{}'.format(sw1.ports["if02"])]['Distance'] = '1'
+    rib_ipv4_static_route1['{}'.format(sw1.ports["if02"])]['Metric'] = '0'
+    rib_ipv4_static_route1['{}'.format(sw1.ports["if02"])]['RouteType'] = \
+        'static'
+    rib_ipv4_static_route1['{}'.format(sw1.ports["if03"])] = dict()
+    rib_ipv4_static_route1['{}'.format(sw1.ports["if03"])]['Distance'] = '1'
+    rib_ipv4_static_route1['{}'.format(sw1.ports["if03"])]['Metric'] = '0'
+    rib_ipv4_static_route1['{}'.format(sw1.ports["if03"])]['RouteType'] = \
+        'static'
     rib_ipv4_static_route1['5.5.5.1'] = dict()
     rib_ipv4_static_route1['5.5.5.1']['Distance'] = '1'
     rib_ipv4_static_route1['5.5.5.1']['Metric'] = '0'
@@ -395,10 +409,11 @@ def interface_shut_trigger_static_routes(sw1, sw2, step):
     rib_ipv4_static_route3 = dict()
     rib_ipv4_static_route3['Route'] = '163.0.0.1/32'
     rib_ipv4_static_route3['NumberNexthops'] = '1'
-    rib_ipv4_static_route3['2'] = dict()
-    rib_ipv4_static_route3['2']['Distance'] = '1'
-    rib_ipv4_static_route3['2']['Metric'] = '0'
-    rib_ipv4_static_route3['2']['RouteType'] = 'static'
+    rib_ipv4_static_route3['{}'.format(sw1.ports["if02"])] = dict()
+    rib_ipv4_static_route3['{}'.format(sw1.ports["if02"])]['Distance'] = '1'
+    rib_ipv4_static_route3['{}'.format(sw1.ports["if02"])]['Metric'] = '0'
+    rib_ipv4_static_route3['{}'.format(sw1.ports["if02"])]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ip route") route dictionary for the
     # route 193.0.0.1/32 and its next-hops. The next-hop for the route
@@ -412,10 +427,11 @@ def interface_shut_trigger_static_routes(sw1, sw2, step):
     rib_ipv4_static_route4 = dict()
     rib_ipv4_static_route4['Route'] = '193.0.0.1/32'
     rib_ipv4_static_route4['NumberNexthops'] = '1'
-    rib_ipv4_static_route4['4'] = dict()
-    rib_ipv4_static_route4['4']['Distance'] = '1'
-    rib_ipv4_static_route4['4']['Metric'] = '0'
-    rib_ipv4_static_route4['4']['RouteType'] = 'static'
+    rib_ipv4_static_route4['{}'.format(sw1.ports["if04"])] = dict()
+    rib_ipv4_static_route4['{}'.format(sw1.ports["if04"])]['Distance'] = '1'
+    rib_ipv4_static_route4['{}'.format(sw1.ports["if04"])]['Metric'] = '0'
+    rib_ipv4_static_route4['{}'.format(sw1.ports["if04"])]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ipv6 route") route dictionary for the
     # route 1234:1234::1/128 and its next-hops. The next-hops via interfaces 2
@@ -423,14 +439,16 @@ def interface_shut_trigger_static_routes(sw1, sw2, step):
     route_ipv6_static_route1 = dict()
     route_ipv6_static_route1['Route'] = '1234:1234::1/128'
     route_ipv6_static_route1['NumberNexthops'] = '2'
-    route_ipv6_static_route1['1'] = dict()
-    route_ipv6_static_route1['1']['Distance'] = '1'
-    route_ipv6_static_route1['1']['Metric'] = '0'
-    route_ipv6_static_route1['1']['RouteType'] = 'static'
-    route_ipv6_static_route1['3'] = dict()
-    route_ipv6_static_route1['3']['Distance'] = '1'
-    route_ipv6_static_route1['3']['Metric'] = '0'
-    route_ipv6_static_route1['3']['RouteType'] = 'static'
+    route_ipv6_static_route1['{}'.format(sw1.ports["if01"])] = dict()
+    route_ipv6_static_route1['{}'.format(sw1.ports["if01"])]['Distance'] = '1'
+    route_ipv6_static_route1['{}'.format(sw1.ports["if01"])]['Metric'] = '0'
+    route_ipv6_static_route1['{}'.format(sw1.ports["if01"])]['RouteType'] = \
+        'static'
+    route_ipv6_static_route1['{}'.format(sw1.ports["if03"])] = dict()
+    route_ipv6_static_route1['{}'.format(sw1.ports["if03"])]['Distance'] = '1'
+    route_ipv6_static_route1['{}'.format(sw1.ports["if03"])]['Metric'] = '0'
+    route_ipv6_static_route1['{}'.format(sw1.ports["if03"])]['RouteType'] = \
+        'static'
 
     # Populate the expected RIB ("show rib") route dictionary for the route
     # 1234:1234::1/128 and its next-hops. All four next-hops of the route
@@ -438,22 +456,26 @@ def interface_shut_trigger_static_routes(sw1, sw2, step):
     rib_ipv6_static_route1 = dict()
     rib_ipv6_static_route1['Route'] = '1234:1234::1/128'
     rib_ipv6_static_route1['NumberNexthops'] = '4'
-    rib_ipv6_static_route1['1'] = dict()
-    rib_ipv6_static_route1['1']['Distance'] = '1'
-    rib_ipv6_static_route1['1']['Metric'] = '0'
-    rib_ipv6_static_route1['1']['RouteType'] = 'static'
-    rib_ipv6_static_route1['2'] = dict()
-    rib_ipv6_static_route1['2']['Distance'] = '1'
-    rib_ipv6_static_route1['2']['Metric'] = '0'
-    rib_ipv6_static_route1['2']['RouteType'] = 'static'
-    rib_ipv6_static_route1['3'] = dict()
-    rib_ipv6_static_route1['3']['Distance'] = '1'
-    rib_ipv6_static_route1['3']['Metric'] = '0'
-    rib_ipv6_static_route1['3']['RouteType'] = 'static'
-    rib_ipv6_static_route1['4'] = dict()
-    rib_ipv6_static_route1['4']['Distance'] = '1'
-    rib_ipv6_static_route1['4']['Metric'] = '0'
-    rib_ipv6_static_route1['4']['RouteType'] = 'static'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if01"])] = dict()
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if01"])]['Distance'] = '1'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if01"])]['Metric'] = '0'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if01"])]['RouteType'] = \
+        'static'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if02"])] = dict()
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if02"])]['Distance'] = '1'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if02"])]['Metric'] = '0'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if02"])]['RouteType'] = \
+        'static'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if03"])] = dict()
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if03"])]['Distance'] = '1'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if03"])]['Metric'] = '0'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if03"])]['RouteType'] = \
+        'static'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if04"])] = dict()
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if04"])]['Distance'] = '1'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if04"])]['Metric'] = '0'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if04"])]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ipv6 route") route dictionary for the
     # route 2234:2234::1/128 and its next-hops. The next-hops via interfaces 2
@@ -467,10 +489,11 @@ def interface_shut_trigger_static_routes(sw1, sw2, step):
     rib_ipv6_static_route2 = dict()
     rib_ipv6_static_route2['Route'] = '2234:2234::1/128'
     rib_ipv6_static_route2['NumberNexthops'] = '1'
-    rib_ipv6_static_route2['4'] = dict()
-    rib_ipv6_static_route2['4']['Distance'] = '1'
-    rib_ipv6_static_route2['4']['Metric'] = '0'
-    rib_ipv6_static_route2['4']['RouteType'] = 'static'
+    rib_ipv6_static_route2['{}'.format(sw1.ports["if04"])] = dict()
+    rib_ipv6_static_route2['{}'.format(sw1.ports["if04"])]['Distance'] = '1'
+    rib_ipv6_static_route2['{}'.format(sw1.ports["if04"])]['Metric'] = '0'
+    rib_ipv6_static_route2['{}'.format(sw1.ports["if04"])]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ipv6 route") route dictionary for the
     # route 3234:3234::1/128 and its next-hops. The next-hops via interfaces 2
@@ -484,10 +507,11 @@ def interface_shut_trigger_static_routes(sw1, sw2, step):
     rib_ipv6_static_route3 = dict()
     rib_ipv6_static_route3['Route'] = '3234:3234::1/128'
     rib_ipv6_static_route3['NumberNexthops'] = '1'
-    rib_ipv6_static_route3['2'] = dict()
-    rib_ipv6_static_route3['2']['Distance'] = '1'
-    rib_ipv6_static_route3['2']['Metric'] = '0'
-    rib_ipv6_static_route3['2']['RouteType'] = 'static'
+    rib_ipv6_static_route3['{}'.format(sw1.ports["if02"])] = dict()
+    rib_ipv6_static_route3['{}'.format(sw1.ports["if02"])]['Distance'] = '1'
+    rib_ipv6_static_route3['{}'.format(sw1.ports["if02"])]['Metric'] = '0'
+    rib_ipv6_static_route3['{}'.format(sw1.ports["if02"])]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ipv6 route") route dictionary for the
     # route 4234:4234::1/128 and its next-hops. The next-hops via interfaces 2
@@ -501,12 +525,11 @@ def interface_shut_trigger_static_routes(sw1, sw2, step):
     rib_ipv6_static_route4 = dict()
     rib_ipv6_static_route4['Route'] = '4234:4234::1/128'
     rib_ipv6_static_route4['NumberNexthops'] = '1'
-    rib_ipv6_static_route4['4'] = dict()
-    rib_ipv6_static_route4['4']['Distance'] = '1'
-    rib_ipv6_static_route4['4']['Metric'] = '0'
-    rib_ipv6_static_route4['4']['RouteType'] = 'static'
-
-    sleep(15)
+    rib_ipv6_static_route4['{}'.format(sw1.ports["if04"])] = dict()
+    rib_ipv6_static_route4['{}'.format(sw1.ports["if04"])]['Distance'] = '1'
+    rib_ipv6_static_route4['{}'.format(sw1.ports["if04"])]['Metric'] = '0'
+    rib_ipv6_static_route4['{}'.format(sw1.ports["if04"])]['RouteType'] = \
+        'static'
 
     step("Verifying the IPv4 static routes on"
          "switch 1 after interface shut triggers")
@@ -585,14 +608,16 @@ def interface_no_shut_trigger_static_routes(sw1, sw2, step):
     rib_ipv4_static_route1['1.1.1.2']['Distance'] = '1'
     rib_ipv4_static_route1['1.1.1.2']['Metric'] = '0'
     rib_ipv4_static_route1['1.1.1.2']['RouteType'] = 'static'
-    rib_ipv4_static_route1['2'] = dict()
-    rib_ipv4_static_route1['2']['Distance'] = '1'
-    rib_ipv4_static_route1['2']['Metric'] = '0'
-    rib_ipv4_static_route1['2']['RouteType'] = 'static'
-    rib_ipv4_static_route1['3'] = dict()
-    rib_ipv4_static_route1['3']['Distance'] = '1'
-    rib_ipv4_static_route1['3']['Metric'] = '0'
-    rib_ipv4_static_route1['3']['RouteType'] = 'static'
+    rib_ipv4_static_route1['{}'.format(sw1.ports["if02"])] = dict()
+    rib_ipv4_static_route1['{}'.format(sw1.ports["if02"])]['Distance'] = '1'
+    rib_ipv4_static_route1['{}'.format(sw1.ports["if02"])]['Metric'] = '0'
+    rib_ipv4_static_route1['{}'.format(sw1.ports["if02"])]['RouteType'] = \
+        'static'
+    rib_ipv4_static_route1['{}'.format(sw1.ports["if03"])] = dict()
+    rib_ipv4_static_route1['{}'.format(sw1.ports["if03"])]['Distance'] = '1'
+    rib_ipv4_static_route1['{}'.format(sw1.ports["if03"])]['Metric'] = '0'
+    rib_ipv4_static_route1['{}'.format(sw1.ports["if03"])]['RouteType'] = \
+        'static'
     rib_ipv4_static_route1['5.5.5.1'] = dict()
     rib_ipv4_static_route1['5.5.5.1']['Distance'] = '1'
     rib_ipv4_static_route1['5.5.5.1']['Metric'] = '0'
@@ -623,10 +648,11 @@ def interface_no_shut_trigger_static_routes(sw1, sw2, step):
     rib_ipv4_static_route3 = dict()
     rib_ipv4_static_route3['Route'] = '163.0.0.1/32'
     rib_ipv4_static_route3['NumberNexthops'] = '1'
-    rib_ipv4_static_route3['2'] = dict()
-    rib_ipv4_static_route3['2']['Distance'] = '1'
-    rib_ipv4_static_route3['2']['Metric'] = '0'
-    rib_ipv4_static_route3['2']['RouteType'] = 'static'
+    rib_ipv4_static_route3['{}'.format(sw1.ports["if02"])] = dict()
+    rib_ipv4_static_route3['{}'.format(sw1.ports["if02"])]['Distance'] = '1'
+    rib_ipv4_static_route3['{}'.format(sw1.ports["if02"])]['Metric'] = '0'
+    rib_ipv4_static_route3['{}'.format(sw1.ports["if02"])]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ip route") route dictionary for the
     # route 163.0.0.1/32 and its next-hops. The next-hops via interfaces
@@ -638,10 +664,11 @@ def interface_no_shut_trigger_static_routes(sw1, sw2, step):
     rib_ipv4_static_route4 = dict()
     rib_ipv4_static_route4['Route'] = '193.0.0.1/32'
     rib_ipv4_static_route4['NumberNexthops'] = '1'
-    rib_ipv4_static_route4['4'] = dict()
-    rib_ipv4_static_route4['4']['Distance'] = '1'
-    rib_ipv4_static_route4['4']['Metric'] = '0'
-    rib_ipv4_static_route4['4']['RouteType'] = 'static'
+    rib_ipv4_static_route4['{}'.format(sw1.ports["if04"])] = dict()
+    rib_ipv4_static_route4['{}'.format(sw1.ports["if04"])]['Distance'] = '1'
+    rib_ipv4_static_route4['{}'.format(sw1.ports["if04"])]['Metric'] = '0'
+    rib_ipv4_static_route4['{}'.format(sw1.ports["if04"])]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ip route") route dictionary for the
     # route 193.0.0.1/32 and its next-hops. The next-hops via interfaces
@@ -653,22 +680,26 @@ def interface_no_shut_trigger_static_routes(sw1, sw2, step):
     rib_ipv6_static_route1 = dict()
     rib_ipv6_static_route1['Route'] = '1234:1234::1/128'
     rib_ipv6_static_route1['NumberNexthops'] = '4'
-    rib_ipv6_static_route1['1'] = dict()
-    rib_ipv6_static_route1['1']['Distance'] = '1'
-    rib_ipv6_static_route1['1']['Metric'] = '0'
-    rib_ipv6_static_route1['1']['RouteType'] = 'static'
-    rib_ipv6_static_route1['2'] = dict()
-    rib_ipv6_static_route1['2']['Distance'] = '1'
-    rib_ipv6_static_route1['2']['Metric'] = '0'
-    rib_ipv6_static_route1['2']['RouteType'] = 'static'
-    rib_ipv6_static_route1['3'] = dict()
-    rib_ipv6_static_route1['3']['Distance'] = '1'
-    rib_ipv6_static_route1['3']['Metric'] = '0'
-    rib_ipv6_static_route1['3']['RouteType'] = 'static'
-    rib_ipv6_static_route1['4'] = dict()
-    rib_ipv6_static_route1['4']['Distance'] = '1'
-    rib_ipv6_static_route1['4']['Metric'] = '0'
-    rib_ipv6_static_route1['4']['RouteType'] = 'static'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if01"])] = dict()
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if01"])]['Distance'] = '1'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if01"])]['Metric'] = '0'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if01"])]['RouteType'] = \
+        'static'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if02"])] = dict()
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if02"])]['Distance'] = '1'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if02"])]['Metric'] = '0'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if02"])]['RouteType'] = \
+        'static'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if03"])] = dict()
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if03"])]['Distance'] = '1'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if03"])]['Metric'] = '0'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if03"])]['RouteType'] = \
+        'static'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if04"])] = dict()
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if04"])]['Distance'] = '1'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if04"])]['Metric'] = '0'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if04"])]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ipv6 route") route dictionary for the
     # route 1234:1234::1/128 and its next-hops. The next-hops via interfaces
@@ -680,10 +711,11 @@ def interface_no_shut_trigger_static_routes(sw1, sw2, step):
     rib_ipv6_static_route2 = dict()
     rib_ipv6_static_route2['Route'] = '2234:2234::1/128'
     rib_ipv6_static_route2['NumberNexthops'] = '1'
-    rib_ipv6_static_route2['4'] = dict()
-    rib_ipv6_static_route2['4']['Distance'] = '1'
-    rib_ipv6_static_route2['4']['Metric'] = '0'
-    rib_ipv6_static_route2['4']['RouteType'] = 'static'
+    rib_ipv6_static_route2['{}'.format(sw1.ports["if04"])] = dict()
+    rib_ipv6_static_route2['{}'.format(sw1.ports["if04"])]['Distance'] = '1'
+    rib_ipv6_static_route2['{}'.format(sw1.ports["if04"])]['Metric'] = '0'
+    rib_ipv6_static_route2['{}'.format(sw1.ports["if04"])]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ipv6 route") route dictionary for the
     # route 2234:2234::1/128 and its next-hops. The next-hops via interfaces
@@ -695,10 +727,11 @@ def interface_no_shut_trigger_static_routes(sw1, sw2, step):
     rib_ipv6_static_route3 = dict()
     rib_ipv6_static_route3['Route'] = '3234:3234::1/128'
     rib_ipv6_static_route3['NumberNexthops'] = '1'
-    rib_ipv6_static_route3['2'] = dict()
-    rib_ipv6_static_route3['2']['Distance'] = '1'
-    rib_ipv6_static_route3['2']['Metric'] = '0'
-    rib_ipv6_static_route3['2']['RouteType'] = 'static'
+    rib_ipv6_static_route3['{}'.format(sw1.ports["if02"])] = dict()
+    rib_ipv6_static_route3['{}'.format(sw1.ports["if02"])]['Distance'] = '1'
+    rib_ipv6_static_route3['{}'.format(sw1.ports["if02"])]['Metric'] = '0'
+    rib_ipv6_static_route3['{}'.format(sw1.ports["if02"])]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ipv6 route") route dictionary for the
     # route 3234:3234::1/128 and its next-hops. The next-hops via interfaces
@@ -710,17 +743,16 @@ def interface_no_shut_trigger_static_routes(sw1, sw2, step):
     rib_ipv6_static_route4 = dict()
     rib_ipv6_static_route4['Route'] = '4234:4234::1/128'
     rib_ipv6_static_route4['NumberNexthops'] = '1'
-    rib_ipv6_static_route4['4'] = dict()
-    rib_ipv6_static_route4['4']['Distance'] = '1'
-    rib_ipv6_static_route4['4']['Metric'] = '0'
-    rib_ipv6_static_route4['4']['RouteType'] = 'static'
+    rib_ipv6_static_route4['{}'.format(sw1.ports["if04"])] = dict()
+    rib_ipv6_static_route4['{}'.format(sw1.ports["if04"])]['Distance'] = '1'
+    rib_ipv6_static_route4['{}'.format(sw1.ports["if04"])]['Metric'] = '0'
+    rib_ipv6_static_route4['{}'.format(sw1.ports["if04"])]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ipv6 route") route dictionary for the
     # route 4234:4234::1/128 and its next-hops. The next-hops via interfaces
     # 2 and 4 should now be present in the FIB.
     route_ipv6_static_route4 = rib_ipv6_static_route4
-
-    sleep(15)
 
     step("Verifying the IPv4 static routes on"
          "switch 1 after interface shut triggers")
@@ -813,14 +845,16 @@ def interface_unconfiguring_addresses_trigger_static_routes(sw1, sw2, step):
     route_ipv4_static_route1 = dict()
     route_ipv4_static_route1['Route'] = '123.0.0.1/32'
     route_ipv4_static_route1['NumberNexthops'] = '2'
-    route_ipv4_static_route1['2'] = dict()
-    route_ipv4_static_route1['2']['Distance'] = '1'
-    route_ipv4_static_route1['2']['Metric'] = '0'
-    route_ipv4_static_route1['2']['RouteType'] = 'static'
-    route_ipv4_static_route1['3'] = dict()
-    route_ipv4_static_route1['3']['Distance'] = '1'
-    route_ipv4_static_route1['3']['Metric'] = '0'
-    route_ipv4_static_route1['3']['RouteType'] = 'static'
+    route_ipv4_static_route1['{}'.format(sw1.ports["if02"])] = dict()
+    route_ipv4_static_route1['{}'.format(sw1.ports["if02"])]['Distance'] = '1'
+    route_ipv4_static_route1['{}'.format(sw1.ports["if02"])]['Metric'] = '0'
+    route_ipv4_static_route1['{}'.format(sw1.ports["if02"])]['RouteType'] = \
+        'static'
+    route_ipv4_static_route1['{}'.format(sw1.ports["if03"])] = dict()
+    route_ipv4_static_route1['{}'.format(sw1.ports["if03"])]['Distance'] = '1'
+    route_ipv4_static_route1['{}'.format(sw1.ports["if03"])]['Metric'] = '0'
+    route_ipv4_static_route1['{}'.format(sw1.ports["if03"])]['RouteType'] = \
+        'static'
 
     # Populate the expected RIB ("show rib") route dictionary for the route
     # 123.0.0.1/32 and its next-hops. All four next-hops of the route should
@@ -832,14 +866,16 @@ def interface_unconfiguring_addresses_trigger_static_routes(sw1, sw2, step):
     rib_ipv4_static_route1['1.1.1.2']['Distance'] = '1'
     rib_ipv4_static_route1['1.1.1.2']['Metric'] = '0'
     rib_ipv4_static_route1['1.1.1.2']['RouteType'] = 'static'
-    rib_ipv4_static_route1['2'] = dict()
-    rib_ipv4_static_route1['2']['Distance'] = '1'
-    rib_ipv4_static_route1['2']['Metric'] = '0'
-    rib_ipv4_static_route1['2']['RouteType'] = 'static'
-    rib_ipv4_static_route1['3'] = dict()
-    rib_ipv4_static_route1['3']['Distance'] = '1'
-    rib_ipv4_static_route1['3']['Metric'] = '0'
-    rib_ipv4_static_route1['3']['RouteType'] = 'static'
+    rib_ipv4_static_route1['{}'.format(sw1.ports["if02"])] = dict()
+    rib_ipv4_static_route1['{}'.format(sw1.ports["if02"])]['Distance'] = '1'
+    rib_ipv4_static_route1['{}'.format(sw1.ports["if02"])]['Metric'] = '0'
+    rib_ipv4_static_route1['{}'.format(sw1.ports["if02"])]['RouteType'] = \
+        'static'
+    rib_ipv4_static_route1['{}'.format(sw1.ports["if03"])] = dict()
+    rib_ipv4_static_route1['{}'.format(sw1.ports["if03"])]['Distance'] = '1'
+    rib_ipv4_static_route1['{}'.format(sw1.ports["if03"])]['Metric'] = '0'
+    rib_ipv4_static_route1['{}'.format(sw1.ports["if03"])]['RouteType'] = \
+        'static'
     rib_ipv4_static_route1['5.5.5.1'] = dict()
     rib_ipv4_static_route1['5.5.5.1']['Distance'] = '1'
     rib_ipv4_static_route1['5.5.5.1']['Metric'] = '0'
@@ -867,10 +903,11 @@ def interface_unconfiguring_addresses_trigger_static_routes(sw1, sw2, step):
     rib_ipv4_static_route3 = dict()
     rib_ipv4_static_route3['Route'] = '163.0.0.1/32'
     rib_ipv4_static_route3['NumberNexthops'] = '1'
-    rib_ipv4_static_route3['2'] = dict()
-    rib_ipv4_static_route3['2']['Distance'] = '1'
-    rib_ipv4_static_route3['2']['Metric'] = '0'
-    rib_ipv4_static_route3['2']['RouteType'] = 'static'
+    rib_ipv4_static_route3['{}'.format(sw1.ports["if02"])] = dict()
+    rib_ipv4_static_route3['{}'.format(sw1.ports["if02"])]['Distance'] = '1'
+    rib_ipv4_static_route3['{}'.format(sw1.ports["if02"])]['Metric'] = '0'
+    rib_ipv4_static_route3['{}'.format(sw1.ports["if02"])]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ip route") route dictionary for the
     # route 163.0.0.1/32 and its next-hops. The next-hops via IP addresses
@@ -883,22 +920,26 @@ def interface_unconfiguring_addresses_trigger_static_routes(sw1, sw2, step):
     rib_ipv6_static_route1 = dict()
     rib_ipv6_static_route1['Route'] = '1234:1234::1/128'
     rib_ipv6_static_route1['NumberNexthops'] = '4'
-    rib_ipv6_static_route1['1'] = dict()
-    rib_ipv6_static_route1['1']['Distance'] = '1'
-    rib_ipv6_static_route1['1']['Metric'] = '0'
-    rib_ipv6_static_route1['1']['RouteType'] = 'static'
-    rib_ipv6_static_route1['2'] = dict()
-    rib_ipv6_static_route1['2']['Distance'] = '1'
-    rib_ipv6_static_route1['2']['Metric'] = '0'
-    rib_ipv6_static_route1['2']['RouteType'] = 'static'
-    rib_ipv6_static_route1['3'] = dict()
-    rib_ipv6_static_route1['3']['Distance'] = '1'
-    rib_ipv6_static_route1['3']['Metric'] = '0'
-    rib_ipv6_static_route1['3']['RouteType'] = 'static'
-    rib_ipv6_static_route1['4'] = dict()
-    rib_ipv6_static_route1['4']['Distance'] = '1'
-    rib_ipv6_static_route1['4']['Metric'] = '0'
-    rib_ipv6_static_route1['4']['RouteType'] = 'static'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if01"])] = dict()
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if01"])]['Distance'] = '1'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if01"])]['Metric'] = '0'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if01"])]['RouteType'] = \
+        'static'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if02"])] = dict()
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if02"])]['Distance'] = '1'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if02"])]['Metric'] = '0'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if02"])]['RouteType'] = \
+        'static'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if03"])] = dict()
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if03"])]['Distance'] = '1'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if03"])]['Metric'] = '0'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if03"])]['RouteType'] = \
+        'static'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if04"])] = dict()
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if04"])]['Distance'] = '1'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if04"])]['Metric'] = '0'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if04"])]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ipv6 route") route dictionary for the
     # route 1234:1234::1/128 and its next-hops. The next-hops via IPv6
@@ -911,10 +952,11 @@ def interface_unconfiguring_addresses_trigger_static_routes(sw1, sw2, step):
     rib_ipv6_static_route2 = dict()
     rib_ipv6_static_route2['Route'] = '2234:2234::1/128'
     rib_ipv6_static_route2['NumberNexthops'] = '1'
-    rib_ipv6_static_route2['4'] = dict()
-    rib_ipv6_static_route2['4']['Distance'] = '1'
-    rib_ipv6_static_route2['4']['Metric'] = '0'
-    rib_ipv6_static_route2['4']['RouteType'] = 'static'
+    rib_ipv6_static_route2['{}'.format(sw1.ports["if04"])] = dict()
+    rib_ipv6_static_route2['{}'.format(sw1.ports["if04"])]['Distance'] = '1'
+    rib_ipv6_static_route2['{}'.format(sw1.ports["if04"])]['Metric'] = '0'
+    rib_ipv6_static_route2['{}'.format(sw1.ports["if04"])]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ipv6 route") route dictionary for the
     # route 2234:2234::1/128 and its next-hops. The next-hops via IPv6
@@ -927,17 +969,16 @@ def interface_unconfiguring_addresses_trigger_static_routes(sw1, sw2, step):
     rib_ipv6_static_route3 = dict()
     rib_ipv6_static_route3['Route'] = '3234:3234::1/128'
     rib_ipv6_static_route3['NumberNexthops'] = '1'
-    rib_ipv6_static_route3['2'] = dict()
-    rib_ipv6_static_route3['2']['Distance'] = '1'
-    rib_ipv6_static_route3['2']['Metric'] = '0'
-    rib_ipv6_static_route3['2']['RouteType'] = 'static'
+    rib_ipv6_static_route3['{}'.format(sw1.ports["if02"])] = dict()
+    rib_ipv6_static_route3['{}'.format(sw1.ports["if02"])]['Distance'] = '1'
+    rib_ipv6_static_route3['{}'.format(sw1.ports["if02"])]['Metric'] = '0'
+    rib_ipv6_static_route3['{}'.format(sw1.ports["if02"])]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ipv6 route") route dictionary for the
     # route 3234:3234::1/128 and its next-hops. The next-hops via IPv6
     # addresses interfaces 1 and 4  should be withdrawn from FIB.
     route_ipv6_static_route3 = rib_ipv6_static_route3
-
-    sleep(15)
 
     step("Verifying the IPv4 static routes onswitch 1")
 
@@ -1019,14 +1060,16 @@ def interface_configuring_addresses_trigger_static_routes(sw1, sw2, step):
     rib_ipv4_static_route1['1.1.1.2']['Distance'] = '1'
     rib_ipv4_static_route1['1.1.1.2']['Metric'] = '0'
     rib_ipv4_static_route1['1.1.1.2']['RouteType'] = 'static'
-    rib_ipv4_static_route1['2'] = dict()
-    rib_ipv4_static_route1['2']['Distance'] = '1'
-    rib_ipv4_static_route1['2']['Metric'] = '0'
-    rib_ipv4_static_route1['2']['RouteType'] = 'static'
-    rib_ipv4_static_route1['3'] = dict()
-    rib_ipv4_static_route1['3']['Distance'] = '1'
-    rib_ipv4_static_route1['3']['Metric'] = '0'
-    rib_ipv4_static_route1['3']['RouteType'] = 'static'
+    rib_ipv4_static_route1['{}'.format(sw1.ports["if02"])] = dict()
+    rib_ipv4_static_route1['{}'.format(sw1.ports["if02"])]['Distance'] = '1'
+    rib_ipv4_static_route1['{}'.format(sw1.ports["if02"])]['Metric'] = '0'
+    rib_ipv4_static_route1['{}'.format(sw1.ports["if02"])]['RouteType'] = \
+        'static'
+    rib_ipv4_static_route1['{}'.format(sw1.ports["if03"])] = dict()
+    rib_ipv4_static_route1['{}'.format(sw1.ports["if03"])]['Distance'] = '1'
+    rib_ipv4_static_route1['{}'.format(sw1.ports["if03"])]['Metric'] = '0'
+    rib_ipv4_static_route1['{}'.format(sw1.ports["if03"])]['RouteType'] = \
+        'static'
     rib_ipv4_static_route1['5.5.5.1'] = dict()
     rib_ipv4_static_route1['5.5.5.1']['Distance'] = '1'
     rib_ipv4_static_route1['5.5.5.1']['Metric'] = '0'
@@ -1059,10 +1102,11 @@ def interface_configuring_addresses_trigger_static_routes(sw1, sw2, step):
     rib_ipv4_static_route3 = dict()
     rib_ipv4_static_route3['Route'] = '163.0.0.1/32'
     rib_ipv4_static_route3['NumberNexthops'] = '1'
-    rib_ipv4_static_route3['2'] = dict()
-    rib_ipv4_static_route3['2']['Distance'] = '1'
-    rib_ipv4_static_route3['2']['Metric'] = '0'
-    rib_ipv4_static_route3['2']['RouteType'] = 'static'
+    rib_ipv4_static_route3['{}'.format(sw1.ports["if02"])] = dict()
+    rib_ipv4_static_route3['{}'.format(sw1.ports["if02"])]['Distance'] = '1'
+    rib_ipv4_static_route3['{}'.format(sw1.ports["if02"])]['Metric'] = '0'
+    rib_ipv4_static_route3['{}'.format(sw1.ports["if02"])]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ip route") route dictionary for the
     # route 163.0.0.1/32 and its next-hops. The next-hops via IP addresses
@@ -1075,22 +1119,26 @@ def interface_configuring_addresses_trigger_static_routes(sw1, sw2, step):
     rib_ipv6_static_route1 = dict()
     rib_ipv6_static_route1['Route'] = '1234:1234::1/128'
     rib_ipv6_static_route1['NumberNexthops'] = '4'
-    rib_ipv6_static_route1['1'] = dict()
-    rib_ipv6_static_route1['1']['Distance'] = '1'
-    rib_ipv6_static_route1['1']['Metric'] = '0'
-    rib_ipv6_static_route1['1']['RouteType'] = 'static'
-    rib_ipv6_static_route1['2'] = dict()
-    rib_ipv6_static_route1['2']['Distance'] = '1'
-    rib_ipv6_static_route1['2']['Metric'] = '0'
-    rib_ipv6_static_route1['2']['RouteType'] = 'static'
-    rib_ipv6_static_route1['3'] = dict()
-    rib_ipv6_static_route1['3']['Distance'] = '1'
-    rib_ipv6_static_route1['3']['Metric'] = '0'
-    rib_ipv6_static_route1['3']['RouteType'] = 'static'
-    rib_ipv6_static_route1['4'] = dict()
-    rib_ipv6_static_route1['4']['Distance'] = '1'
-    rib_ipv6_static_route1['4']['Metric'] = '0'
-    rib_ipv6_static_route1['4']['RouteType'] = 'static'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if01"])] = dict()
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if01"])]['Distance'] = '1'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if01"])]['Metric'] = '0'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if01"])]['RouteType'] = \
+        'static'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if02"])] = dict()
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if02"])]['Distance'] = '1'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if02"])]['Metric'] = '0'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if02"])]['RouteType'] = \
+        'static'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if03"])] = dict()
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if03"])]['Distance'] = '1'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if03"])]['Metric'] = '0'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if03"])]['RouteType'] = \
+        'static'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if04"])] = dict()
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if04"])]['Distance'] = '1'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if04"])]['Metric'] = '0'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if04"])]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ipv6 route") route dictionary for the
     # route 1234:1234::1/128 and its next-hops. The next-hops via IPv6
@@ -1103,10 +1151,11 @@ def interface_configuring_addresses_trigger_static_routes(sw1, sw2, step):
     rib_ipv6_static_route2 = dict()
     rib_ipv6_static_route2['Route'] = '2234:2234::1/128'
     rib_ipv6_static_route2['NumberNexthops'] = '1'
-    rib_ipv6_static_route2['4'] = dict()
-    rib_ipv6_static_route2['4']['Distance'] = '1'
-    rib_ipv6_static_route2['4']['Metric'] = '0'
-    rib_ipv6_static_route2['4']['RouteType'] = 'static'
+    rib_ipv6_static_route2['{}'.format(sw1.ports["if04"])] = dict()
+    rib_ipv6_static_route2['{}'.format(sw1.ports["if04"])]['Distance'] = '1'
+    rib_ipv6_static_route2['{}'.format(sw1.ports["if04"])]['Metric'] = '0'
+    rib_ipv6_static_route2['{}'.format(sw1.ports["if04"])]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ipv6 route") route dictionary for the
     # route 2234:2234::1/128 and its next-hops. The next-hops via IPv6
@@ -1119,17 +1168,16 @@ def interface_configuring_addresses_trigger_static_routes(sw1, sw2, step):
     rib_ipv6_static_route3 = dict()
     rib_ipv6_static_route3['Route'] = '3234:3234::1/128'
     rib_ipv6_static_route3['NumberNexthops'] = '1'
-    rib_ipv6_static_route3['2'] = dict()
-    rib_ipv6_static_route3['2']['Distance'] = '1'
-    rib_ipv6_static_route3['2']['Metric'] = '0'
-    rib_ipv6_static_route3['2']['RouteType'] = 'static'
+    rib_ipv6_static_route3['{}'.format(sw1.ports["if02"])] = dict()
+    rib_ipv6_static_route3['{}'.format(sw1.ports["if02"])]['Distance'] = '1'
+    rib_ipv6_static_route3['{}'.format(sw1.ports["if02"])]['Metric'] = '0'
+    rib_ipv6_static_route3['{}'.format(sw1.ports["if02"])]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ipv6 route") route dictionary for the
     # route 3234:3234::1/128 and its next-hops. The next-hops via IPv6
     # addresses interfaces 1 and 4  should be reprogrammed into FIB.
     route_ipv6_static_route3 = rib_ipv6_static_route3
-
-    sleep(15)
 
     step("Verifying the IPv4 static routes onswitch 1")
 
@@ -1214,14 +1262,16 @@ def interface_changing_addresses_trigger_static_routes(sw1, sw2, step):
     rib_ipv4_static_route1['1.1.1.2']['Distance'] = '1'
     rib_ipv4_static_route1['1.1.1.2']['Metric'] = '0'
     rib_ipv4_static_route1['1.1.1.2']['RouteType'] = 'static'
-    rib_ipv4_static_route1['2'] = dict()
-    rib_ipv4_static_route1['2']['Distance'] = '1'
-    rib_ipv4_static_route1['2']['Metric'] = '0'
-    rib_ipv4_static_route1['2']['RouteType'] = 'static'
-    rib_ipv4_static_route1['3'] = dict()
-    rib_ipv4_static_route1['3']['Distance'] = '1'
-    rib_ipv4_static_route1['3']['Metric'] = '0'
-    rib_ipv4_static_route1['3']['RouteType'] = 'static'
+    rib_ipv4_static_route1['{}'.format(sw1.ports["if02"])] = dict()
+    rib_ipv4_static_route1['{}'.format(sw1.ports["if02"])]['Distance'] = '1'
+    rib_ipv4_static_route1['{}'.format(sw1.ports["if02"])]['Metric'] = '0'
+    rib_ipv4_static_route1['{}'.format(sw1.ports["if02"])]['RouteType'] = \
+        'static'
+    rib_ipv4_static_route1['{}'.format(sw1.ports["if03"])] = dict()
+    rib_ipv4_static_route1['{}'.format(sw1.ports["if03"])]['Distance'] = '1'
+    rib_ipv4_static_route1['{}'.format(sw1.ports["if03"])]['Metric'] = '0'
+    rib_ipv4_static_route1['{}'.format(sw1.ports["if03"])]['RouteType'] = \
+        'static'
     rib_ipv4_static_route1['5.5.5.1'] = dict()
     rib_ipv4_static_route1['5.5.5.1']['Distance'] = '1'
     rib_ipv4_static_route1['5.5.5.1']['Metric'] = '0'
@@ -1234,14 +1284,16 @@ def interface_changing_addresses_trigger_static_routes(sw1, sw2, step):
     route_ipv4_static_route1 = dict()
     route_ipv4_static_route1['Route'] = '123.0.0.1/32'
     route_ipv4_static_route1['NumberNexthops'] = '3'
-    route_ipv4_static_route1['2'] = dict()
-    route_ipv4_static_route1['2']['Distance'] = '1'
-    route_ipv4_static_route1['2']['Metric'] = '0'
-    route_ipv4_static_route1['2']['RouteType'] = 'static'
-    route_ipv4_static_route1['3'] = dict()
-    route_ipv4_static_route1['3']['Distance'] = '1'
-    route_ipv4_static_route1['3']['Metric'] = '0'
-    route_ipv4_static_route1['3']['RouteType'] = 'static'
+    route_ipv4_static_route1['{}'.format(sw1.ports["if02"])] = dict()
+    route_ipv4_static_route1['{}'.format(sw1.ports["if02"])]['Distance'] = '1'
+    route_ipv4_static_route1['{}'.format(sw1.ports["if02"])]['Metric'] = '0'
+    route_ipv4_static_route1['{}'.format(sw1.ports["if02"])]['RouteType'] = \
+        'static'
+    route_ipv4_static_route1['{}'.format(sw1.ports["if03"])] = dict()
+    route_ipv4_static_route1['{}'.format(sw1.ports["if03"])]['Distance'] = '1'
+    route_ipv4_static_route1['{}'.format(sw1.ports["if03"])]['Metric'] = '0'
+    route_ipv4_static_route1['{}'.format(sw1.ports["if03"])]['RouteType'] = \
+        'static'
     route_ipv4_static_route1['5.5.5.1'] = dict()
     route_ipv4_static_route1['5.5.5.1']['Distance'] = '1'
     route_ipv4_static_route1['5.5.5.1']['Metric'] = '0'
@@ -1271,10 +1323,11 @@ def interface_changing_addresses_trigger_static_routes(sw1, sw2, step):
     rib_ipv4_static_route3 = dict()
     rib_ipv4_static_route3['Route'] = '163.0.0.1/32'
     rib_ipv4_static_route3['NumberNexthops'] = '1'
-    rib_ipv4_static_route3['2'] = dict()
-    rib_ipv4_static_route3['2']['Distance'] = '1'
-    rib_ipv4_static_route3['2']['Metric'] = '0'
-    rib_ipv4_static_route3['2']['RouteType'] = 'static'
+    rib_ipv4_static_route3['{}'.format(sw1.ports["if02"])] = dict()
+    rib_ipv4_static_route3['{}'.format(sw1.ports["if02"])]['Distance'] = '1'
+    rib_ipv4_static_route3['{}'.format(sw1.ports["if02"])]['Metric'] = '0'
+    rib_ipv4_static_route3['{}'.format(sw1.ports["if02"])]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ip route") route dictionary for the
     # route 163.0.0.1/32 and its next-hops. The next-hops via IP addresses,
@@ -1288,22 +1341,26 @@ def interface_changing_addresses_trigger_static_routes(sw1, sw2, step):
     rib_ipv6_static_route1 = dict()
     rib_ipv6_static_route1['Route'] = '1234:1234::1/128'
     rib_ipv6_static_route1['NumberNexthops'] = '4'
-    rib_ipv6_static_route1['1'] = dict()
-    rib_ipv6_static_route1['1']['Distance'] = '1'
-    rib_ipv6_static_route1['1']['Metric'] = '0'
-    rib_ipv6_static_route1['1']['RouteType'] = 'static'
-    rib_ipv6_static_route1['2'] = dict()
-    rib_ipv6_static_route1['2']['Distance'] = '1'
-    rib_ipv6_static_route1['2']['Metric'] = '0'
-    rib_ipv6_static_route1['2']['RouteType'] = 'static'
-    rib_ipv6_static_route1['3'] = dict()
-    rib_ipv6_static_route1['3']['Distance'] = '1'
-    rib_ipv6_static_route1['3']['Metric'] = '0'
-    rib_ipv6_static_route1['3']['RouteType'] = 'static'
-    rib_ipv6_static_route1['4'] = dict()
-    rib_ipv6_static_route1['4']['Distance'] = '1'
-    rib_ipv6_static_route1['4']['Metric'] = '0'
-    rib_ipv6_static_route1['4']['RouteType'] = 'static'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if01"])] = dict()
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if01"])]['Distance'] = '1'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if01"])]['Metric'] = '0'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if01"])]['RouteType'] = \
+        'static'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if02"])] = dict()
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if02"])]['Distance'] = '1'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if02"])]['Metric'] = '0'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if02"])]['RouteType'] = \
+        'static'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if03"])] = dict()
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if03"])]['Distance'] = '1'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if03"])]['Metric'] = '0'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if03"])]['RouteType'] = \
+        'static'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if04"])] = dict()
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if04"])]['Distance'] = '1'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if04"])]['Metric'] = '0'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if04"])]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ip route") route dictionary for the
     # route 1234:1234::1/128  and its next-hops. The next-hops via IPv6
@@ -1317,10 +1374,11 @@ def interface_changing_addresses_trigger_static_routes(sw1, sw2, step):
     rib_ipv6_static_route2 = dict()
     rib_ipv6_static_route2['Route'] = '2234:2234::1/128'
     rib_ipv6_static_route2['NumberNexthops'] = '1'
-    rib_ipv6_static_route2['4'] = dict()
-    rib_ipv6_static_route2['4']['Distance'] = '1'
-    rib_ipv6_static_route2['4']['Metric'] = '0'
-    rib_ipv6_static_route2['4']['RouteType'] = 'static'
+    rib_ipv6_static_route2['{}'.format(sw1.ports["if04"])] = dict()
+    rib_ipv6_static_route2['{}'.format(sw1.ports["if04"])]['Distance'] = '1'
+    rib_ipv6_static_route2['{}'.format(sw1.ports["if04"])]['Metric'] = '0'
+    rib_ipv6_static_route2['{}'.format(sw1.ports["if04"])]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ip route") route dictionary for the
     # route 2234:2234::1/128  and its next-hops. The next-hops via IPv6
@@ -1334,18 +1392,17 @@ def interface_changing_addresses_trigger_static_routes(sw1, sw2, step):
     rib_ipv6_static_route3 = dict()
     rib_ipv6_static_route3['Route'] = '3234:3234::1/128'
     rib_ipv6_static_route3['NumberNexthops'] = '1'
-    rib_ipv6_static_route3['2'] = dict()
-    rib_ipv6_static_route3['2']['Distance'] = '1'
-    rib_ipv6_static_route3['2']['Metric'] = '0'
-    rib_ipv6_static_route3['2']['RouteType'] = 'static'
+    rib_ipv6_static_route3['{}'.format(sw1.ports["if02"])] = dict()
+    rib_ipv6_static_route3['{}'.format(sw1.ports["if02"])]['Distance'] = '1'
+    rib_ipv6_static_route3['{}'.format(sw1.ports["if02"])]['Metric'] = '0'
+    rib_ipv6_static_route3['{}'.format(sw1.ports["if02"])]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ip route") route dictionary for the
     # route 3234:3234::1/128  and its next-hops. The next-hops via IPv6
     # addresses, if the next-hops do not occur in subnets on interfaces 1
     # and 4, should be withdrawn from FIB.
     route_ipv6_static_route3 = rib_ipv6_static_route3
-
-    sleep(15)
 
     step("Verifying the IPv4 static routes onswitch 1 after changing"
          " interface addresses triggers")
@@ -1432,14 +1489,16 @@ def interface_changing_back_addresses_trigger_static_routes(sw1, sw2, step):
     rib_ipv4_static_route1['1.1.1.2']['Distance'] = '1'
     rib_ipv4_static_route1['1.1.1.2']['Metric'] = '0'
     rib_ipv4_static_route1['1.1.1.2']['RouteType'] = 'static'
-    rib_ipv4_static_route1['2'] = dict()
-    rib_ipv4_static_route1['2']['Distance'] = '1'
-    rib_ipv4_static_route1['2']['Metric'] = '0'
-    rib_ipv4_static_route1['2']['RouteType'] = 'static'
-    rib_ipv4_static_route1['3'] = dict()
-    rib_ipv4_static_route1['3']['Distance'] = '1'
-    rib_ipv4_static_route1['3']['Metric'] = '0'
-    rib_ipv4_static_route1['3']['RouteType'] = 'static'
+    rib_ipv4_static_route1['{}'.format(sw1.ports["if02"])] = dict()
+    rib_ipv4_static_route1['{}'.format(sw1.ports["if02"])]['Distance'] = '1'
+    rib_ipv4_static_route1['{}'.format(sw1.ports["if02"])]['Metric'] = '0'
+    rib_ipv4_static_route1['{}'.format(sw1.ports["if02"])]['RouteType'] = \
+        'static'
+    rib_ipv4_static_route1['{}'.format(sw1.ports["if03"])] = dict()
+    rib_ipv4_static_route1['{}'.format(sw1.ports["if03"])]['Distance'] = '1'
+    rib_ipv4_static_route1['{}'.format(sw1.ports["if03"])]['Metric'] = '0'
+    rib_ipv4_static_route1['{}'.format(sw1.ports["if03"])]['RouteType'] = \
+        'static'
     rib_ipv4_static_route1['5.5.5.1'] = dict()
     rib_ipv4_static_route1['5.5.5.1']['Distance'] = '1'
     rib_ipv4_static_route1['5.5.5.1']['Metric'] = '0'
@@ -1474,10 +1533,11 @@ def interface_changing_back_addresses_trigger_static_routes(sw1, sw2, step):
     rib_ipv4_static_route3 = dict()
     rib_ipv4_static_route3['Route'] = '163.0.0.1/32'
     rib_ipv4_static_route3['NumberNexthops'] = '1'
-    rib_ipv4_static_route3['2'] = dict()
-    rib_ipv4_static_route3['2']['Distance'] = '1'
-    rib_ipv4_static_route3['2']['Metric'] = '0'
-    rib_ipv4_static_route3['2']['RouteType'] = 'static'
+    rib_ipv4_static_route3['{}'.format(sw1.ports["if02"])] = dict()
+    rib_ipv4_static_route3['{}'.format(sw1.ports["if02"])]['Distance'] = '1'
+    rib_ipv4_static_route3['{}'.format(sw1.ports["if02"])]['Metric'] = '0'
+    rib_ipv4_static_route3['{}'.format(sw1.ports["if02"])]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ip route") route dictionary for the
     # route 163.0.0.1/32 and its next-hops. The next-hops via IP addresses,
@@ -1491,22 +1551,26 @@ def interface_changing_back_addresses_trigger_static_routes(sw1, sw2, step):
     rib_ipv6_static_route1 = dict()
     rib_ipv6_static_route1['Route'] = '1234:1234::1/128'
     rib_ipv6_static_route1['NumberNexthops'] = '4'
-    rib_ipv6_static_route1['1'] = dict()
-    rib_ipv6_static_route1['1']['Distance'] = '1'
-    rib_ipv6_static_route1['1']['Metric'] = '0'
-    rib_ipv6_static_route1['1']['RouteType'] = 'static'
-    rib_ipv6_static_route1['2'] = dict()
-    rib_ipv6_static_route1['2']['Distance'] = '1'
-    rib_ipv6_static_route1['2']['Metric'] = '0'
-    rib_ipv6_static_route1['2']['RouteType'] = 'static'
-    rib_ipv6_static_route1['3'] = dict()
-    rib_ipv6_static_route1['3']['Distance'] = '1'
-    rib_ipv6_static_route1['3']['Metric'] = '0'
-    rib_ipv6_static_route1['3']['RouteType'] = 'static'
-    rib_ipv6_static_route1['4'] = dict()
-    rib_ipv6_static_route1['4']['Distance'] = '1'
-    rib_ipv6_static_route1['4']['Metric'] = '0'
-    rib_ipv6_static_route1['4']['RouteType'] = 'static'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if01"])] = dict()
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if01"])]['Distance'] = '1'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if01"])]['Metric'] = '0'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if01"])]['RouteType'] = \
+        'static'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if02"])] = dict()
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if02"])]['Distance'] = '1'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if02"])]['Metric'] = '0'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if02"])]['RouteType'] = \
+        'static'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if03"])] = dict()
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if03"])]['Distance'] = '1'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if03"])]['Metric'] = '0'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if03"])]['RouteType'] = \
+        'static'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if04"])] = dict()
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if04"])]['Distance'] = '1'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if04"])]['Metric'] = '0'
+    rib_ipv6_static_route1['{}'.format(sw1.ports["if04"])]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ipv6 route") route dictionary for the
     # route 1234:1234::1/128 and its next-hops. The next-hops via IPv6
@@ -1520,10 +1584,11 @@ def interface_changing_back_addresses_trigger_static_routes(sw1, sw2, step):
     rib_ipv6_static_route2 = dict()
     rib_ipv6_static_route2['Route'] = '2234:2234::1/128'
     rib_ipv6_static_route2['NumberNexthops'] = '1'
-    rib_ipv6_static_route2['4'] = dict()
-    rib_ipv6_static_route2['4']['Distance'] = '1'
-    rib_ipv6_static_route2['4']['Metric'] = '0'
-    rib_ipv6_static_route2['4']['RouteType'] = 'static'
+    rib_ipv6_static_route2['{}'.format(sw1.ports["if04"])] = dict()
+    rib_ipv6_static_route2['{}'.format(sw1.ports["if04"])]['Distance'] = '1'
+    rib_ipv6_static_route2['{}'.format(sw1.ports["if04"])]['Metric'] = '0'
+    rib_ipv6_static_route2['{}'.format(sw1.ports["if04"])]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ipv6 route") route dictionary for the
     # route 2234:2234::1/128 and its next-hops. The next-hops via IPv6
@@ -1537,18 +1602,17 @@ def interface_changing_back_addresses_trigger_static_routes(sw1, sw2, step):
     rib_ipv6_static_route3 = dict()
     rib_ipv6_static_route3['Route'] = '3234:3234::1/128'
     rib_ipv6_static_route3['NumberNexthops'] = '1'
-    rib_ipv6_static_route3['2'] = dict()
-    rib_ipv6_static_route3['2']['Distance'] = '1'
-    rib_ipv6_static_route3['2']['Metric'] = '0'
-    rib_ipv6_static_route3['2']['RouteType'] = 'static'
+    rib_ipv6_static_route3['{}'.format(sw1.ports["if02"])] = dict()
+    rib_ipv6_static_route3['{}'.format(sw1.ports["if02"])]['Distance'] = '1'
+    rib_ipv6_static_route3['{}'.format(sw1.ports["if02"])]['Metric'] = '0'
+    rib_ipv6_static_route3['{}'.format(sw1.ports["if02"])]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ipv6 route") route dictionary for the
     # route 3234:3234::1/128 and its next-hops. The next-hops via IPv6
     # addresses, if the next-hops occur in subnets on interfaces 1 and 4,
     # should be reprogrammed in FIB.
     route_ipv6_static_route3 = rib_ipv6_static_route3
-
-    sleep(15)
 
     step("Verifying the IPv4 static routes onswitch 1 after changing back"
          " interface addresses triggers")
@@ -1614,10 +1678,11 @@ def add_inactive_nexthop_to_static_routes(sw1, sw2, step):
     rib_ipv4_static_route = dict()
     rib_ipv4_static_route['Route'] = '163.0.0.1' + '/' + '32'
     rib_ipv4_static_route['NumberNexthops'] = '2'
-    rib_ipv4_static_route['2'] = dict()
-    rib_ipv4_static_route['2']['Distance'] = '1'
-    rib_ipv4_static_route['2']['Metric'] = '0'
-    rib_ipv4_static_route['2']['RouteType'] = 'static'
+    rib_ipv4_static_route['{}'.format(sw1.ports["if02"])] = dict()
+    rib_ipv4_static_route['{}'.format(sw1.ports["if02"])]['Distance'] = '1'
+    rib_ipv4_static_route['{}'.format(sw1.ports["if02"])]['Metric'] = '0'
+    rib_ipv4_static_route['{}'.format(sw1.ports["if02"])]['RouteType'] = \
+        'static'
     rib_ipv4_static_route['4.4.4.7'] = dict()
     rib_ipv4_static_route['4.4.4.7']['Distance'] = '1'
     rib_ipv4_static_route['4.4.4.7']['Metric'] = '0'
@@ -1628,41 +1693,43 @@ def add_inactive_nexthop_to_static_routes(sw1, sw2, step):
     route_ipv4_static_route = dict()
     route_ipv4_static_route['Route'] = '163.0.0.1' + '/' + '32'
     route_ipv4_static_route['NumberNexthops'] = '1'
-    route_ipv4_static_route['2'] = dict()
-    route_ipv4_static_route['2']['Distance'] = '1'
-    route_ipv4_static_route['2']['Metric'] = '0'
-    route_ipv4_static_route['2']['RouteType'] = 'static'
+    route_ipv4_static_route['{}'.format(sw1.ports["if02"])] = dict()
+    route_ipv4_static_route['{}'.format(sw1.ports["if02"])]['Distance'] = '1'
+    route_ipv4_static_route['{}'.format(sw1.ports["if02"])]['Metric'] = '0'
+    route_ipv4_static_route['{}'.format(sw1.ports["if02"])]['RouteType'] = \
+        'static'
 
     # Configure IPv6 route 3234:3234::1/128 with interface 4 as next-hop
-    sw1("ipv6 route 3234:3234::1/128 4")
+    sw1("ipv6 route 3234:3234::1/128 {}".format(sw1.ports["if04"]))
     output = sw1("do show running-config")
-    assert "ipv6 route 3234:3234::1/128 4" in output
+    assert "ipv6 route 3234:3234::1/128 {}".format(sw1.ports["if04"]) in output
 
     # Populate the expected RIB ("show rib") route dictionary for the
     # route 3234:3234::1/128 and its next-hops.
     rib_ipv6_static_route = dict()
     rib_ipv6_static_route['Route'] = '3234:3234::1' + '/' + '128'
     rib_ipv6_static_route['NumberNexthops'] = '2'
-    rib_ipv6_static_route['2'] = dict()
-    rib_ipv6_static_route['2']['Distance'] = '1'
-    rib_ipv6_static_route['2']['Metric'] = '0'
-    rib_ipv6_static_route['2']['RouteType'] = 'static'
-    rib_ipv6_static_route['4'] = dict()
-    rib_ipv6_static_route['4']['Distance'] = '1'
-    rib_ipv6_static_route['4']['Metric'] = '0'
-    rib_ipv6_static_route['4']['RouteType'] = 'static'
+    rib_ipv6_static_route['{}'.format(sw1.ports["if02"])] = dict()
+    rib_ipv6_static_route['{}'.format(sw1.ports["if02"])]['Distance'] = '1'
+    rib_ipv6_static_route['{}'.format(sw1.ports["if02"])]['Metric'] = '0'
+    rib_ipv6_static_route['{}'.format(sw1.ports["if02"])]['RouteType'] = \
+        'static'
+    rib_ipv6_static_route['{}'.format(sw1.ports["if04"])] = dict()
+    rib_ipv6_static_route['{}'.format(sw1.ports["if04"])]['Distance'] = '1'
+    rib_ipv6_static_route['{}'.format(sw1.ports["if04"])]['Metric'] = '0'
+    rib_ipv6_static_route['{}'.format(sw1.ports["if04"])]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ipv6 route") route dictionary for the
     # route 3234:3234::1/128 and its next-hops.
     route_ipv6_static_route = dict()
     route_ipv6_static_route['Route'] = '3234:3234::1' + '/' + '128'
     route_ipv6_static_route['NumberNexthops'] = '1'
-    route_ipv6_static_route['2'] = dict()
-    route_ipv6_static_route['2']['Distance'] = '1'
-    route_ipv6_static_route['2']['Metric'] = '0'
-    route_ipv6_static_route['2']['RouteType'] = 'static'
-
-    sleep(15)
+    route_ipv6_static_route['{}'.format(sw1.ports["if02"])] = dict()
+    route_ipv6_static_route['{}'.format(sw1.ports["if02"])]['Distance'] = '1'
+    route_ipv6_static_route['{}'.format(sw1.ports["if02"])]['Metric'] = '0'
+    route_ipv6_static_route['{}'.format(sw1.ports["if02"])]['RouteType'] = \
+        'static'
 
     # Verify route 163.0.0.1/32 and next-hops in RIB and FIB
     aux_route = route_ipv4_static_route["Route"]
@@ -1683,9 +1750,9 @@ def add_inactive_nexthop_to_static_routes(sw1, sw2, step):
 def remove_active_nexthop_from_static_routes(sw1, sw2, step):
 
     # Remove nexthop interface 2 from route 163.0.0.1/32
-    sw1("no ip route 163.0.0.1/32 2")
+    sw1("no ip route 163.0.0.1/32 {}".format(sw1.ports["if02"]))
     output = sw1("do show running-config")
-    assert "ip route 163.0.0.1/32 2" not in output
+    assert "ip route 163.0.0.1/32 {}".format(sw1.ports["if02"]) not in output
 
     # Populate the expected RIB ("show rib") route dictionary for the
     # route 163.0.0.1/32 and its next-hops.
@@ -1704,27 +1771,27 @@ def remove_active_nexthop_from_static_routes(sw1, sw2, step):
     route_ipv4_static_route['Route'] = '163.0.0.1' + '/' + '32'
 
     # Un-Configure IPv6 route 3234:3234::1/128 with interface 2 as next-hop
-    sw1("no ipv6 route 3234:3234::1/128 2")
+    sw1("no ipv6 route 3234:3234::1/128 {}".format(sw1.ports["if02"]))
     output = sw1("do show running-config")
-    assert "ipv6 route 3234:3234::1/128 2" not in output
+    assert "ipv6 route 3234:3234::1/128 {}".format(sw1.ports["if02"]) not in \
+        output
 
     # Populate the expected RIB ("show rib") route dictionary for the
     # route 3234:3234::1/128 and its next-hops.
     rib_ipv6_static_route = dict()
     rib_ipv6_static_route['Route'] = '3234:3234::1' + '/' + '128'
     rib_ipv6_static_route['NumberNexthops'] = '1'
-    rib_ipv6_static_route['4'] = dict()
-    rib_ipv6_static_route['4']['Distance'] = '1'
-    rib_ipv6_static_route['4']['Metric'] = '0'
-    rib_ipv6_static_route['4']['RouteType'] = 'static'
+    rib_ipv6_static_route['{}'.format(sw1.ports["if04"])] = dict()
+    rib_ipv6_static_route['{}'.format(sw1.ports["if04"])]['Distance'] = '1'
+    rib_ipv6_static_route['{}'.format(sw1.ports["if04"])]['Metric'] = '0'
+    rib_ipv6_static_route['{}'.format(sw1.ports["if04"])]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ipv6 route") route dictionary for the
     # route 3234:3234::1/128 and its next-hops. The next-hop for the route
     # should be withdrawn from the FIB.
     route_ipv6_static_route = dict()
     route_ipv6_static_route['Route'] = '3234:3234::1' + '/' + '128'
-
-    sleep(15)
 
     # Verify route 163.0.0.1/32 and next-hops in RIB and FIB
     aux_route = route_ipv4_static_route["Route"]
@@ -1742,6 +1809,7 @@ def remove_active_nexthop_from_static_routes(sw1, sw2, step):
     verify_show_rib(sw1, aux_route, 'static', rib_ipv6_static_route)
 
 
+@mark.timeout(300)
 def test_zebra_ct_interface_state_change(topology, step):
     sw1 = topology.get("sw1")
     sw2 = topology.get("sw2")

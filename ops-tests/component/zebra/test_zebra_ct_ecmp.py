@@ -17,8 +17,11 @@
 # Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 # 02111-1307, USA.
 
-from time import sleep
-# from re import search
+from zebra_routing import (
+    verify_show_ip_route,
+    verify_show_rib
+)
+from pytest import mark
 
 TOPOLOGY = """
 #               +-------+     +-------+
@@ -80,9 +83,157 @@ def _configure_switches(topology, step):
     sw1("no shut")
     sw1("exit")
 
+    # Populate the expected RIB ("show rib") route dictionary for the connected
+    # IPv4 route for layer-3 interface '1'.
+    sw1_rib_ipv4_layer3_connected_route_1 = dict()
+    sw1_rib_ipv4_layer3_connected_route_1['Route'] = '10.0.10.0/24'
+    sw1_rib_ipv4_layer3_connected_route_1['NumberNexthops'] = '1'
+    sw1_rib_ipv4_layer3_connected_route_1['1'] = dict()
+    sw1_rib_ipv4_layer3_connected_route_1['1']['Distance'] = '0'
+    sw1_rib_ipv4_layer3_connected_route_1['1']['Metric'] = '0'
+    sw1_rib_ipv4_layer3_connected_route_1['1']['RouteType'] = 'connected'
+
+    # Populate the expected FIB ("show ip route") route dictionary for the
+    # connected IPv4 route for layer-3 interface '1'.
+    sw1_fib_ipv4_layer3_connected_route_1 = \
+        sw1_rib_ipv4_layer3_connected_route_1
+
+    # Populate the expected RIB ("show rib") route dictionary for the connected
+    # IPv4 route for layer-3 interface '2'.
+    sw1_rib_ipv4_layer3_connected_route_2 = dict()
+    sw1_rib_ipv4_layer3_connected_route_2['Route'] = '10.0.20.0/24'
+    sw1_rib_ipv4_layer3_connected_route_2['NumberNexthops'] = '1'
+    sw1_rib_ipv4_layer3_connected_route_2['2'] = dict()
+    sw1_rib_ipv4_layer3_connected_route_2['2']['Distance'] = '0'
+    sw1_rib_ipv4_layer3_connected_route_2['2']['Metric'] = '0'
+    sw1_rib_ipv4_layer3_connected_route_2['2']['RouteType'] = 'connected'
+
+    # Populate the expected RIB ("show ip route") route dictionary for the
+    # connected IPv4 route for layer-3 interface '2'.
+    sw1_fib_ipv4_layer3_connected_route_2 = \
+        sw1_rib_ipv4_layer3_connected_route_2
+
+    # Populate the expected RIB ("show rib") route dictionary for the connected
+    # IPv4 route for layer-3 interface '3'.
+    sw1_rib_ipv4_layer3_connected_route_3 = dict()
+    sw1_rib_ipv4_layer3_connected_route_3['Route'] = '10.0.30.0/24'
+    sw1_rib_ipv4_layer3_connected_route_3['NumberNexthops'] = '1'
+    sw1_rib_ipv4_layer3_connected_route_3['3'] = dict()
+    sw1_rib_ipv4_layer3_connected_route_3['3']['Distance'] = '0'
+    sw1_rib_ipv4_layer3_connected_route_3['3']['Metric'] = '0'
+    sw1_rib_ipv4_layer3_connected_route_3['3']['RouteType'] = 'connected'
+
+    # Populate the expected FIB ("show ip route") route dictionary for the
+    # connected IPv4 route for layer-3 interface '3'.
+    sw1_fib_ipv4_layer3_connected_route_3 = \
+        sw1_rib_ipv4_layer3_connected_route_3
+
+    # Populate the expected RIB ("show rib") route dictionary for the connected
+    # IPv4 route for layer-3 interface '4'.
+    sw1_rib_ipv4_layer3_connected_route_4 = dict()
+    sw1_rib_ipv4_layer3_connected_route_4['Route'] = '10.0.40.0/24'
+    sw1_rib_ipv4_layer3_connected_route_4['NumberNexthops'] = '1'
+    sw1_rib_ipv4_layer3_connected_route_4['4'] = dict()
+    sw1_rib_ipv4_layer3_connected_route_4['4']['Distance'] = '0'
+    sw1_rib_ipv4_layer3_connected_route_4['4']['Metric'] = '0'
+    sw1_rib_ipv4_layer3_connected_route_4['4']['RouteType'] = 'connected'
+
+    # Populate the expected FIB ("show ip route") route dictionary for the
+    # connected IPv4 route for layer-3 interface '4'.
+    sw1_fib_ipv4_layer3_connected_route_4 = \
+        sw1_rib_ipv4_layer3_connected_route_4
+
     # Add IPv4 static route on sw1 and sw2
     sw1("ip route 10.0.70.0/24 10.0.30.2")
     sw1("ip route 10.0.70.0/24 10.0.40.2")
+
+    # Populate the expected RIB ("show rib") route dictionary for the
+    # route 10.0.70.0/24 and its next-hops.
+    sw1_rib_ipv4_layer3_static_route_1 = dict()
+    sw1_rib_ipv4_layer3_static_route_1['Route'] = '10.0.70.0/24'
+    sw1_rib_ipv4_layer3_static_route_1['NumberNexthops'] = '2'
+    sw1_rib_ipv4_layer3_static_route_1['10.0.30.2'] = dict()
+    sw1_rib_ipv4_layer3_static_route_1['10.0.30.2']['Distance'] = '1'
+    sw1_rib_ipv4_layer3_static_route_1['10.0.30.2']['Metric'] = '0'
+    sw1_rib_ipv4_layer3_static_route_1['10.0.30.2']['RouteType'] = 'static'
+    sw1_rib_ipv4_layer3_static_route_1['10.0.40.2'] = dict()
+    sw1_rib_ipv4_layer3_static_route_1['10.0.40.2']['Distance'] = '1'
+    sw1_rib_ipv4_layer3_static_route_1['10.0.40.2']['Metric'] = '0'
+    sw1_rib_ipv4_layer3_static_route_1['10.0.40.2']['RouteType'] = 'static'
+
+    # Populate the expected FIB ("show ipv6 route") route dictionary for the
+    # route 10.0.70.0/24 and its next-hops.
+    sw1_fib_ipv4_layer3_static_route_1 = sw1_rib_ipv4_layer3_static_route_1
+
+    # Verify route 10.0.10.0/24 and next-hops in RIB and FIB
+    aux_route = sw1_fib_ipv4_layer3_connected_route_1["Route"]
+    verify_show_ip_route(
+        sw1,
+        aux_route,
+        'connected',
+        sw1_fib_ipv4_layer3_connected_route_1)
+    aux_route = sw1_rib_ipv4_layer3_connected_route_1["Route"]
+    verify_show_rib(
+        sw1,
+        aux_route,
+        'connected',
+        sw1_rib_ipv4_layer3_connected_route_1)
+
+    # Verify route 10.0.20.0/24 and next-hops in RIB and FIB
+    aux_route = sw1_fib_ipv4_layer3_connected_route_2["Route"]
+    verify_show_ip_route(
+        sw1,
+        aux_route,
+        'connected',
+        sw1_fib_ipv4_layer3_connected_route_2)
+    aux_route = sw1_rib_ipv4_layer3_connected_route_2["Route"]
+    verify_show_rib(
+        sw1,
+        aux_route,
+        'connected',
+        sw1_rib_ipv4_layer3_connected_route_2)
+
+    # Verify route 10.0.30.0/24 and next-hops in RIB and FIB
+    aux_route = sw1_fib_ipv4_layer3_connected_route_3["Route"]
+    verify_show_ip_route(
+        sw1,
+        aux_route,
+        'connected',
+        sw1_fib_ipv4_layer3_connected_route_3)
+    aux_route = sw1_rib_ipv4_layer3_connected_route_3["Route"]
+    verify_show_rib(
+        sw1,
+        aux_route,
+        'connected',
+        sw1_rib_ipv4_layer3_connected_route_3)
+
+    # Verify route 10.0.40.0/24 and next-hops in RIB and FIB
+    aux_route = sw1_fib_ipv4_layer3_connected_route_4["Route"]
+    verify_show_ip_route(
+        sw1,
+        aux_route,
+        'connected',
+        sw1_fib_ipv4_layer3_connected_route_4)
+    aux_route = sw1_rib_ipv4_layer3_connected_route_4["Route"]
+    verify_show_rib(
+        sw1,
+        aux_route,
+        'connected',
+        sw1_rib_ipv4_layer3_connected_route_4)
+
+    # Verify route 10.0.70.0/24 and next-hops in RIB and FIB
+    aux_route = sw1_fib_ipv4_layer3_static_route_1["Route"]
+    verify_show_ip_route(
+        sw1,
+        aux_route,
+        'static',
+        sw1_fib_ipv4_layer3_static_route_1)
+    aux_route = sw1_rib_ipv4_layer3_static_route_1["Route"]
+    verify_show_rib(
+        sw1,
+        aux_route,
+        'static',
+        sw1_rib_ipv4_layer3_static_route_1)
 
     # Add second ecmp IPv4 static route on sw1 and sw2
     # sw1("ip route 10.0.70.0/24 10.0.40.2")
@@ -106,11 +257,162 @@ def _configure_switches(topology, step):
     sw2("ip address 10.0.70.2/24")
     sw2("no shut")
     sw2("exit")
+
+    # Populate the expected RIB ("show rib") route dictionary for the connected
+    # IPv4 route for layer-3 interface '1'.
+    sw2_rib_ipv4_layer3_connected_route_1 = dict()
+    sw2_rib_ipv4_layer3_connected_route_1['Route'] = '10.0.30.0/24'
+    sw2_rib_ipv4_layer3_connected_route_1['NumberNexthops'] = '1'
+    sw2_rib_ipv4_layer3_connected_route_1['1'] = dict()
+    sw2_rib_ipv4_layer3_connected_route_1['1']['Distance'] = '0'
+    sw2_rib_ipv4_layer3_connected_route_1['1']['Metric'] = '0'
+    sw2_rib_ipv4_layer3_connected_route_1['1']['RouteType'] = 'connected'
+
+    # Populate the expected FIB ("show ip route") route dictionary for the
+    # connected IPv4 route for layer-3 interface '1'.
+    sw2_fib_ipv4_layer3_connected_route_1 = \
+        sw2_rib_ipv4_layer3_connected_route_1
+
+    # Populate the expected RIB ("show rib") route dictionary for the connected
+    # IPv4 route for layer-3 interface '2'.
+    sw2_rib_ipv4_layer3_connected_route_2 = dict()
+    sw2_rib_ipv4_layer3_connected_route_2['Route'] = '10.0.40.0/24'
+    sw2_rib_ipv4_layer3_connected_route_2['NumberNexthops'] = '1'
+    sw2_rib_ipv4_layer3_connected_route_2['2'] = dict()
+    sw2_rib_ipv4_layer3_connected_route_2['2']['Distance'] = '0'
+    sw2_rib_ipv4_layer3_connected_route_2['2']['Metric'] = '0'
+    sw2_rib_ipv4_layer3_connected_route_2['2']['RouteType'] = 'connected'
+
+    # Populate the expected RIB ("show ip route") route dictionary for the
+    # connected IPv4 route for layer-3 interface '2'.
+    sw2_fib_ipv4_layer3_connected_route_2 = \
+        sw2_rib_ipv4_layer3_connected_route_2
+
+    # Populate the expected RIB ("show rib") route dictionary for the connected
+    # IPv4 route for layer-3 interface '3'.
+    sw2_rib_ipv4_layer3_connected_route_3 = dict()
+    sw2_rib_ipv4_layer3_connected_route_3['Route'] = '10.0.70.0/24'
+    sw2_rib_ipv4_layer3_connected_route_3['NumberNexthops'] = '1'
+    sw2_rib_ipv4_layer3_connected_route_3['3'] = dict()
+    sw2_rib_ipv4_layer3_connected_route_3['3']['Distance'] = '0'
+    sw2_rib_ipv4_layer3_connected_route_3['3']['Metric'] = '0'
+    sw2_rib_ipv4_layer3_connected_route_3['3']['RouteType'] = 'connected'
+
+    # Populate the expected FIB ("show ip route") route dictionary for the
+    # connected IPv4 route for layer-3 interface '3'.
+    sw2_fib_ipv4_layer3_connected_route_3 = \
+        sw2_rib_ipv4_layer3_connected_route_3
+
     sw2("ip route 10.0.10.0/24 10.0.30.1")
     sw2("ip route 10.0.10.0/24 10.0.40.1")
-    sleep(1)
     sw2("ip route 10.0.20.0/24 10.0.30.1")
     sw2("ip route 10.0.20.0/24 10.0.40.1")
+
+    # Populate the expected RIB ("show rib") route dictionary for the
+    # route 10.0.10.0/24 and its next-hops.
+    sw2_rib_ipv4_layer3_static_route_1 = dict()
+    sw2_rib_ipv4_layer3_static_route_1['Route'] = '10.0.10.0/24'
+    sw2_rib_ipv4_layer3_static_route_1['NumberNexthops'] = '2'
+    sw2_rib_ipv4_layer3_static_route_1['10.0.30.1'] = dict()
+    sw2_rib_ipv4_layer3_static_route_1['10.0.30.1']['Distance'] = '1'
+    sw2_rib_ipv4_layer3_static_route_1['10.0.30.1']['Metric'] = '0'
+    sw2_rib_ipv4_layer3_static_route_1['10.0.30.1']['RouteType'] = 'static'
+    sw2_rib_ipv4_layer3_static_route_1['10.0.40.1'] = dict()
+    sw2_rib_ipv4_layer3_static_route_1['10.0.40.1']['Distance'] = '1'
+    sw2_rib_ipv4_layer3_static_route_1['10.0.40.1']['Metric'] = '0'
+    sw2_rib_ipv4_layer3_static_route_1['10.0.40.1']['RouteType'] = 'static'
+
+    # Populate the expected FIB ("show ipv6 route") route dictionary for the
+    # route 10.0.10.0/24 and its next-hops.
+    sw2_fib_ipv4_layer3_static_route_1 = sw2_rib_ipv4_layer3_static_route_1
+
+    # Populate the expected RIB ("show rib") route dictionary for the
+    # route 10.0.20.0/24 and its next-hops.
+    sw2_rib_ipv4_layer3_static_route_2 = dict()
+    sw2_rib_ipv4_layer3_static_route_2['Route'] = '10.0.20.0/24'
+    sw2_rib_ipv4_layer3_static_route_2['NumberNexthops'] = '2'
+    sw2_rib_ipv4_layer3_static_route_2['10.0.30.1'] = dict()
+    sw2_rib_ipv4_layer3_static_route_2['10.0.30.1']['Distance'] = '1'
+    sw2_rib_ipv4_layer3_static_route_2['10.0.30.1']['Metric'] = '0'
+    sw2_rib_ipv4_layer3_static_route_2['10.0.30.1']['RouteType'] = 'static'
+    sw2_rib_ipv4_layer3_static_route_2['10.0.40.1'] = dict()
+    sw2_rib_ipv4_layer3_static_route_2['10.0.40.1']['Distance'] = '1'
+    sw2_rib_ipv4_layer3_static_route_2['10.0.40.1']['Metric'] = '0'
+    sw2_rib_ipv4_layer3_static_route_2['10.0.40.1']['RouteType'] = 'static'
+
+    # Populate the expected FIB ("show ipv6 route") route dictionary for the
+    # route 10.0.20.0/24 and its next-hops.
+    sw2_fib_ipv4_layer3_static_route_2 = sw2_rib_ipv4_layer3_static_route_2
+
+    # Verify route 10.0.30.0/24 and next-hops in RIB and FIB
+    aux_route = sw2_fib_ipv4_layer3_connected_route_1["Route"]
+    verify_show_ip_route(
+        sw2,
+        aux_route,
+        'connected',
+        sw2_fib_ipv4_layer3_connected_route_1)
+    aux_route = sw2_rib_ipv4_layer3_connected_route_1["Route"]
+    verify_show_rib(
+        sw2,
+        aux_route,
+        'connected',
+        sw2_rib_ipv4_layer3_connected_route_1)
+
+    # Verify route 10.0.40.0/24 and next-hops in RIB and FIB
+    aux_route = sw2_fib_ipv4_layer3_connected_route_2["Route"]
+    verify_show_ip_route(
+        sw2,
+        aux_route,
+        'connected',
+        sw2_fib_ipv4_layer3_connected_route_2)
+    aux_route = sw2_rib_ipv4_layer3_connected_route_2["Route"]
+    verify_show_rib(
+        sw2,
+        aux_route,
+        'connected',
+        sw2_rib_ipv4_layer3_connected_route_2)
+
+    # Verify route 10.0.70.0/24 and next-hops in RIB and FIB
+    aux_route = sw2_fib_ipv4_layer3_connected_route_3["Route"]
+    verify_show_ip_route(
+        sw2,
+        aux_route,
+        'connected',
+        sw2_fib_ipv4_layer3_connected_route_3)
+    aux_route = sw2_rib_ipv4_layer3_connected_route_3["Route"]
+    verify_show_rib(
+        sw2,
+        aux_route,
+        'connected',
+        sw2_rib_ipv4_layer3_connected_route_3)
+
+    # Verify route 10.0.10.0/24 and next-hops in RIB and FIB
+    aux_route = sw2_fib_ipv4_layer3_static_route_1["Route"]
+    verify_show_ip_route(
+        sw2,
+        aux_route,
+        'static',
+        sw2_fib_ipv4_layer3_static_route_1)
+    aux_route = sw2_rib_ipv4_layer3_static_route_1["Route"]
+    verify_show_rib(
+        sw2,
+        aux_route,
+        'static',
+        sw2_rib_ipv4_layer3_static_route_1)
+
+    # Verify route 10.0.20.0/24 and next-hops in RIB and FIB
+    aux_route = sw2_fib_ipv4_layer3_static_route_2["Route"]
+    verify_show_ip_route(
+        sw2,
+        aux_route,
+        'static',
+        sw2_fib_ipv4_layer3_static_route_2)
+    aux_route = sw2_rib_ipv4_layer3_static_route_2["Route"]
+    verify_show_rib(
+        sw2,
+        aux_route,
+        'static',
+        sw2_rib_ipv4_layer3_static_route_2)
 
 
 def _configure_hosts(topology, step):
@@ -154,16 +456,21 @@ def _v4_route_ping_test(topology, step):
     assert hs1 is not None
     hs2 = topology.get("hs2")
     assert hs2 is not None
-    sleep(3)
     step('3-IPv4 Ping test')
 
-    # Ping host3 from host1
+    # Ping host3 from host1, pinging twice to take care of unresolved ARPs
     ping = hs1.libs.ping.ping(5, '10.0.70.1')
-    assert ping['transmitted'] >= 3 and ping['received'] >= 3
+    assert ping['received'] > 0, "Ping from Host3 to Host1 failed"
+    ping = hs1.libs.ping.ping(5, '10.0.70.1')
+    assert ping['transmitted'] == ping['received'], "Ping from Host3 to Host1"\
+                                                    " failed"
 
-    # Ping host3 from host2
+    # Ping host3 from host2, pinging twice to take care of unresolved ARPs
     ping = hs2.libs.ping.ping(5, '10.0.70.1')
-    assert ping['transmitted'] >= 3 and ping['received'] >= 3
+    assert ping['received'] > 0, "Ping from Host2 to Host1 failed"
+    ping = hs2.libs.ping.ping(5, '10.0.70.1')
+    assert ping['transmitted'] == ping['received'], "Ping from Host2 to Host1"\
+                                                    " failed"
 
 
 def _v4_route_delete_ping_test(topology, step):
@@ -180,11 +487,12 @@ def _v4_route_delete_ping_test(topology, step):
     sw1("no ip route 10.0.70.0/24 10.0.30.2")
 
     # Ping host1 from host2
-    sleep(3)
     ping = hs1.libs.ping.ping(5, '10.0.70.1')
-    assert ping['transmitted'] is 5 and ping['received'] is 0
+    assert ping['transmitted'] is 5 and ping['received'] is 0, "Ping from "\
+        "Host1 to Host2 success"
 
 
+@mark.timeout(300)
 def test_zebra_ct_ecmp(topology, step):
     _configure_switches(topology, step)
     _configure_hosts(topology, step)

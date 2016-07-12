@@ -15,6 +15,8 @@
 # specific language governing permissions and limitations
 # under the License.
 
+from pytest import mark
+
 """
 Component test to verify zebra diagnostic commands.
 """
@@ -33,6 +35,8 @@ TOPOLOGY = """
 
 """
 
+
+@mark.timeout(300)
 def test_zebra_diag_dump(topology, step):
     '''
     This test verifies various diagnostic commands related to zebra daemon
@@ -49,45 +53,69 @@ def test_zebra_diag_dump(topology, step):
     assert '-------- Zebra internal IPv6 routes dump: --------' in output, \
            'Missing internal IPv6 routes dump in "zebra/dump rib" output'
 
-    step('### Testing output of "ovs-appctl -t ops-zebra zebra/dump kernel-routes" ###')
-    output = sw1("ovs-appctl -t ops-zebra zebra/dump kernel-routes", shell="bash")
+    step(
+        '### Testing output of "ovs-appctl -t ops-zebra zebra/dump '
+        'kernel-routes" ###')
+    output = sw1(
+        "ovs-appctl -t ops-zebra zebra/dump kernel-routes",
+        shell="bash")
     assert '-------- Kernel IPv4 routes dump: --------' in output, \
-           'Missing kernel IPv4 routes dump in "zebra/dump kernel-routes" output'
+           'Missing kernel IPv4 routes dump in "zebra/dump kernel-routes" ' \
+           'output'
     assert '-------- Kernel IPv6 routes dump: --------' in output, \
-           'Missing kernel IPv6 routes dump in "zebra/dump kernel-routes" output'
+        'Missing kernel IPv6 routes dump in "zebra/dump kernel-routes" ' \
+        'output'
 
-    step('### Testing output of "ovs-appctl -t ops-zebra zebra/dump l3-port-cache" ###')
-    output = sw1("ovs-appctl -t ops-zebra zebra/dump l3-port-cache", shell="bash")
+    step(
+        '### Testing output of "ovs-appctl -t ops-zebra zebra/dump '
+        'l3-port-cache" ###')
+    output = sw1(
+        "ovs-appctl -t ops-zebra zebra/dump l3-port-cache",
+        shell="bash")
     assert '-------- Zebra L3 port cache dump: --------' in output, \
            'Missing L3 port cache dump in "zebra/dump l3-port-cache" output'
 
-    step('### Testing output of "ovs-appctl -t ops-zebra zebra/dump memory" ###')
+    step(
+        '### Testing output of "ovs-appctl -t ops-zebra zebra/dump memory" '
+        '###')
     output = sw1("ovs-appctl -t ops-zebra zebra/dump memory", shell="bash")
     assert '-------- Zebra memory dump: --------' in output, \
            'Missing memory dump in "zebra/dump memory" output'
 
-    step('### Testing output of CLI command "diag-dump route-manager basic" ###')
+    step(
+        '### Testing output of CLI command "diag-dump route-manager basic" '
+        '###')
     output = sw1('diag-dump route-manager basic')
     assert '-------- Zebra internal IPv4 routes dump: --------' in output, \
-           'Missing internal IPv4 routes dump in "diag-dump route-manager basicb" output'
+           'Missing internal IPv4 routes dump in "diag-dump route-manager ' \
+           'basicb" output'
     assert '-------- Zebra internal IPv6 routes dump: --------' in output, \
-           'Missing internal IPv6 routes dump in "diag-dump route-manager basic" output'
+           'Missing internal IPv6 routes dump in "diag-dump route-manager ' \
+           'basic" output'
     assert '-------- Kernel IPv4 routes dump: --------' in output, \
-           'Missing kernel IPv4 routes dump in "diag-dump route-manager basic" output'
+           'Missing kernel IPv4 routes dump in "diag-dump route-manager ' \
+           'basic" output'
     assert '-------- Kernel IPv6 routes dump: --------' in output, \
-           'Missing kernel IPv6 routes dump in "diag-dump route-manager basic" output'
+           'Missing kernel IPv6 routes dump in "diag-dump route-manager ' \
+           'basic" output'
     assert '-------- Zebra L3 port cache dump: --------' in output, \
-           'Missing L3 port cache dump in "diag-dump route-manager basic" output'
+           'Missing L3 port cache dump in "diag-dump route-manager basic" ' \
+           'output'
     assert '-------- Zebra memory dump: --------' in output, \
            'Missing memory dump in "diag-dump route-manager basic" output'
 
-
-    step('### Testing invalid option to "ovs-appctl -t ops-zebra zebra/dump" command ###')
-    output = sw1("ovs-appctl -t ops-zebra zebra/dump unsupported", shell="bash")
+    step(
+        '### Testing invalid option to "ovs-appctl -t ops-zebra zebra/dump" '
+        'command ###')
+    output = sw1(
+        "ovs-appctl -t ops-zebra zebra/dump unsupported",
+        shell="bash")
     assert 'Argument unsupported not supported' in output, \
            '"zebra/dump unsupported" should fail with error'
 
-    step('### Testing output of "ovs-appctl -t ops-zebra zebra/dump" with no arguments ###')
+    step(
+        '### Testing output of "ovs-appctl -t ops-zebra zebra/dump" with no '
+        'arguments ###')
     output = sw1("ovs-appctl -t ops-zebra zebra/dump", shell="bash")
     assert '-------- Zebra internal IPv4 routes dump: --------' in output, \
            'Missing internal IPv4 routes dump in "zebra/dump" output'
@@ -102,13 +130,19 @@ def test_zebra_diag_dump(topology, step):
     assert '-------- Zebra memory dump: --------' in output, \
            'Missing memory dump in "zebra/dump" output'
 
-    step('### Testing invalid arguments to "ovs-appctl -t ops-zebra zebra/diag" ###')
+    step(
+        '### Testing invalid arguments to "ovs-appctl -t ops-zebra '
+        'zebra/diag" ###')
     output = sw1("ovs-appctl -t ops-zebra zebra/diag -1", shell="bash")
-    assert 'Buffer length can only be set to a positive integer value' in output, \
-           '"ovs-appctl -t ops-zebra zebra/diag" should only accept positive \
-           integer values'
+    assert 'Buffer length can only be set to a positive integer value' in \
+        output, '"ovs-appctl -t ops-zebra zebra/diag" should only accept \
+        positive integer values'
 
-    step('### Testing invalid arguments to "ovs-appctl -t ops-zebra zebra/debug" ###')
-    output = sw1("ovs-appctl -t ops-zebra zebra/debug unsupported", shell="bash")
+    step(
+        '### Testing invalid arguments to "ovs-appctl -t ops-zebra '
+        'zebra/debug" ###')
+    output = sw1(
+        "ovs-appctl -t ops-zebra zebra/debug unsupported",
+        shell="bash")
     assert 'Unsupported argument - unsupported' in output, \
            '"ovs-appctl -t ops-zebra zebra/debug" should fail with error'

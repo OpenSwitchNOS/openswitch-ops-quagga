@@ -22,7 +22,7 @@ from route_generator_and_stats_reporter import (
     get_static_route_dict,
     capture_output_samples_and_generate_perf_stats
 )
-from time import sleep
+from pytest import mark
 
 TOPOLOGY = """
 # +-------+    +-------+
@@ -56,8 +56,7 @@ zebra_stop_command_string = "systemctl stop ops-zebra"
 zebra_start_command_string = "systemctl start ops-zebra"
 
 
-def ConfigureIpv6StaticRoutes(sw1, sw2, ipv6_route_list, step):
-    sw1_interfaces = []
+def configure_ipv6_static_routes(sw1, sw2, ipv6_route_list, step):
 
     # IPv4 addresses to cnfigure on switch
     sw1_if_ip = "8421:8421::1"
@@ -82,6 +81,7 @@ def ConfigureIpv6StaticRoutes(sw1, sw2, ipv6_route_list, step):
 
     # Stop ops-zebra process on sw1
     sw1(zebra_stop_command_string, shell='bash')
+    sw1("configure terminal")
 
     for route in ipv6_route_list:
         sw1("ipv6 route {} {}".format(route['Prefix'], route['Nexthop']))
@@ -93,34 +93,32 @@ def ConfigureIpv6StaticRoutes(sw1, sw2, ipv6_route_list, step):
     # Start ops-zebra process on sw1
     sw1(zebra_start_command_string, shell='bash')
 
-    sleep(TRIGGER_SLEEP)
-
     perf_stats_dict = capture_output_samples_and_generate_perf_stats(
-                                       sw1, ipv6_route_list,
-                                       "Config", False,
-                                       TOTAL_TIME, SAMPLING_TIME,
-                                       SNAPSHOT_TIME)
+        sw1, ipv6_route_list,
+        "Config", False,
+        TOTAL_TIME, SAMPLING_TIME,
+        SNAPSHOT_TIME)
 
-    assert perf_stats_dict is not None, "No perf stat captured \
-           at "  + str(SNAPSHOT_TIME) + "seconds"
+    assert perf_stats_dict is not None, "No perf stat captured "\
+        "at " + str(SNAPSHOT_TIME) + "seconds"
 
-    assert perf_stats_dict['TotalShowIpRoute'] == MAX_IPV6_ROUTE,  "The \
-           show ip route captured at " + str(SNAPSHOT_TIME) + " seconds \
-           are not same expected: " + str(MAX_IPV6_ROUTE) + " \
-           actual: " + str(perf_stats_dict['TotalShowIpRoute'])
+    assert perf_stats_dict['TotalShowIpRoute'] == MAX_IPV6_ROUTE,  "The "\
+        "show ip route captured at " + str(SNAPSHOT_TIME) + " seconds "\
+        "are not same expected: " + str(MAX_IPV6_ROUTE) + \
+        "actual: " + str(perf_stats_dict['TotalShowIpRoute'])
 
-    assert perf_stats_dict['TotalKernelIpRoute'] == MAX_IPV6_ROUTE,  "The \
-           kernel ip route captured at " + str(SNAPSHOT_TIME) + " seconds \
-           are not same expected: " + str(MAX_IPV6_ROUTE) + " \
-           actual: " + str(perf_stats_dict['TotalKernelIpRoute'])
+    assert perf_stats_dict['TotalKernelIpRoute'] == MAX_IPV6_ROUTE,  "The "\
+        "kernel ip route captured at " + str(SNAPSHOT_TIME) + " seconds "\
+        "are not same expected: " + str(MAX_IPV6_ROUTE) + \
+        "actual: " + str(perf_stats_dict['TotalKernelIpRoute'])
 
-    assert perf_stats_dict['TotalShowRunning'] == MAX_IPV6_ROUTE,  "The \
-           show running captured at " + str(SNAPSHOT_TIME) + " seconds \
-           are not same expected: " + str(MAX_IPV6_ROUTE) + " \
-           actual: " + str(perf_stats_dict['TotalShowRunning'])
+    assert perf_stats_dict['TotalShowRunning'] == MAX_IPV6_ROUTE,  "The "\
+        "show running captured at " + str(SNAPSHOT_TIME) + " seconds "\
+        "are not same expected: " + str(MAX_IPV6_ROUTE) + \
+        "actual: " + str(perf_stats_dict['TotalShowRunning'])
 
 
-def InterfaceDown(sw1, sw2, ipv6_route_list, step):
+def interface_down(sw1, sw2, ipv6_route_list, step):
     step('### Test selection of static routes on interface shutdown ###')
 
     sw1_interface = sw1.ports["if0{}".format(1)]
@@ -133,34 +131,32 @@ def InterfaceDown(sw1, sw2, ipv6_route_list, step):
 
     sw1("exit")
 
-    sleep(TRIGGER_SLEEP)
+    perf_stats_dict = capture_output_samples_and_generate_perf_stats(
+        sw1, ipv6_route_list,
+        "Interface shutdown", False,
+        TOTAL_TIME, SAMPLING_TIME,
+        SNAPSHOT_TIME)
 
-    perf_stats_dict= capture_output_samples_and_generate_perf_stats(
-                                     sw1, ipv6_route_list,
-                                     "Interface shutdown", False,
-                                     TOTAL_TIME, SAMPLING_TIME,
-                                     SNAPSHOT_TIME)
+    assert perf_stats_dict is not None, "No perf stat captured "\
+        "at " + str(SNAPSHOT_TIME) + "seconds"
 
-    assert perf_stats_dict is not None, "No perf stat captured \
-           at "  + str(SNAPSHOT_TIME) + "seconds"
+    assert perf_stats_dict['TotalShowIpRoute'] == 0,  "The "\
+        "show ip route captured at " + str(SNAPSHOT_TIME) + " seconds "\
+        "are not same expected: " + str(0) + \
+        "actual: " + str(perf_stats_dict['TotalShowIpRoute'])
 
-    assert perf_stats_dict['TotalShowIpRoute'] == 0,  "The \
-           show ip route captured at " + str(SNAPSHOT_TIME) + " seconds \
-           are not same expected: " + str(0) + " \
-           actual: " + str(perf_stats_dict['TotalShowIpRoute'])
+    assert perf_stats_dict['TotalKernelIpRoute'] == 0,  "The "\
+        "kernel ip route captured at " + str(SNAPSHOT_TIME) + " seconds "\
+        "are not same expected: " + str(0) + \
+        "actual: " + str(perf_stats_dict['TotalKernelIpRoute'])
 
-    assert perf_stats_dict['TotalKernelIpRoute'] == 0,  "The \
-           kernel ip route captured at " + str(SNAPSHOT_TIME) + " seconds \
-           are not same expected: " + str(0) + " \
-           actual: " + str(perf_stats_dict['TotalKernelIpRoute'])
-
-    assert perf_stats_dict['TotalShowRunning'] == MAX_IPV6_ROUTE,  "The \
-           show running captured at " + str(SNAPSHOT_TIME) + " seconds \
-           are not same expected: " + str(MAX_IPV6_ROUTE) + " \
-           actual: " + str(perf_stats_dict['TotalShowRunning'])
+    assert perf_stats_dict['TotalShowRunning'] == MAX_IPV6_ROUTE,  "The "\
+        "show running captured at " + str(SNAPSHOT_TIME) + " seconds "\
+        "are not same expected: " + str(MAX_IPV6_ROUTE) + \
+        "actual: " + str(perf_stats_dict['TotalShowRunning'])
 
 
-def InterfaceUp(sw1, sw2, ipv6_route_list, step):
+def interface_up(sw1, sw2, ipv6_route_list, step):
     step('### Test selection of static routes on interface un-shutdown ###')
 
     sw1_interface = sw1.ports["if0{}".format(1)]
@@ -173,34 +169,32 @@ def InterfaceUp(sw1, sw2, ipv6_route_list, step):
 
     sw1("exit")
 
-    sleep(TRIGGER_SLEEP)
-
     perf_stats_dict = capture_output_samples_and_generate_perf_stats(
-                                     sw1, ipv6_route_list,
-                                     "Interface un-shutdown", False,
-                                     TOTAL_TIME, SAMPLING_TIME,
-                                     SNAPSHOT_TIME)
+        sw1, ipv6_route_list,
+        "Interface un-shutdown", False,
+        TOTAL_TIME, SAMPLING_TIME,
+        SNAPSHOT_TIME)
 
-    assert perf_stats_dict is not None, "No perf stat captured \
-           at "  + str(SNAPSHOT_TIME) + "seconds"
+    assert perf_stats_dict is not None, "No perf stat captured "\
+        "at " + str(SNAPSHOT_TIME) + "seconds"
 
-    assert perf_stats_dict['TotalShowIpRoute'] == MAX_IPV6_ROUTE,  "The \
-           show ip route captured at " + str(SNAPSHOT_TIME) + " seconds \
-           are not same expected: " + str(MAX_IPV6_ROUTE) + " \
-           actual: " + str(perf_stats_dict['TotalShowIpRoute'])
+    assert perf_stats_dict['TotalShowIpRoute'] == MAX_IPV6_ROUTE,  "The "\
+        "show ip route captured at " + str(SNAPSHOT_TIME) + " seconds "\
+        "are not same expected: " + str(0) + \
+        "actual: " + str(perf_stats_dict['TotalShowIpRoute'])
 
-    assert perf_stats_dict['TotalKernelIpRoute'] == MAX_IPV6_ROUTE,  "The \
-           kernel ip route captured at " + str(SNAPSHOT_TIME) + " seconds \
-           are not same expected: " + str(MAX_IPV6_ROUTE) + " \
-           actual: " + str(perf_stats_dict['TotalKernelIpRoute'])
+    assert perf_stats_dict['TotalKernelIpRoute'] == MAX_IPV6_ROUTE,  "The "\
+        "kernel ip route captured at " + str(SNAPSHOT_TIME) + " seconds "\
+        "are not same expected: " + str(0) + \
+        "actual: " + str(perf_stats_dict['TotalKernelIpRoute'])
 
-    assert perf_stats_dict['TotalShowRunning'] == MAX_IPV6_ROUTE,  "The \
-           show running captured at " + str(SNAPSHOT_TIME) + " seconds \
-           are not same expected: " + str(MAX_IPV6_ROUTE) + " \
-           actual: " + str(perf_stats_dict['TotalShowRunning'])
+    assert perf_stats_dict['TotalShowRunning'] == MAX_IPV6_ROUTE,  "The "\
+        "show running captured at " + str(SNAPSHOT_TIME) + " seconds "\
+        "are not same expected: " + str(MAX_IPV6_ROUTE) + \
+        "actual: " + str(perf_stats_dict['TotalShowRunning'])
 
 
-def InterfaceAddrChange(sw1, sw2, ipv6_route_list, step):
+def interface_addr_change(sw1, sw2, ipv6_route_list, step):
     step('### Test selection of static routes on interface address change ###')
 
     sw1_interface = sw1.ports["if0{}".format(1)]
@@ -213,35 +207,34 @@ def InterfaceAddrChange(sw1, sw2, ipv6_route_list, step):
 
     sw1("exit")
 
-    sleep(TRIGGER_SLEEP)
-
     perf_stats_dict = capture_output_samples_and_generate_perf_stats(
-                                     sw1, ipv6_route_list,
-                                     "Interface address change", False,
-                                     TOTAL_TIME, SAMPLING_TIME,
-                                     SNAPSHOT_TIME)
+        sw1, ipv6_route_list,
+        "Interface address change", False,
+        TOTAL_TIME, SAMPLING_TIME,
+        SNAPSHOT_TIME)
 
-    assert perf_stats_dict is not None, "No perf stat captured \
-           at "  + str(SNAPSHOT_TIME) + "seconds"
+    assert perf_stats_dict is not None, "No perf stat captured "\
+        "at " + str(SNAPSHOT_TIME) + "seconds"
 
-    assert perf_stats_dict['TotalShowIpRoute'] == MAX_IPV6_ROUTE,  "The \
-           show ip route captured at " + str(SNAPSHOT_TIME) + " seconds \
-           are not same expected: " + str(MAX_IPV6_ROUTE) + " \
-           actual: " + str(perf_stats_dict['TotalShowIpRoute'])
+    assert perf_stats_dict['TotalShowIpRoute'] == MAX_IPV6_ROUTE,  "The "\
+        "show ip route captured at " + str(SNAPSHOT_TIME) + " seconds "\
+        "are not same expected: " + str(0) + \
+        "actual: " + str(perf_stats_dict['TotalShowIpRoute'])
 
-    assert perf_stats_dict['TotalKernelIpRoute'] == MAX_IPV6_ROUTE,  "The \
-           kernel ip route captured at " + str(SNAPSHOT_TIME) + " seconds \
-           are not same expected: " + str(MAX_IPV6_ROUTE) + " \
-           actual: " + str(perf_stats_dict['TotalKernelIpRoute'])
+    assert perf_stats_dict['TotalKernelIpRoute'] == MAX_IPV6_ROUTE,  "The "\
+        "kernel ip route captured at " + str(SNAPSHOT_TIME) + " seconds "\
+        "are not same expected: " + str(0) + \
+        "actual: " + str(perf_stats_dict['TotalKernelIpRoute'])
 
-    assert perf_stats_dict['TotalShowRunning'] == MAX_IPV6_ROUTE,  "The \
-           show running captured at " + str(SNAPSHOT_TIME) + " seconds \
-           are not same expected: " + str(MAX_IPV6_ROUTE) + " \
-           actual: " + str(perf_stats_dict['TotalShowRunning'])
+    assert perf_stats_dict['TotalShowRunning'] == MAX_IPV6_ROUTE,  "The "\
+        "show running captured at " + str(SNAPSHOT_TIME) + " seconds "\
+        "are not same expected: " + str(MAX_IPV6_ROUTE) + \
+        "actual: " + str(perf_stats_dict['TotalShowRunning'])
 
 
-def InterfaceAddrRestore(sw1, sw2, ipv6_route_list, step):
-    step('### Test selection of static routes on interface address restore ###')
+def interface_addr_restore(sw1, sw2, ipv6_route_list, step):
+    step(
+        '### Test selection of static routes on interface address restore ###')
 
     sw1_interface = sw1.ports["if0{}".format(1)]
 
@@ -253,34 +246,32 @@ def InterfaceAddrRestore(sw1, sw2, ipv6_route_list, step):
 
     sw1("exit")
 
-    sleep(TRIGGER_SLEEP)
-
     perf_stats_dict = capture_output_samples_and_generate_perf_stats(
-                                     sw1, ipv6_route_list,
-                                     "Interface address restore", False,
-                                     TOTAL_TIME, SAMPLING_TIME,
-                                     SNAPSHOT_TIME)
+        sw1, ipv6_route_list,
+        "Interface address restore", False,
+        TOTAL_TIME, SAMPLING_TIME,
+        SNAPSHOT_TIME)
 
-    assert perf_stats_dict is not None, "No perf stat captured \
-           at "  + str(SNAPSHOT_TIME) + "seconds"
+    assert perf_stats_dict is not None, "No perf stat captured "\
+        "at " + str(SNAPSHOT_TIME) + "seconds"
 
-    assert perf_stats_dict['TotalShowIpRoute'] == MAX_IPV6_ROUTE,  "The \
-           show ip route captured at " + str(SNAPSHOT_TIME) + " seconds \
-           are not same expected: " + str(MAX_IPV6_ROUTE) + " \
-           actual: " + str(perf_stats_dict['TotalShowIpRoute'])
+    assert perf_stats_dict['TotalShowIpRoute'] == MAX_IPV6_ROUTE,  "The "\
+        "show ip route captured at " + str(SNAPSHOT_TIME) + " seconds "\
+        "are not same expected: " + str(0) + \
+        "actual: " + str(perf_stats_dict['TotalShowIpRoute'])
 
-    assert perf_stats_dict['TotalKernelIpRoute'] == MAX_IPV6_ROUTE,  "The \
-           kernel ip route captured at " + str(SNAPSHOT_TIME) + " seconds \
-           are not same expected: " + str(MAX_IPV6_ROUTE) + " \
-           actual: " + str(perf_stats_dict['TotalKernelIpRoute'])
+    assert perf_stats_dict['TotalKernelIpRoute'] == MAX_IPV6_ROUTE,  "The "\
+        "kernel ip route captured at " + str(SNAPSHOT_TIME) + " seconds "\
+        "are not same expected: " + str(0) + \
+        "actual: " + str(perf_stats_dict['TotalKernelIpRoute'])
 
-    assert perf_stats_dict['TotalShowRunning'] == MAX_IPV6_ROUTE,  "The \
-           show running captured at " + str(SNAPSHOT_TIME) + " seconds \
-           are not same expected: " + str(MAX_IPV6_ROUTE) + " \
-           actual: " + str(perf_stats_dict['TotalShowRunning'])
+    assert perf_stats_dict['TotalShowRunning'] == MAX_IPV6_ROUTE,  "The "\
+        "show running captured at " + str(SNAPSHOT_TIME) + " seconds "\
+        "are not same expected: " + str(MAX_IPV6_ROUTE) + \
+        "actual: " + str(perf_stats_dict['TotalShowRunning'])
 
 
-def InterfaceNoRouting(sw1, sw2, ipv6_route_list, step):
+def interface_no_routing(sw1, sw2, ipv6_route_list, step):
     step('### Test selection of static routes on interface no routing ###')
 
     sw1_interface = sw1.ports["if0{}".format(1)]
@@ -293,33 +284,32 @@ def InterfaceNoRouting(sw1, sw2, ipv6_route_list, step):
 
     sw1("exit")
 
-    sleep(TRIGGER_SLEEP)
-
     perf_stats_dict = capture_output_samples_and_generate_perf_stats(
-                                     sw1, ipv6_route_list,
-                                     "Interface no routing", False,
-                                     TOTAL_TIME, SAMPLING_TIME,
-                                     SNAPSHOT_TIME)
+        sw1, ipv6_route_list,
+        "Interface no routing", False,
+        TOTAL_TIME, SAMPLING_TIME,
+        SNAPSHOT_TIME)
 
-    assert perf_stats_dict is not None, "No perf stat captured \
-           at "  + str(SNAPSHOT_TIME) + "seconds"
+    assert perf_stats_dict is not None, "No perf stat captured "\
+        "at " + str(SNAPSHOT_TIME) + "seconds"
 
-    assert perf_stats_dict['TotalShowIpRoute'] == 0,  "The \
-           show ip route captured at " + str(SNAPSHOT_TIME) + " seconds \
-           are not same expected: " + str(0) + " \
-           actual: " + str(perf_stats_dict['TotalShowIpRoute'])
+    assert perf_stats_dict['TotalShowIpRoute'] == 0,  "The "\
+        "show ip route captured at " + str(SNAPSHOT_TIME) + " seconds "\
+        "are not same expected: " + str(0) + \
+        "actual: " + str(perf_stats_dict['TotalShowIpRoute'])
 
-    assert perf_stats_dict['TotalKernelIpRoute'] == 0,  "The \
-           kernel ip route captured at " + str(SNAPSHOT_TIME) + " seconds \
-           are not same expected: " + str(0) + " \
-           actual: " + str(perf_stats_dict['TotalKernelIpRoute'])
+    assert perf_stats_dict['TotalKernelIpRoute'] == 0,  "The "\
+        "kernel ip route captured at " + str(SNAPSHOT_TIME) + " seconds "\
+        "are not same expected: " + str(0) + \
+        "actual: " + str(perf_stats_dict['TotalKernelIpRoute'])
 
-    assert perf_stats_dict['TotalShowRunning'] == 0,  "The \
-           show running captured at " + str(SNAPSHOT_TIME) + " seconds \
-           are not same expected: " + str(0) + " \
-           actual: " + str(perf_stats_dict['TotalShowRunning'])
+    assert perf_stats_dict['TotalShowRunning'] == 0,  "The "\
+        "show running captured at " + str(SNAPSHOT_TIME) + " seconds "\
+        "are not same expected: " + str(MAX_IPV6_ROUTE) + \
+        "actual: " + str(perf_stats_dict['TotalShowRunning'])
 
 
+@mark.timeout(300)
 def test_zebra_ct_ipv6_scale_tests(topology, step):
     sw1 = topology.get("sw1")
     sw2 = topology.get("sw2")
@@ -328,9 +318,9 @@ def test_zebra_ct_ipv6_scale_tests(topology, step):
     assert sw1 is not None
     assert sw2 is not None
 
-    ConfigureIpv6StaticRoutes(sw1, sw2, ipv6_route_list, step)
-    InterfaceDown(sw1, sw2, ipv6_route_list, step)
-    InterfaceUp(sw1, sw2, ipv6_route_list, step)
-    InterfaceAddrChange(sw1, sw2, ipv6_route_list, step)
-    InterfaceAddrRestore(sw1, sw2, ipv6_route_list, step)
-    InterfaceNoRouting(sw1, sw2, ipv6_route_list, step)
+    configure_ipv6_static_routes(sw1, sw2, ipv6_route_list, step)
+    interface_down(sw1, sw2, ipv6_route_list, step)
+    interface_up(sw1, sw2, ipv6_route_list, step)
+    interface_addr_change(sw1, sw2, ipv6_route_list, step)
+    interface_addr_restore(sw1, sw2, ipv6_route_list, step)
+    interface_no_routing(sw1, sw2, ipv6_route_list, step)

@@ -20,6 +20,7 @@
 
 from time import sleep
 from re import match
+from re import sub
 from operator import itemgetter
 from pprint import pprint
 
@@ -202,25 +203,42 @@ def verify_show(sw1, route, route_type, p_dict, show):
     :param show : type of show to be checked
     :type show : string
     """
-    # Get the actual route dictionary for the route
-    dict_from_show = get_route_from_show(sw1,
-                                         route,
-                                         route_type,
-                                         show)
-
-    # Parsing the obtained dictionary so we can compare it easily
-    dict_from_show = sorted(dict_from_show.items(), key=itemgetter(0))
-
     # Parsing the received dictionary so we can compare it easily
     p_dict = sorted(p_dict.items(), key=itemgetter(0))
 
-    # Prints for debug purposes
-    print("Actual: {}\n".format(str(dict_from_show)))
+    # Get the actual route dictionary for the route. Execute the show command
+    # until the route is seen in the show output, else sleep for a second in
+    # every iteration to allow processing by ops-zebra.
+    route_found = False
+    num_of_iterations = 0
+    while route_found is not True:
+        dict_from_show = get_route_from_show(sw1,
+                                             route,
+                                             route_type,
+                                             show)
 
-    print("Expected: {}\n".format(str(p_dict)))
+        # Parsing the obtained dictionary so we can compare it easily
+        dict_from_show = sorted(dict_from_show.items(), key=itemgetter(0))
 
-    # Comparing dictionaries, if not equals, assertion will fail
-    assert p_dict == dict_from_show
+        # Prints for debug purposes
+        num_of_iterations = num_of_iterations + 1
+
+        print("Verification attempt: %d\n" % num_of_iterations)
+
+        print("Actual: {}\n".format(str(dict_from_show)))
+
+        print("Expected: {}\n".format(str(p_dict)))
+
+        if p_dict == dict_from_show:
+            route_found = True
+            break
+
+        sleep(1)
+
+    if route_found is True:
+        print("Expected route found in the 'show %s' command\n" % show)
+    else:
+        print("Expected route not found in the 'show %s' command\n" % show)
 
 
 def verify_show_ip_route(sw1, route, route_type, p_dict):
@@ -482,13 +500,14 @@ def get_route_from_show_kernel_route(**kwargs):
 
     # Execute the "command" on the Linux bash interface
     kernel_route_buffer = sw(kernel_route_command, shell="bash")
+    sw("configure terminal")
 
     # Initialize the return route dictionary
-    RouteDict = dict()
+    route_dict = dict()
 
     # Add the prefix and the mask length of the route in the return
     # dictionary
-    RouteDict['Route'] = route
+    route_dict['Route'] = route
 
     # Split the route into prefix and mask length
     [prefix, masklen] = route.split('/')
@@ -503,9 +522,9 @@ def get_route_from_show_kernel_route(**kwargs):
     # 10.0.0.0/24 -> 10.0.0.0/24
     # 123:1::/64 -> 123:1::/64
     #
-    #That's why the logic below is put to handle this case.
+    # That's why the logic below is put to handle this case.
     route_string = ""
-    if if_ipv4 == True:
+    if if_ipv4:
         if int(masklen) >= 32:
             route_string = prefix
         else:
@@ -524,12 +543,15 @@ def get_route_from_show_kernel_route(**kwargs):
     # populate the return route distionary
     for line in lines:
 
-        commandLine = match("ip netns exec swns ip", line)
+        commandline = match("ip netns exec swns ip", line)
 
-        if commandLine:
+        if commandline:
             continue
 
-        routeline = match("(%s)(.*)(proto %s)" %(route_string, route_type), line)
+        line = sub("\s\s+", " ", line)
+        routeline = match(
+            "(%s)(.*)(proto %s)" %
+            (route_string, route_type), line)
 
         nexthop_string = ""
 
@@ -537,40 +559,40 @@ def get_route_from_show_kernel_route(**kwargs):
 
             if_route_found = True
 
-            nexthopipline = match("(.*)via (.*)( )dev(.*)", line)
+            nexthopipline = match("(.*)via\s(.*)( )dev(.*)", line)
 
             if nexthopipline:
                 nexthop_string = nexthopipline.group(2)
-            else :
-                nexthopifline = match("(.*)dev (\d+) (.*)", line)
+            else:
+                nexthopifline = match("(.*)dev\s(.+)\sproto(.*)", line)
 
                 if nexthopifline:
                     nexthop_string = nexthopifline.group(2)
 
-        nexthopipline = match("(.*)nexthop via (.*)( )dev(.*)", line)
+        nexthopipline = match("(.*)nexthop\svia\s(.*)( )dev(.*)", line)
 
         if nexthopipline:
             nexthop_string = nexthopipline.group(2)
 
-        nexthopifline = match("(.*)nexthop dev (\d+) (.*)", line)
+        nexthopifline = match("(.*)nexthop\sdev\s(.*)\sweight(.*)", line)
 
         if nexthopifline:
             nexthop_string = nexthopifline.group(2)
 
-        if len(nexthop_string) > 0 and if_route_found == True:
+        if len(nexthop_string) > 0 and if_route_found:
 
-            RouteDict[nexthop_string.rstrip(' ')] = dict()
-            RouteDict[nexthop_string.rstrip(' ')]['Distance'] = ""
-            RouteDict[nexthop_string.rstrip(' ')]['Metric'] = ""
-            RouteDict[nexthop_string.rstrip(' ')]['RouteType'] = route_type
+            route_dict[nexthop_string.rstrip(' ')] = dict()
+            route_dict[nexthop_string.rstrip(' ')]['Distance'] = ""
+            route_dict[nexthop_string.rstrip(' ')]['Metric'] = ""
+            route_dict[nexthop_string.rstrip(' ')]['RouteType'] = route_type
 
             nexthop_number = nexthop_number + 1
 
     if nexthop_number > 0:
-        RouteDict['NumberNexthops'] = str(nexthop_number)
+        route_dict['NumberNexthops'] = str(nexthop_number)
 
     # Return the kernel route dictionary
-    return RouteDict
+    return route_dict
 
 
 def verify_route_in_show_kernel_route(sw, if_ipv4, expected_route_dict,
@@ -608,7 +630,7 @@ def verify_route_in_show_kernel_route(sw, if_ipv4, expected_route_dict,
     # If there was error getting the actual route dictionary, then assert and
     # fail the test case
     if actual_route_dict is None:
-       assert False,  "Failed to get the dictionary for route " + \
+        assert False,  "Failed to get the dictionary for route " + \
                       expected_route_dict['Route'] + " and route type " \
                       + route_type
 
@@ -616,7 +638,8 @@ def verify_route_in_show_kernel_route(sw, if_ipv4, expected_route_dict,
     actual_route_dict = sorted(actual_route_dict.items(), key=itemgetter(0))
 
     # Sort the expected route dictionary
-    expected_route_dict = sorted(expected_route_dict.items(), key=itemgetter(0))
+    expected_route_dict = sorted(expected_route_dict.items(),
+                                 key=itemgetter(0))
 
     # Print the actual and expected route dictionaries for debugging purposes
     print("\nThe expected kernel route dictionary is:")
@@ -629,7 +652,40 @@ def verify_route_in_show_kernel_route(sw, if_ipv4, expected_route_dict,
     assert actual_route_dict == expected_route_dict
 
 
-__all__ = ["wait_for_route", "verify_show_ip_route",
+def verify_active_router_id_in_vrf(sw, expected_active_router_id):
+    """
+    Library function tests whether active router id is set correctly
+    in the VRF table in the database.
+
+    :param sw : Device object
+    :type  sw : topology.platforms.base.BaseNode
+    :param expected_active_router_id : Expected router-id that should be
+                                       present in the VRF table
+    :type expected_active_router_id : string
+    """
+
+    router_id_found = False
+    num_of_iterations = 0
+    while router_id_found is not True:
+
+        num_of_iterations = num_of_iterations + 1
+        print("Verification attempt: %d\n" % num_of_iterations)
+
+        output = sw("ovsdb-client dump VRF", shell='bash')
+        if expected_active_router_id in output:
+            router_id_found = True
+            break
+
+        sleep(1)
+
+    if router_id_found is True:
+        print("Expected active router id found in the VRF database\n")
+    else:
+        print("Expected active router id not found in the VRF database\n")
+
+
+__all__ = ["verify_show_ip_route",
            "verify_show_ipv6_route", "verify_show_rib",
            "route_and_nexthop_in_show_running_config",
-           "verify_route_in_show_kernel_route"]
+           "verify_route_in_show_kernel_route",
+           "verify_active_router_id_in_vrf"]

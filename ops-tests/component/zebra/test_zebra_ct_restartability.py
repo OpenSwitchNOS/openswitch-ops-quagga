@@ -27,6 +27,7 @@ from helpers_routing import (
     verify_route_in_show_kernel_route
 )
 from time import sleep
+from pytest import mark
 
 
 zebra_stop_command_string = "systemctl stop ops-zebra"
@@ -347,7 +348,7 @@ def configure_static_routes(sw1, sw2, step):
     route_ipv6_kernel_route3['2']['Metric'] = ''
     route_ipv6_kernel_route3['2']['RouteType'] = 'zebra'
 
-    sleep(15)
+#    sleep(15)
 
     step("Verifying the IPv4 static routes on switch 1")
 
@@ -611,7 +612,7 @@ def restart_zebra_without_config_change(sw1, sw2, step):
     route_ipv6_kernel_route3['2']['Metric'] = ''
     route_ipv6_kernel_route3['2']['RouteType'] = 'zebra'
 
-    sleep(15)
+#    sleep(15)
 
     step("Verifying the IPv4 static routes onswitch 1")
 
@@ -975,7 +976,7 @@ def restart_zebra_with_config_change(sw1, sw2, step):
     # Execute the command to start zebra on the Linux bash interface
     sw1(zebra_start_command_string, shell='bash')
 
-    sleep(15)
+#    sleep(15)
 
     step("Verifying the IPv4 static routes on switch 1")
 
@@ -1363,7 +1364,7 @@ def config_change_after_zebra_restart(sw1, sw2, step):
     # for the route 8234:8234::1/128 and its next-hops.
     route_ipv6_kernel_route5 = route_ipv6_static_route5
 
-    sleep(15)
+#    sleep(15)
 
     step("Verifying the IPv4 static routes onswitch 1")
 
@@ -1678,7 +1679,7 @@ def interface_down_before_zebra_restart(sw1, sw2, step):
     route_ipv6_kernel_route3 = dict()
     route_ipv6_kernel_route3['Route'] = '3234:3234::1' + '/' + '128'
 
-    sleep(15)
+#    sleep(15)
 
     step("Verifying the IPv4 static routes onswitch 1")
 
@@ -1949,7 +1950,7 @@ def interface_up_before_zebra_restart(sw1, sw2, step):
     route_ipv6_kernel_route3['2']['Metric'] = ''
     route_ipv6_kernel_route3['2']['RouteType'] = 'zebra'
 
-    sleep(15)
+#    sleep(15)
 
     step("Verifying the IPv4 static routes onswitch 1")
 
@@ -2232,7 +2233,7 @@ def interface_addr_change_before_zebra_restart(sw1, sw2, step):
     route_ipv6_kernel_route3['2']['Metric'] = ''
     route_ipv6_kernel_route3['2']['RouteType'] = 'zebra'
 
-    sleep(15)
+#    sleep(15)
 
     step("Verifying the IPv4 static routes onswitch 1")
 
@@ -2506,7 +2507,7 @@ def interface_addr_restore_before_zebra_restart(sw1, sw2, step):
     route_ipv6_kernel_route3['2']['Metric'] = ''
     route_ipv6_kernel_route3['2']['RouteType'] = 'zebra'
 
-    sleep(15)
+#    sleep(15)
 
     step("Verifying the IPv4 static routes onswitch 1")
 
@@ -2683,7 +2684,7 @@ def all_configuration_deleted_before_zebra_restart(sw1, sw2, step):
     # for the route 3234:3234::1/128 and its next-hops.
     route_ipv6_kernel_route3 = route_ipv6_static_route3
 
-    sleep(15)
+#    sleep(15)
 
     step("Verifying the IPv4 static routes on switch 1")
 
@@ -2738,6 +2739,7 @@ def all_configuration_deleted_before_zebra_restart(sw1, sw2, step):
                                       route_ipv6_kernel_route3, 'zebra')
 
 
+@mark.timeout(300)
 def test_zebra_ct_restartability(topology, step):
     sw1 = topology.get("sw1")
     sw2 = topology.get("sw2")

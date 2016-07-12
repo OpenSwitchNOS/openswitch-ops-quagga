@@ -17,6 +17,7 @@
 
 from re import match
 from re import findall
+from pytest import mark
 from time import sleep
 
 TOPOLOGY = """
@@ -76,6 +77,7 @@ def get_prefix_uuid(switch, prefix_value, step):
     assert prefix_uuid is not None
     return prefix_uuid.group(3).rstrip('\r')
 
+@mark.timeout(300)
 def test_static_route_config(topology, step):
     '''
     This test cases verifies sorted(lexicographic) retrieval of the ip routes
@@ -94,10 +96,6 @@ def test_static_route_config(topology, step):
     sw1p4 = sw1.ports['if04']
     sw2p1 = sw2.ports['if01']
     sw2p2 = sw2.ports['if02']
-
-    # Accounting for the time required to bring up the switch and get the
-    # daemons up and running
-    sleep(15)
 
     step("### Verify that the static routes are retrieved in sorted order ###")
     # Configure switch 1
@@ -118,6 +116,37 @@ def test_static_route_config(topology, step):
     sw1('no shutdown')
     sw1('exit')
 
+    # Verifying the connected routes showing up in the "show ip/ipv6 route" CLI
+    ipv4_route_list_expected = ['11.0.0.0/24', '22.0.0.0/24', '33.0.0.0/24']
+    ipv6_route_list_expected = ['1001::/120', '2001::/120', '3001::/120']
+    ipv4_route_list_output = []
+    ipv6_route_list_output = []
+    ipv4_routes_found = False
+    ipv6_routes_found = False
+    while ipv4_routes_found != True and ipv6_routes_found != True:
+        ipv4_connected_routes = sw1('do show ip route')
+        ipv6_connected_routes = sw1('do show ipv6 route')
+        ipv4_route_list_output = findall(r'(.*),\s*.*next-hops',
+                                         ipv4_connected_routes)
+        ipv6_route_list_output = findall(r'(.*),\s*.*next-hops',
+                                         ipv6_connected_routes)
+
+        if ipv4_route_list_output == ipv4_route_list_expected:
+            ipv4_routes_found = True
+            break;
+        else:
+            sleep(1)
+
+        if ipv6_route_list_output == ipv6_route_list_expected:
+            ipv6_routes_found = True
+            break;
+        else:
+            sleep(1)
+
+    # Stop zebra to turn 'on' the selected bit for the listed prefixes and to
+    # popluate BGP and OSPF routes using ovsdb-client utility.
+    sw1("systemctl stop ops-zebra", shell='bash')
+
     step("### Adding IPv4 routes with various prefixes and nexthops ###")
     sw1("ip route 20.20.20.0/24 2")
     sw1("ip route 10.0.0.0/24 2")
@@ -129,14 +158,6 @@ def test_static_route_config(topology, step):
     sw1('ipv6 route  2001::/96 2')
     sw1('ipv6 route  ::/128 1')
     sw1('ipv6 route  1:1::/127 1')
-
-    # Accounting for the time required to set the configuration in DB and
-    # let zebra install the connected and the static routes in the kernel
-    sleep(10)
-
-    # Stop zebra to turn 'on' the selected bit for the listed prefixes and to
-    # popluate BGP and OSPF routes using ovsdb-client utility.
-    sw1("systemctl stop ops-zebra", shell='bash')
 
     # 'show ip route' shows the routes selected by zebra for forwarding (FIB).
     # Significant amount of delay is seen when an interface is configured and

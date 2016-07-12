@@ -16,6 +16,8 @@
 # under the License.
 
 
+from pytest import mark
+
 TOPOLOGY = """
 #
 #
@@ -31,6 +33,7 @@ TOPOLOGY = """
 """
 
 
+@mark.timeout(300)
 def test_zebra_ct_verify_tcpport_closed(topology, step):
     '''
     This test verifies if the TCP port: 2601 used by OpenSource Zebra protocol

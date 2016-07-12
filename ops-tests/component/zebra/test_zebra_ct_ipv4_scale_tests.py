@@ -23,6 +23,7 @@ from route_generator_and_stats_reporter import (
 )
 
 from time import sleep
+from pytest import mark
 
 TOPOLOGY = """
 # +-------+    +-------+
@@ -320,6 +321,7 @@ def InterfaceNoRouting(sw1, sw2, ipv4_route_list, step):
            actual: " + str(perf_stats_dict['TotalShowRunning'])
 
 
+@mark.timeout(300)
 def test_zebra_ct_ipv4_scale_tests(topology, step):
     sw1 = topology.get("sw1")
     sw2 = topology.get("sw2")

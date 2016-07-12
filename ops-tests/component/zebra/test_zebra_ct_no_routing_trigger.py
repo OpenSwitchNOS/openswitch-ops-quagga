@@ -17,13 +17,13 @@
 # Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 # 02111-1307, USA.
 
-from helpers_routing import (
+from zebra_routing import (
     route_and_nexthop_in_show_running_config,
     verify_show_ip_route,
     verify_show_ipv6_route,
     verify_show_rib
 )
-from time import sleep
+from pytest import mark
 
 # Topology definition. the topology contains two back to back switches
 # having four links between them.
@@ -258,8 +258,6 @@ def add_static_routes(sw1, sw2, step):
     # route 3234:3234::1/128 and its next-hops.
     route_ipv6_static_route3 = rib_ipv6_static_route3
 
-    sleep(15)
-
     step("Verifying the IPv4 static routes on switch 1")
 
     # Verify route 123.0.0.1/32 and next-hops in RIB, FIB and
@@ -468,8 +466,6 @@ def no_routing_trigger_static_routes(sw1, sw2, step):
     # routing via "no routed" interfaces should be removed from the FIB.
     route_ipv6_static_route3 = rib_ipv6_static_route3
 
-    sleep(15)
-
     step("Verifying the IPv4 static routes on switch 1")
     # Verify route 123.0.0.1/32 and next-hops in RIB, FIB and
     # running-config. The next-hops which were "no routed" should not
@@ -614,8 +610,6 @@ def no_routing_on_interface_without_ip(sw1, sw2, step):
     # route 2003:2003::1/128 and its next-hops.
     route_ipv6_static_route1 = rib_ipv6_static_route1
 
-    sleep(15)
-
     step("Verifying the IPv4 static routes on switch 1")
 
     # Verify route 203.0.0.1/32 and next-hops in RIB, FIB and
@@ -664,8 +658,6 @@ def no_routing_on_interface_without_ip(sw1, sw2, step):
     # Populate the expected FIB ("show ipv6 route") route dictionary for the
     # route 2003:2003::1/128 and its next-hops.
     route_ipv6_static_route1 = rib_ipv6_static_route1
-
-    sleep(15)
 
     # Verify route 203.0.0.1/32 and next-hops in RIB, FIB and
     # running-config
@@ -801,8 +793,6 @@ def routing_trigger_static_routes(sw1, sw2, step):
     # route 3234:3234::1/128 and its next-hops. "Routing" trigger on
     # interfaces should not add any next-hops to the RIB.
     route_ipv6_static_route3 = rib_ipv6_static_route3
-
-    sleep(15)
 
     step("Verifying the IPv4 static routes on switch 1")
 
@@ -1031,8 +1021,6 @@ def add_static_routes_via_l3_sub_interfaces(sw1, sw2, step):
     # route 5234:5234::1/128 and its next-hops.
     route_ipv6_static_route2 = rib_ipv6_static_route2
 
-    sleep(15)
-
     step("Verifying the IPv4 static routes via loopbacks on switch 1")
 
     # Verify route 173.0.0.1/32 and next-hops in RIB, FIB and
@@ -1156,8 +1144,6 @@ def no_routing_trigger_l3_parent_interfaces(sw1, sw2, step):
     # route 5234:5234::1/128 and its next-hops.
     route_ipv6_static_route2 = rib_ipv6_static_route2
 
-    sleep(15)
-
     step("Verifying the IPv4 static routes via loopbacks on switch 1")
 
     # Verify route 173.0.0.1/32 and next-hops in RIB, FIB and
@@ -1221,6 +1207,7 @@ def no_routing_trigger_l3_parent_interfaces(sw1, sw2, step):
                                                     nexthop='1.1')
 
 
+@mark.timeout(300)
 def test_zebra_ct_no_routing_trigger(topology, step):
     sw1 = topology.get("sw1")
     assert sw1 is not None

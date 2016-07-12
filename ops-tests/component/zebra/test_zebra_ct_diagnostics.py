@@ -15,6 +15,8 @@
 # specific language governing permissions and limitations
 # under the License.
 
+from pytest import mark
+
 """
 Component test to verify zebra diagnostic commands.
 """
@@ -33,6 +35,8 @@ TOPOLOGY = """
 
 """
 
+
+@mark.timeout(300)
 def test_zebra_diag_dump(topology, step):
     '''
     This test verifies various diagnostic commands related to zebra daemon

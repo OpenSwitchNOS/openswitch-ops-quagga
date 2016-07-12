@@ -20,6 +20,7 @@
 
 from time import sleep
 from re import match
+from re import sub
 from operator import itemgetter
 from pprint import pprint
 
@@ -29,6 +30,12 @@ IPV6_STATIC_ROUTE = "ipv6_static_route"
 IPV4_ROUTE = "ip route"
 IPV6_ROUTE = "ipv6 route"
 RIB = "rib"
+
+# Default timeout for all the zebra component test scripts
+ZEBRA_DEFAULT_TIMEOUT = 600
+
+# Configuration install and processing time taken by ops-zebra
+ZEBRA_TEST_SLEEP_TIME = 15
 
 
 def get_route_and_nexthops_from_output(output, route, route_type):
@@ -202,25 +209,44 @@ def verify_show(sw1, route, route_type, p_dict, show):
     :param show : type of show to be checked
     :type show : string
     """
-    # Get the actual route dictionary for the route
-    dict_from_show = get_route_from_show(sw1,
-                                         route,
-                                         route_type,
-                                         show)
-
-    # Parsing the obtained dictionary so we can compare it easily
-    dict_from_show = sorted(dict_from_show.items(), key=itemgetter(0))
-
     # Parsing the received dictionary so we can compare it easily
     p_dict = sorted(p_dict.items(), key=itemgetter(0))
 
-    # Prints for debug purposes
-    print("Actual: {}\n".format(str(dict_from_show)))
+    # Get the actual route dictionary for the route. Execute the show command
+    # until the route is seen in the show output, else sleep for a second in
+    # every iteration to allow processing by ops-zebra.
+    route_found = False
+    num_of_iterations = 0
+    while route_found is not True:
+        dict_from_show = get_route_from_show(sw1,
+                                             route,
+                                             route_type,
+                                             show)
 
-    print("Expected: {}\n".format(str(p_dict)))
+        # Parsing the obtained dictionary so we can compare it easily
+        dict_from_show = sorted(dict_from_show.items(), key=itemgetter(0))
 
-    # Comparing dictionaries, if not equals, assertion will fail
-    assert p_dict == dict_from_show
+        # Prints for debug purposes
+        num_of_iterations = num_of_iterations + 1
+
+        print("Verification attempt: %d\n" % num_of_iterations)
+
+        print("Actual: {}\n".format(str(dict_from_show)))
+
+        print("Expected: {}\n".format(str(p_dict)))
+
+        if p_dict == dict_from_show:
+            route_found = True
+            # Break out of the while loop once the route is found
+            break
+
+        # Sleep for a second to allow processing by ops-zebra
+        sleep(1)
+
+    if route_found is True:
+        print("Expected route found in the 'show %s' command\n" % show)
+    else:
+        print("Expected route not found in the 'show %s' command\n" % show)
 
 
 def verify_show_ip_route(sw1, route, route_type, p_dict):
@@ -308,6 +334,7 @@ def if_config_in_running_config(**kwargs):
 
     sw1 = kwargs.get('sw1', None)
     config_type = kwargs.get('config_type', None)
+    config_present_check = kwargs.get('config_present_check', None)
     running_config_string = ''
 
     # checks if device is passed, if not, assertion will fail
@@ -315,6 +342,10 @@ def if_config_in_running_config(**kwargs):
 
     # checks if config typw is passed, if not, assertion will fail
     assert config_type is not None
+
+    # checks if config_present_check parameter is passed, if not, assertion
+    # will fail
+    assert config_present_check is not None
 
     # If the config type is either IPV4_STATIC_ROUTE or IPV6_STATIC_ROUTE:,
     # then read the route, nexthop and distance from the arguments
@@ -357,35 +388,89 @@ def if_config_in_running_config(**kwargs):
                             nexthop,
                             distance)
 
-    # The command in whose output we need to check the presence of
-    # configuration
-    show_running_config = sw1("do show running-config")
+    # The 'if' condition checks for the presence of "ip route" command in the
+    # output of 'show running-config' whereas the else condition checks for the
+    # absence of "ip route" command in the 'show running-config' output
+    if config_present_check is True:
+        # Get the actual route dictionary for the route. Execute the show
+        # command until the route is seen in the show output, else sleep for a
+        # second in every iteration to allow processing by ops-zebra.
+        route_found = False
+        num_of_iterations = 0
+        while route_found is not True:
+            # The command in whose output we need to check the presence of
+            # configuration
+            show_running_config = sw1("do show running-config")
 
-    # Split the output of "show running-config" into lines
-    show_running_config_lines = show_running_config.split('\n')
+            # Split the output of "show running-config" into lines
+            show_running_config_lines = show_running_config.split('\n')
 
-    found = False
+            num_of_iterations = num_of_iterations + 1
+            print("Verification attempt: %d\n" % num_of_iterations)
 
-    # Walk through all the lines of "show running-config" and check if the
-    # configuration exists in one of the lines
-    for line in show_running_config_lines:
+            # Walk through all the lines of "show running-config" and check if
+            # the configuration exists in one of the lines, if not then sleep
+            # for a second until the route is found to allow processing by
+            # ops-zebra
+            for line in show_running_config_lines:
 
-        # If the configuration exists in the "show running-config" output,
-        # then mark found as True and breaks the cycle
-        if running_config_string in line:
-            found = True
-            break
-    # Returns True if found, False otherwise
-    return found
+                # If the configuration exists in the "show running-config"
+                # output, then mark route_found as True and break the cycle
+                if running_config_string in line:
+                    route_found = True
+                    break
+
+            sleep(1)
+
+        # Returns True if route found, False otherwise
+        return route_found
+
+    else:
+        # Get the actual route dictionary for the route. Execute the show
+        # command until the route is seen in the show output, else sleep for a
+        # second in every iteration to allow processing by ops-zebra.
+        route_found = True
+        num_of_iterations = 0
+        while route_found is True:
+            # The command in whose output we need to check the presence of
+            # configuration
+            show_running_config = sw1("do show running-config")
+
+            # Split the output of "show running-config" into lines
+            show_running_config_lines = show_running_config.split('\n')
+
+            num_of_iterations = num_of_iterations + 1
+            print("Verification attempt: %d\n" % num_of_iterations)
+
+            # Walk through all the lines of "show running-config" and check if
+            # the configuration does not exist in one of the lines, if yes then
+            # sleep for a second until the route is removed to allow processing
+            # by ops-zebra
+            for line in show_running_config_lines:
+
+                # If the configuration doesn't exist in the
+                # "show running-config" output, then mark route_found as False
+                # and break the cycle
+                if running_config_string not in line:
+                    route_found = False
+                    break
+
+            sleep(1)
+
+        # Returns True if route not found, False otherwise
+        if route_found is False:
+            return True
+
+        return False
 
 
 def route_and_nexthop_in_show_running_config(**kwargs):
     """
     Library function tests whether a static route with "prefix/mask-length",
-    next-hop and administration distance does not exists in the command
+    next-hop and administration distance exists in the command
     "show running-config". If such a static route configuration exists in the
-    output of "show running-config" output, then this function fails this will
-    return False, otherwise True.
+    output of "show running-config" output, then this function returns True,
+    otherwise False.
 
     :param sw1 : Device object
     :type  sw1 : topology.platforms.base.BaseNode
@@ -416,13 +501,63 @@ def route_and_nexthop_in_show_running_config(**kwargs):
                                            config_type=IPV4_STATIC_ROUTE,
                                            route=route,
                                            nexthop=nexthop,
-                                           distance=distance)
+                                           distance=distance,
+                                           config_present_check=True)
     else:
         return if_config_in_running_config(sw1=sw1,
                                            config_type=IPV6_STATIC_ROUTE,
                                            route=route,
                                            nexthop=nexthop,
-                                           distance=distance)
+                                           distance=distance,
+                                           config_present_check=True)
+
+
+def route_and_nexthop_not_in_show_running_config(**kwargs):
+    """
+    Library function tests whether a static route with "prefix/mask-length",
+    next-hop and administration distance does not exists in the command
+    "show running-config". If such a static route configuration exists in the
+    output of "show running-config" output, then this function returns False,
+    otherwise True.
+
+    :param sw1 : Device object
+    :type  sw1 : topology.platforms.base.BaseNode
+    :param if_ipv4   : If the route passed is IPv4 or IPv6 route. If
+                       the route passed in IPv4, then if_ipv4 should
+                       be 'True' otherwise it should be 'False'
+    :type  if_ipv4   : boolean
+    :param route     : route is of the format "prefix/mask-length"
+    :type  route     : string
+    :param nexthop   : Nexthop which is of the format "IP/IPv6 address" or
+                       "Port number"
+    :type nexthop    : string
+    :param distance  : Administration distance of the route
+    :type distance   : string
+    :return type : Boolean
+    """
+    sw1 = kwargs.get('sw1', None)
+    if_ipv4 = kwargs.get('if_ipv4', None)
+    route = kwargs.get('route', None)
+    nexthop = kwargs.get('nexthop', None)
+    distance = kwargs.get('distance', None)
+
+    # If the route is a IPv4 route call if_config_in_running_config() with
+    # IPV4_STATIC_ROUTE else call if_config_in_running_config() with
+    # IPV6_STATIC_ROUTE
+    if if_ipv4 is True:
+        return if_config_in_running_config(sw1=sw1,
+                                           config_type=IPV4_STATIC_ROUTE,
+                                           route=route,
+                                           nexthop=nexthop,
+                                           distance=distance,
+                                           config_present_check=False)
+    else:
+        return if_config_in_running_config(sw1=sw1,
+                                           config_type=IPV6_STATIC_ROUTE,
+                                           route=route,
+                                           nexthop=nexthop,
+                                           distance=distance,
+                                           config_present_check=False)
 
 
 def get_route_from_show_kernel_route(**kwargs):
@@ -482,13 +617,14 @@ def get_route_from_show_kernel_route(**kwargs):
 
     # Execute the "command" on the Linux bash interface
     kernel_route_buffer = sw(kernel_route_command, shell="bash")
+    sw("configure terminal")
 
     # Initialize the return route dictionary
-    RouteDict = dict()
+    route_dict = dict()
 
     # Add the prefix and the mask length of the route in the return
     # dictionary
-    RouteDict['Route'] = route
+    route_dict['Route'] = route
 
     # Split the route into prefix and mask length
     [prefix, masklen] = route.split('/')
@@ -503,9 +639,9 @@ def get_route_from_show_kernel_route(**kwargs):
     # 10.0.0.0/24 -> 10.0.0.0/24
     # 123:1::/64 -> 123:1::/64
     #
-    #That's why the logic below is put to handle this case.
+    # That's why the logic below is put to handle this case.
     route_string = ""
-    if if_ipv4 == True:
+    if if_ipv4:
         if int(masklen) >= 32:
             route_string = prefix
         else:
@@ -524,12 +660,15 @@ def get_route_from_show_kernel_route(**kwargs):
     # populate the return route distionary
     for line in lines:
 
-        commandLine = match("ip netns exec swns ip", line)
+        commandline = match("ip netns exec swns ip", line)
 
-        if commandLine:
+        if commandline:
             continue
 
-        routeline = match("(%s)(.*)(proto %s)" %(route_string, route_type), line)
+        line = sub("\s\s+", " ", line)
+        routeline = match(
+            "(%s)(.*)(proto %s)" %
+            (route_string, route_type), line)
 
         nexthop_string = ""
 
@@ -537,40 +676,41 @@ def get_route_from_show_kernel_route(**kwargs):
 
             if_route_found = True
 
-            nexthopipline = match("(.*)via (.*)( )dev(.*)", line)
+            nexthopipline = match("(.*)via\s(.*)( )dev(.*)", line)
 
             if nexthopipline:
                 nexthop_string = nexthopipline.group(2)
-            else :
-                nexthopifline = match("(.*)dev (\d+) (.*)", line)
+            else:
+                nexthopifline = match("(.*)dev\s(.+)\sproto(.*)", line)
 
                 if nexthopifline:
                     nexthop_string = nexthopifline.group(2)
 
-        nexthopipline = match("(.*)nexthop via (.*)( )dev(.*)", line)
+        nexthopipline = match("(.*)nexthop\svia\s(.*)( )dev(.*)", line)
 
         if nexthopipline:
             nexthop_string = nexthopipline.group(2)
 
-        nexthopifline = match("(.*)nexthop dev (\d+) (.*)", line)
+        nexthopifline = match("(.*)nexthop\sdev\s(.*)\sweight(.*)", line)
 
         if nexthopifline:
             nexthop_string = nexthopifline.group(2)
 
-        if len(nexthop_string) > 0 and if_route_found == True:
+        if len(nexthop_string) > 0 and if_route_found:
 
-            RouteDict[nexthop_string.rstrip(' ')] = dict()
-            RouteDict[nexthop_string.rstrip(' ')]['Distance'] = ""
-            RouteDict[nexthop_string.rstrip(' ')]['Metric'] = ""
-            RouteDict[nexthop_string.rstrip(' ')]['RouteType'] = route_type
+            route_dict[nexthop_string.rstrip(' ')] = dict()
+            route_dict[nexthop_string.rstrip(' ')]['Distance'] = ""
+            route_dict[nexthop_string.rstrip(' ')]['Metric'] = ""
+            route_dict[nexthop_string.rstrip(' ')]['RouteType'] = route_type
 
             nexthop_number = nexthop_number + 1
 
     if nexthop_number > 0:
-        RouteDict['NumberNexthops'] = str(nexthop_number)
+        route_dict['NumberNexthops'] = str(nexthop_number)
 
     # Return the kernel route dictionary
-    return RouteDict
+    print("returning\n")
+    return route_dict
 
 
 def verify_route_in_show_kernel_route(sw, if_ipv4, expected_route_dict,
@@ -600,25 +740,28 @@ def verify_route_in_show_kernel_route(sw, if_ipv4, expected_route_dict,
 
     # Get the actual route dictionary for the route
     actual_route_dict = get_route_from_show_kernel_route(
-                                           switch=sw,
-                                           if_ipv4=if_ipv4,
-                                           route=expected_route_dict['Route'],
-                                           route_type=route_type)
+        switch=sw,
+        if_ipv4=if_ipv4,
+        route=expected_route_dict['Route'],
+        route_type=route_type)
 
-    # If there was error getting the actual route dictionary, then assert and
-    # fail the test case
+    # If there was error getting the actual route dictionary, then assert
+    # and fail the test case
     if actual_route_dict is None:
-       assert False,  "Failed to get the dictionary for route " + \
-                      expected_route_dict['Route'] + " and route type " \
-                      + route_type
+        assert False,  "Failed to get the dictionary for route " + \
+            expected_route_dict['Route'] + " and route type " \
+            + route_type
 
     # Sort the actual route dictionary
-    actual_route_dict = sorted(actual_route_dict.items(), key=itemgetter(0))
+    actual_route_dict = sorted(actual_route_dict.items(),
+                               key=itemgetter(0))
 
     # Sort the expected route dictionary
-    expected_route_dict = sorted(expected_route_dict.items(), key=itemgetter(0))
+    expected_route_dict = sorted(expected_route_dict.items(),
+                                 key=itemgetter(0))
 
-    # Print the actual and expected route dictionaries for debugging purposes
+    # Print the actual and expected route dictionaries for debugging
+    # purposes
     print("\nThe expected kernel route dictionary is:")
     pprint(expected_route_dict, width=1)
 
@@ -629,7 +772,48 @@ def verify_route_in_show_kernel_route(sw, if_ipv4, expected_route_dict,
     assert actual_route_dict == expected_route_dict
 
 
-__all__ = ["wait_for_route", "verify_show_ip_route",
+def verify_active_router_id_in_vrf(sw, expected_active_router_id):
+    """
+    Library function tests whether active router id is set correctly
+    in the VRF table in the database.
+
+    :param sw : Device object
+    :type  sw : topology.platforms.base.BaseNode
+    :param expected_active_router_id : Expected router-id that should be
+                                       present in the VRF table
+    :type expected_active_router_id : string
+    """
+
+    # Execute the "ovsdb-client dump VRF" command until the router-id is seen
+    # in the show output, else sleep for a second in every iteration to allow
+    # processing by ops-zebra.
+    router_id_found = False
+    num_of_iterations = 0
+    while router_id_found is not True:
+
+        num_of_iterations = num_of_iterations + 1
+        print("Verification attempt: %d\n" % num_of_iterations)
+
+        output = sw("ovsdb-client dump VRF", shell='bash')
+        if expected_active_router_id in output:
+            router_id_found = True
+            # Break out of the while loop once the active router-id is found
+            break
+
+        # Sleep for a second to allow processing by ops-zebra
+        sleep(1)
+
+    if router_id_found is True:
+        print("Expected active router id found in the VRF database\n")
+    else:
+        print("Expected active router id not found in the VRF database\n")
+
+
+__all__ = ["verify_show_ip_route",
            "verify_show_ipv6_route", "verify_show_rib",
            "route_and_nexthop_in_show_running_config",
-           "verify_route_in_show_kernel_route"]
+           "route_and_nexthop_not_in_show_running_config",
+           "verify_route_in_show_kernel_route",
+           "verify_active_router_id_in_vrf",
+           ZEBRA_DEFAULT_TIMEOUT,
+           ZEBRA_TEST_SLEEP_TIME]

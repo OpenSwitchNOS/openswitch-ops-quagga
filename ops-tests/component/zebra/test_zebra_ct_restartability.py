@@ -20,13 +20,16 @@
 # having four links between them.
 
 
-from zebra_routing import (
+from .zebra_routing import (
     verify_show_ip_route,
     verify_show_ipv6_route,
     verify_show_rib,
-    verify_route_in_show_kernel_route
+    verify_route_in_show_kernel_route,
+    ZEBRA_DEFAULT_TIMEOUT,
+    ZEBRA_TEST_SLEEP_TIME
 )
 from time import sleep
+from pytest import mark
 
 
 zebra_stop_command_string = "systemctl stop ops-zebra"
@@ -75,6 +78,12 @@ sw1:if04 -- sw2:if04
 # routes and next-hops show correctly in the output of
 # "show ip/ipv6 route/show rib".
 def configure_static_routes(sw1, sw2, step):
+
+    sw1_intf1 = format(sw1.ports["if01"])
+    sw1_intf2 = format(sw1.ports["if02"])
+    sw1_intf3 = format(sw1.ports["if03"])
+    sw1_intf4 = format(sw1.ports["if04"])
+
     sw1_interfaces = []
 
     # IPv4 addresses to cnfigure on switch
@@ -88,8 +97,8 @@ def configure_static_routes(sw1, sw2, step):
     # configured within the same interface
     size = len(sw1_ifs_ips)
     for i in range(size):
-        if i is not size-1:
-            sw1_interfaces.append(sw1.ports["if0{}".format(i+1)])
+        if i is not size - 1:
+            sw1_interfaces.append(sw1.ports["if0{}".format(i + 1)])
         else:
             sw1_interfaces.append(sw1.ports["if0{}".format(i)])
     sw1_mask = 24
@@ -101,7 +110,7 @@ def configure_static_routes(sw1, sw2, step):
     sw1("configure terminal")
     for i in range(size):
         sw1("interface {}".format(sw1_interfaces[i]))
-        if i is not size-1:
+        if i is not size - 1:
             sw1("ip address {}/{}".format(sw1_ifs_ips[i], sw1_mask))
             sw1("ipv6 address {}/{}".format(sw1_ifs_ipv6s[i], sw1_ipv6_mask))
         else:
@@ -119,10 +128,11 @@ def configure_static_routes(sw1, sw2, step):
     step("Cofiguring sw1 IPV4 static routes")
 
     # Routes to configure
-    nexthops = ["1.1.1.2", "2", "3", "4.4.4.1"]
+    nexthops = ["1.1.1.2", sw1_interfaces[1],
+                sw1_interfaces[2], "4.4.4.1"]
 
     # COnfiguring IP routes
-    for i in range(size-1):
+    for i in range(size - 1):
         sw1("ip route 123.0.0.1/32 {}".format(nexthops[i]))
         output = sw1("do show running-config")
         assert "ip route 123.0.0.1/32 {}".format(nexthops[i]) in output
@@ -136,14 +146,16 @@ def configure_static_routes(sw1, sw2, step):
     rib_ipv4_static_route1['1.1.1.2']['Distance'] = '1'
     rib_ipv4_static_route1['1.1.1.2']['Metric'] = '0'
     rib_ipv4_static_route1['1.1.1.2']['RouteType'] = 'static'
-    rib_ipv4_static_route1['2'] = dict()
-    rib_ipv4_static_route1['2']['Distance'] = '1'
-    rib_ipv4_static_route1['2']['Metric'] = '0'
-    rib_ipv4_static_route1['2']['RouteType'] = 'static'
-    rib_ipv4_static_route1['3'] = dict()
-    rib_ipv4_static_route1['3']['Distance'] = '1'
-    rib_ipv4_static_route1['3']['Metric'] = '0'
-    rib_ipv4_static_route1['3']['RouteType'] = 'static'
+    rib_ipv4_static_route1[sw1_intf2] = dict()
+    rib_ipv4_static_route1[sw1_intf2]['Distance'] = '1'
+    rib_ipv4_static_route1[sw1_intf2]['Metric'] = '0'
+    rib_ipv4_static_route1[sw1_intf2]['RouteType'] = \
+        'static'
+    rib_ipv4_static_route1[sw1_intf3] = dict()
+    rib_ipv4_static_route1[sw1_intf3]['Distance'] = '1'
+    rib_ipv4_static_route1[sw1_intf3]['Metric'] = '0'
+    rib_ipv4_static_route1[sw1_intf3]['RouteType'] = \
+        'static'
     rib_ipv4_static_route1['4.4.4.1'] = dict()
     rib_ipv4_static_route1['4.4.4.1']['Distance'] = '1'
     rib_ipv4_static_route1['4.4.4.1']['Metric'] = '0'
@@ -162,14 +174,16 @@ def configure_static_routes(sw1, sw2, step):
     route_ipv4_kernel_route1['1.1.1.2']['Distance'] = ''
     route_ipv4_kernel_route1['1.1.1.2']['Metric'] = ''
     route_ipv4_kernel_route1['1.1.1.2']['RouteType'] = 'zebra'
-    route_ipv4_kernel_route1['2'] = dict()
-    route_ipv4_kernel_route1['2']['Distance'] = ''
-    route_ipv4_kernel_route1['2']['Metric'] = ''
-    route_ipv4_kernel_route1['2']['RouteType'] = 'zebra'
-    route_ipv4_kernel_route1['3'] = dict()
-    route_ipv4_kernel_route1['3']['Distance'] = ''
-    route_ipv4_kernel_route1['3']['Metric'] = ''
-    route_ipv4_kernel_route1['3']['RouteType'] = 'zebra'
+    route_ipv4_kernel_route1[sw1_intf2] = dict()
+    route_ipv4_kernel_route1[sw1_intf2]['Distance'] = ''
+    route_ipv4_kernel_route1[sw1_intf2]['Metric'] = ''
+    route_ipv4_kernel_route1[sw1_intf2]['RouteType'] = \
+        'zebra'
+    route_ipv4_kernel_route1[sw1_intf3] = dict()
+    route_ipv4_kernel_route1[sw1_intf3]['Distance'] = ''
+    route_ipv4_kernel_route1[sw1_intf3]['Metric'] = ''
+    route_ipv4_kernel_route1[sw1_intf3]['RouteType'] = \
+        'zebra'
     route_ipv4_kernel_route1['4.4.4.1'] = dict()
     route_ipv4_kernel_route1['4.4.4.1']['Distance'] = ''
     route_ipv4_kernel_route1['4.4.4.1']['Metric'] = ''
@@ -205,19 +219,20 @@ def configure_static_routes(sw1, sw2, step):
     route_ipv4_kernel_route2['4.4.4.1']['RouteType'] = 'zebra'
 
     # Configure IPv4 route 163.0.0.1/32 with 1 next-hop.
-    sw1("ip route 163.0.0.1/32 2")
+    sw1("ip route 163.0.0.1/32 %s" % sw1_intf2)
     output = sw1("do show running-config")
-    assert "ip route 163.0.0.1/32 2" in output
+    assert "ip route 163.0.0.1/32 %s" % sw1_intf2 in output
 
     # Populate the expected RIB ("show rib") route dictionary for the
     # route 163.0.0.1/32 and its next-hops.
     rib_ipv4_static_route3 = dict()
     rib_ipv4_static_route3['Route'] = '163.0.0.1/32'
     rib_ipv4_static_route3['NumberNexthops'] = '1'
-    rib_ipv4_static_route3['2'] = dict()
-    rib_ipv4_static_route3['2']['Distance'] = '1'
-    rib_ipv4_static_route3['2']['Metric'] = '0'
-    rib_ipv4_static_route3['2']['RouteType'] = 'static'
+    rib_ipv4_static_route3[sw1_intf2] = dict()
+    rib_ipv4_static_route3[sw1_intf2]['Distance'] = '1'
+    rib_ipv4_static_route3[sw1_intf2]['Metric'] = '0'
+    rib_ipv4_static_route3[sw1_intf2]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ip route") route dictionary for the
     # route 163.0.0.1/32 and its next-hops.
@@ -228,40 +243,46 @@ def configure_static_routes(sw1, sw2, step):
     route_ipv4_kernel_route3 = dict()
     route_ipv4_kernel_route3['Route'] = '163.0.0.1' + '/' + '32'
     route_ipv4_kernel_route3['NumberNexthops'] = '1'
-    route_ipv4_kernel_route3['2'] = dict()
-    route_ipv4_kernel_route3['2']['Distance'] = ''
-    route_ipv4_kernel_route3['2']['Metric'] = ''
-    route_ipv4_kernel_route3['2']['RouteType'] = 'zebra'
+    route_ipv4_kernel_route3[sw1_intf2] = dict()
+    route_ipv4_kernel_route3[sw1_intf2]['Distance'] = ''
+    route_ipv4_kernel_route3[sw1_intf2]['Metric'] = ''
+    route_ipv4_kernel_route3[sw1_intf2]['RouteType'] = \
+        'zebra'
 
     step("Configuring switch 1IPv6 static routes")
 
     # Configure IPv6 route a234:a234::1/128 with 4 ECMP next-hops.
     for i in range(4):
-        sw1("ipv6 route a234:a234::1/128 {}".format(i+1))
+        sw1("ipv6 route a234:a234::1/128 {}".format(sw1_interfaces[i]))
         output = sw1("do show running-config")
-        assert "ipv6 route a234:a234::1/128 {}".format(i+1) in output
+        assert "ipv6 route a234:a234::1/128 {}".format(sw1_interfaces[i]) in \
+            output
 
     # Populate the expected RIB ("show rib") route dictionary for the
     # route a234:a234::1/128 and its next-hops.
     rib_ipv6_static_route1 = dict()
     rib_ipv6_static_route1['Route'] = 'a234:a234::1/128'
     rib_ipv6_static_route1['NumberNexthops'] = '4'
-    rib_ipv6_static_route1['1'] = dict()
-    rib_ipv6_static_route1['1']['Distance'] = '1'
-    rib_ipv6_static_route1['1']['Metric'] = '0'
-    rib_ipv6_static_route1['1']['RouteType'] = 'static'
-    rib_ipv6_static_route1['2'] = dict()
-    rib_ipv6_static_route1['2']['Distance'] = '1'
-    rib_ipv6_static_route1['2']['Metric'] = '0'
-    rib_ipv6_static_route1['2']['RouteType'] = 'static'
-    rib_ipv6_static_route1['3'] = dict()
-    rib_ipv6_static_route1['3']['Distance'] = '1'
-    rib_ipv6_static_route1['3']['Metric'] = '0'
-    rib_ipv6_static_route1['3']['RouteType'] = 'static'
-    rib_ipv6_static_route1['4'] = dict()
-    rib_ipv6_static_route1['4']['Distance'] = '1'
-    rib_ipv6_static_route1['4']['Metric'] = '0'
-    rib_ipv6_static_route1['4']['RouteType'] = 'static'
+    rib_ipv6_static_route1[sw1_intf1] = dict()
+    rib_ipv6_static_route1[sw1_intf1]['Distance'] = '1'
+    rib_ipv6_static_route1[sw1_intf1]['Metric'] = '0'
+    rib_ipv6_static_route1[sw1_intf1]['RouteType'] = \
+        'static'
+    rib_ipv6_static_route1[sw1_intf2] = dict()
+    rib_ipv6_static_route1[sw1_intf2]['Distance'] = '1'
+    rib_ipv6_static_route1[sw1_intf2]['Metric'] = '0'
+    rib_ipv6_static_route1[sw1_intf2]['RouteType'] = \
+        'static'
+    rib_ipv6_static_route1[sw1_intf3] = dict()
+    rib_ipv6_static_route1[sw1_intf3]['Distance'] = '1'
+    rib_ipv6_static_route1[sw1_intf3]['Metric'] = '0'
+    rib_ipv6_static_route1[sw1_intf3]['RouteType'] = \
+        'static'
+    rib_ipv6_static_route1[sw1_intf4] = dict()
+    rib_ipv6_static_route1[sw1_intf4]['Distance'] = '1'
+    rib_ipv6_static_route1[sw1_intf4]['Metric'] = '0'
+    rib_ipv6_static_route1[sw1_intf4]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ipv6 route") route dictionary for the
     # route a234:a234::1/128 and its next-hops.
@@ -272,37 +293,42 @@ def configure_static_routes(sw1, sw2, step):
     route_ipv6_kernel_route1 = dict()
     route_ipv6_kernel_route1['Route'] = 'a234:a234::1' + '/' + '128'
     route_ipv6_kernel_route1['NumberNexthops'] = '4'
-    route_ipv6_kernel_route1['1'] = dict()
-    route_ipv6_kernel_route1['1']['Distance'] = ''
-    route_ipv6_kernel_route1['1']['Metric'] = ''
-    route_ipv6_kernel_route1['1']['RouteType'] = 'zebra'
-    route_ipv6_kernel_route1['2'] = dict()
-    route_ipv6_kernel_route1['2']['Distance'] = ''
-    route_ipv6_kernel_route1['2']['Metric'] = ''
-    route_ipv6_kernel_route1['2']['RouteType'] = 'zebra'
-    route_ipv6_kernel_route1['3'] = dict()
-    route_ipv6_kernel_route1['3']['Distance'] = ''
-    route_ipv6_kernel_route1['3']['Metric'] = ''
-    route_ipv6_kernel_route1['3']['RouteType'] = 'zebra'
-    route_ipv6_kernel_route1['4'] = dict()
-    route_ipv6_kernel_route1['4']['Distance'] = ''
-    route_ipv6_kernel_route1['4']['Metric'] = ''
-    route_ipv6_kernel_route1['4']['RouteType'] = 'zebra'
+    route_ipv6_kernel_route1[sw1_intf1] = dict()
+    route_ipv6_kernel_route1[sw1_intf1]['Distance'] = ''
+    route_ipv6_kernel_route1[sw1_intf1]['Metric'] = ''
+    route_ipv6_kernel_route1[sw1_intf1]['RouteType'] = \
+        'zebra'
+    route_ipv6_kernel_route1[sw1_intf2] = dict()
+    route_ipv6_kernel_route1[sw1_intf2]['Distance'] = ''
+    route_ipv6_kernel_route1[sw1_intf2]['Metric'] = ''
+    route_ipv6_kernel_route1[sw1_intf2]['RouteType'] = \
+        'zebra'
+    route_ipv6_kernel_route1[sw1_intf3] = dict()
+    route_ipv6_kernel_route1[sw1_intf3]['Distance'] = ''
+    route_ipv6_kernel_route1[sw1_intf3]['Metric'] = ''
+    route_ipv6_kernel_route1[sw1_intf3]['RouteType'] = \
+        'zebra'
+    route_ipv6_kernel_route1[sw1_intf4] = dict()
+    route_ipv6_kernel_route1[sw1_intf4]['Distance'] = ''
+    route_ipv6_kernel_route1[sw1_intf4]['Metric'] = ''
+    route_ipv6_kernel_route1[sw1_intf4]['RouteType'] = \
+        'zebra'
 
     # Configure IPv4 route 2234:2234::1/128 with 1 next-hop.
-    sw1("ipv6 route 2234:2234::1/128 4")
+    sw1("ipv6 route 2234:2234::1/128 %s" % sw1_intf4)
     output = sw1("do show running-config")
-    assert "ipv6 route 2234:2234::1/128 4" in output
+    assert "ipv6 route 2234:2234::1/128 %s" % sw1_intf4 in output
 
     # Populate the expected RIB ("show rib") route dictionary for the
     # route 2234:2234::1/128 and its next-hops.
     rib_ipv6_static_route2 = dict()
     rib_ipv6_static_route2['Route'] = '2234:2234::1/128'
     rib_ipv6_static_route2['NumberNexthops'] = '1'
-    rib_ipv6_static_route2['4'] = dict()
-    rib_ipv6_static_route2['4']['Distance'] = '1'
-    rib_ipv6_static_route2['4']['Metric'] = '0'
-    rib_ipv6_static_route2['4']['RouteType'] = 'static'
+    rib_ipv6_static_route2[sw1_intf4] = dict()
+    rib_ipv6_static_route2[sw1_intf4]['Distance'] = '1'
+    rib_ipv6_static_route2[sw1_intf4]['Metric'] = '0'
+    rib_ipv6_static_route2[sw1_intf4]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ipv6 route") route dictionary for the
     # route 2234:2234::1/128 and its next-hops.
@@ -313,25 +339,27 @@ def configure_static_routes(sw1, sw2, step):
     route_ipv6_kernel_route2 = dict()
     route_ipv6_kernel_route2['Route'] = '2234:2234::1' + '/' + '128'
     route_ipv6_kernel_route2['NumberNexthops'] = '1'
-    route_ipv6_kernel_route2['4'] = dict()
-    route_ipv6_kernel_route2['4']['Distance'] = ''
-    route_ipv6_kernel_route2['4']['Metric'] = ''
-    route_ipv6_kernel_route2['4']['RouteType'] = 'zebra'
+    route_ipv6_kernel_route2[sw1_intf4] = dict()
+    route_ipv6_kernel_route2[sw1_intf4]['Distance'] = ''
+    route_ipv6_kernel_route2[sw1_intf4]['Metric'] = ''
+    route_ipv6_kernel_route2[sw1_intf4]['RouteType'] = \
+        'zebra'
 
     # Configure IPv4 route 3234:3234::1/128 with 1 next-hop.
-    sw1("ipv6 route 3234:3234::1/128 2")
+    sw1("ipv6 route 3234:3234::1/128 %s" % sw1_intf2)
     output = sw1("do show running-config")
-    assert "ipv6 route 3234:3234::1/128 2" in output
+    assert "ipv6 route 3234:3234::1/128 %s" % sw1_intf2 in output
 
     # Populate the expected RIB ("show rib") route dictionary for the
     # route 3234:3234::1/128 and its next-hops.
     rib_ipv6_static_route3 = dict()
     rib_ipv6_static_route3['Route'] = '3234:3234::1/128'
     rib_ipv6_static_route3['NumberNexthops'] = '1'
-    rib_ipv6_static_route3['2'] = dict()
-    rib_ipv6_static_route3['2']['Distance'] = '1'
-    rib_ipv6_static_route3['2']['Metric'] = '0'
-    rib_ipv6_static_route3['2']['RouteType'] = 'static'
+    rib_ipv6_static_route3[sw1_intf2] = dict()
+    rib_ipv6_static_route3[sw1_intf2]['Distance'] = '1'
+    rib_ipv6_static_route3[sw1_intf2]['Metric'] = '0'
+    rib_ipv6_static_route3[sw1_intf2]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ipv6 route") route dictionary for the
     # route 3234:3234::1/128 and its next-hops.
@@ -342,12 +370,13 @@ def configure_static_routes(sw1, sw2, step):
     route_ipv6_kernel_route3 = dict()
     route_ipv6_kernel_route3['Route'] = '3234:3234::1' + '/' + '128'
     route_ipv6_kernel_route3['NumberNexthops'] = '1'
-    route_ipv6_kernel_route3['2'] = dict()
-    route_ipv6_kernel_route3['2']['Distance'] = ''
-    route_ipv6_kernel_route3['2']['Metric'] = ''
-    route_ipv6_kernel_route3['2']['RouteType'] = 'zebra'
+    route_ipv6_kernel_route3[sw1_intf2] = dict()
+    route_ipv6_kernel_route3[sw1_intf2]['Distance'] = ''
+    route_ipv6_kernel_route3[sw1_intf2]['Metric'] = ''
+    route_ipv6_kernel_route3[sw1_intf2]['RouteType'] = \
+        'zebra'
 
-    sleep(15)
+    sleep(ZEBRA_TEST_SLEEP_TIME)
 
     step("Verifying the IPv4 static routes on switch 1")
 
@@ -403,18 +432,29 @@ def configure_static_routes(sw1, sw2, step):
 
 
 # This test restarts zebra process and checks if the routes and next-hops show
-# correctly in the output of "show ip route/show rib" after zebra has restarted.
-# There is no configuration change when zebra is not running.
+# correctly in the output of "show ip route/show rib" after zebra has
+# restarted. There is no configuration change when zebra is not running.
 def restart_zebra_without_config_change(sw1, sw2, step):
 
-    step("######### Restarting zebra without config changes on switch 1#########")
+    sw1_intf1 = format(sw1.ports["if01"])
+    sw1_intf2 = format(sw1.ports["if02"])
+    sw1_intf3 = format(sw1.ports["if03"])
+    sw1_intf4 = format(sw1.ports["if04"])
 
-    step("######### Restarting zebra. Stopping ops-zebra service on switch 1#########")
+    step(
+        "######### Restarting zebra without config changes on switch 1"
+        "#########")
+
+    step(
+        "######### Restarting zebra. Stopping ops-zebra service on switch 1"
+        "#########")
 
     # Execute the command to stop zebra on the Linux bash interface
     sw1(zebra_stop_command_string, shell='bash')
 
-    step("######### Restarting zebra. Starting ops-zebra service on switch 1#########")
+    step(
+        "######### Restarting zebra. Starting ops-zebra service on switch 1"
+        "#########")
 
     # Execute the command to start zebra on the Linux bash interface
     sw1(zebra_start_command_string, shell='bash')
@@ -428,14 +468,16 @@ def restart_zebra_without_config_change(sw1, sw2, step):
     rib_ipv4_static_route1['1.1.1.2']['Distance'] = '1'
     rib_ipv4_static_route1['1.1.1.2']['Metric'] = '0'
     rib_ipv4_static_route1['1.1.1.2']['RouteType'] = 'static'
-    rib_ipv4_static_route1['2'] = dict()
-    rib_ipv4_static_route1['2']['Distance'] = '1'
-    rib_ipv4_static_route1['2']['Metric'] = '0'
-    rib_ipv4_static_route1['2']['RouteType'] = 'static'
-    rib_ipv4_static_route1['3'] = dict()
-    rib_ipv4_static_route1['3']['Distance'] = '1'
-    rib_ipv4_static_route1['3']['Metric'] = '0'
-    rib_ipv4_static_route1['3']['RouteType'] = 'static'
+    rib_ipv4_static_route1[sw1_intf2] = dict()
+    rib_ipv4_static_route1[sw1_intf2]['Distance'] = '1'
+    rib_ipv4_static_route1[sw1_intf2]['Metric'] = '0'
+    rib_ipv4_static_route1[sw1_intf2]['RouteType'] = \
+        'static'
+    rib_ipv4_static_route1[sw1_intf3] = dict()
+    rib_ipv4_static_route1[sw1_intf3]['Distance'] = '1'
+    rib_ipv4_static_route1[sw1_intf3]['Metric'] = '0'
+    rib_ipv4_static_route1[sw1_intf3]['RouteType'] = \
+        'static'
     rib_ipv4_static_route1['4.4.4.1'] = dict()
     rib_ipv4_static_route1['4.4.4.1']['Distance'] = '1'
     rib_ipv4_static_route1['4.4.4.1']['Metric'] = '0'
@@ -454,14 +496,16 @@ def restart_zebra_without_config_change(sw1, sw2, step):
     route_ipv4_kernel_route1['1.1.1.2']['Distance'] = ''
     route_ipv4_kernel_route1['1.1.1.2']['Metric'] = ''
     route_ipv4_kernel_route1['1.1.1.2']['RouteType'] = 'zebra'
-    route_ipv4_kernel_route1['2'] = dict()
-    route_ipv4_kernel_route1['2']['Distance'] = ''
-    route_ipv4_kernel_route1['2']['Metric'] = ''
-    route_ipv4_kernel_route1['2']['RouteType'] = 'zebra'
-    route_ipv4_kernel_route1['3'] = dict()
-    route_ipv4_kernel_route1['3']['Distance'] = ''
-    route_ipv4_kernel_route1['3']['Metric'] = ''
-    route_ipv4_kernel_route1['3']['RouteType'] = 'zebra'
+    route_ipv4_kernel_route1[sw1_intf2] = dict()
+    route_ipv4_kernel_route1[sw1_intf2]['Distance'] = ''
+    route_ipv4_kernel_route1[sw1_intf2]['Metric'] = ''
+    route_ipv4_kernel_route1[sw1_intf2]['RouteType'] = \
+        'zebra'
+    route_ipv4_kernel_route1[sw1_intf3] = dict()
+    route_ipv4_kernel_route1[sw1_intf3]['Distance'] = ''
+    route_ipv4_kernel_route1[sw1_intf3]['Metric'] = ''
+    route_ipv4_kernel_route1[sw1_intf3]['RouteType'] = \
+        'zebra'
     route_ipv4_kernel_route1['4.4.4.1'] = dict()
     route_ipv4_kernel_route1['4.4.4.1']['Distance'] = ''
     route_ipv4_kernel_route1['4.4.4.1']['Metric'] = ''
@@ -496,10 +540,11 @@ def restart_zebra_without_config_change(sw1, sw2, step):
     rib_ipv4_static_route3 = dict()
     rib_ipv4_static_route3['Route'] = '163.0.0.1/32'
     rib_ipv4_static_route3['NumberNexthops'] = '1'
-    rib_ipv4_static_route3['2'] = dict()
-    rib_ipv4_static_route3['2']['Distance'] = '1'
-    rib_ipv4_static_route3['2']['Metric'] = '0'
-    rib_ipv4_static_route3['2']['RouteType'] = 'static'
+    rib_ipv4_static_route3[sw1_intf2] = dict()
+    rib_ipv4_static_route3[sw1_intf2]['Distance'] = '1'
+    rib_ipv4_static_route3[sw1_intf2]['Metric'] = '0'
+    rib_ipv4_static_route3[sw1_intf2]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ip route") route dictionary for the
     # route 163.0.0.1/32 and its next-hops.
@@ -510,32 +555,37 @@ def restart_zebra_without_config_change(sw1, sw2, step):
     route_ipv4_kernel_route3 = dict()
     route_ipv4_kernel_route3['Route'] = '163.0.0.1' + '/' + '32'
     route_ipv4_kernel_route3['NumberNexthops'] = '1'
-    route_ipv4_kernel_route3['2'] = dict()
-    route_ipv4_kernel_route3['2']['Distance'] = ''
-    route_ipv4_kernel_route3['2']['Metric'] = ''
-    route_ipv4_kernel_route3['2']['RouteType'] = 'zebra'
+    route_ipv4_kernel_route3[sw1_intf2] = dict()
+    route_ipv4_kernel_route3[sw1_intf2]['Distance'] = ''
+    route_ipv4_kernel_route3[sw1_intf2]['Metric'] = ''
+    route_ipv4_kernel_route3[sw1_intf2]['RouteType'] = \
+        'zebra'
 
     # Populate the expected RIB ("show rib") route dictionary for the
     # route a234:a234::1/128 and its next-hops.
     rib_ipv6_static_route1 = dict()
     rib_ipv6_static_route1['Route'] = 'a234:a234::1/128'
     rib_ipv6_static_route1['NumberNexthops'] = '4'
-    rib_ipv6_static_route1['1'] = dict()
-    rib_ipv6_static_route1['1']['Distance'] = '1'
-    rib_ipv6_static_route1['1']['Metric'] = '0'
-    rib_ipv6_static_route1['1']['RouteType'] = 'static'
-    rib_ipv6_static_route1['2'] = dict()
-    rib_ipv6_static_route1['2']['Distance'] = '1'
-    rib_ipv6_static_route1['2']['Metric'] = '0'
-    rib_ipv6_static_route1['2']['RouteType'] = 'static'
-    rib_ipv6_static_route1['3'] = dict()
-    rib_ipv6_static_route1['3']['Distance'] = '1'
-    rib_ipv6_static_route1['3']['Metric'] = '0'
-    rib_ipv6_static_route1['3']['RouteType'] = 'static'
-    rib_ipv6_static_route1['4'] = dict()
-    rib_ipv6_static_route1['4']['Distance'] = '1'
-    rib_ipv6_static_route1['4']['Metric'] = '0'
-    rib_ipv6_static_route1['4']['RouteType'] = 'static'
+    rib_ipv6_static_route1[sw1_intf1] = dict()
+    rib_ipv6_static_route1[sw1_intf1]['Distance'] = '1'
+    rib_ipv6_static_route1[sw1_intf1]['Metric'] = '0'
+    rib_ipv6_static_route1[sw1_intf1]['RouteType'] = \
+        'static'
+    rib_ipv6_static_route1[sw1_intf2] = dict()
+    rib_ipv6_static_route1[sw1_intf2]['Distance'] = '1'
+    rib_ipv6_static_route1[sw1_intf2]['Metric'] = '0'
+    rib_ipv6_static_route1[sw1_intf2]['RouteType'] = \
+        'static'
+    rib_ipv6_static_route1[sw1_intf3] = dict()
+    rib_ipv6_static_route1[sw1_intf3]['Distance'] = '1'
+    rib_ipv6_static_route1[sw1_intf3]['Metric'] = '0'
+    rib_ipv6_static_route1[sw1_intf3]['RouteType'] = \
+        'static'
+    rib_ipv6_static_route1[sw1_intf4] = dict()
+    rib_ipv6_static_route1[sw1_intf4]['Distance'] = '1'
+    rib_ipv6_static_route1[sw1_intf4]['Metric'] = '0'
+    rib_ipv6_static_route1[sw1_intf4]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ipv6 route") route dictionary for the
     # route a234:a234::1/128 and its next-hops.
@@ -546,32 +596,37 @@ def restart_zebra_without_config_change(sw1, sw2, step):
     route_ipv6_kernel_route1 = dict()
     route_ipv6_kernel_route1['Route'] = 'a234:a234::1' + '/' + '128'
     route_ipv6_kernel_route1['NumberNexthops'] = '4'
-    route_ipv6_kernel_route1['1'] = dict()
-    route_ipv6_kernel_route1['1']['Distance'] = ''
-    route_ipv6_kernel_route1['1']['Metric'] = ''
-    route_ipv6_kernel_route1['1']['RouteType'] = 'zebra'
-    route_ipv6_kernel_route1['2'] = dict()
-    route_ipv6_kernel_route1['2']['Distance'] = ''
-    route_ipv6_kernel_route1['2']['Metric'] = ''
-    route_ipv6_kernel_route1['2']['RouteType'] = 'zebra'
-    route_ipv6_kernel_route1['3'] = dict()
-    route_ipv6_kernel_route1['3']['Distance'] = ''
-    route_ipv6_kernel_route1['3']['Metric'] = ''
-    route_ipv6_kernel_route1['3']['RouteType'] = 'zebra'
-    route_ipv6_kernel_route1['4'] = dict()
-    route_ipv6_kernel_route1['4']['Distance'] = ''
-    route_ipv6_kernel_route1['4']['Metric'] = ''
-    route_ipv6_kernel_route1['4']['RouteType'] = 'zebra'
+    route_ipv6_kernel_route1[sw1_intf1] = dict()
+    route_ipv6_kernel_route1[sw1_intf1]['Distance'] = ''
+    route_ipv6_kernel_route1[sw1_intf1]['Metric'] = ''
+    route_ipv6_kernel_route1[sw1_intf1]['RouteType'] = \
+        'zebra'
+    route_ipv6_kernel_route1[sw1_intf2] = dict()
+    route_ipv6_kernel_route1[sw1_intf2]['Distance'] = ''
+    route_ipv6_kernel_route1[sw1_intf2]['Metric'] = ''
+    route_ipv6_kernel_route1[sw1_intf2]['RouteType'] = \
+        'zebra'
+    route_ipv6_kernel_route1[sw1_intf3] = dict()
+    route_ipv6_kernel_route1[sw1_intf3]['Distance'] = ''
+    route_ipv6_kernel_route1[sw1_intf3]['Metric'] = ''
+    route_ipv6_kernel_route1[sw1_intf3]['RouteType'] = \
+        'zebra'
+    route_ipv6_kernel_route1[sw1_intf4] = dict()
+    route_ipv6_kernel_route1[sw1_intf4]['Distance'] = ''
+    route_ipv6_kernel_route1[sw1_intf4]['Metric'] = ''
+    route_ipv6_kernel_route1[sw1_intf4]['RouteType'] = \
+        'zebra'
 
     # Populate the expected RIB ("show rib") route dictionary for the
     # route 2234:2234::1/128 and its next-hops.
     rib_ipv6_static_route2 = dict()
     rib_ipv6_static_route2['Route'] = '2234:2234::1/128'
     rib_ipv6_static_route2['NumberNexthops'] = '1'
-    rib_ipv6_static_route2['4'] = dict()
-    rib_ipv6_static_route2['4']['Distance'] = '1'
-    rib_ipv6_static_route2['4']['Metric'] = '0'
-    rib_ipv6_static_route2['4']['RouteType'] = 'static'
+    rib_ipv6_static_route2[sw1_intf4] = dict()
+    rib_ipv6_static_route2[sw1_intf4]['Distance'] = '1'
+    rib_ipv6_static_route2[sw1_intf4]['Metric'] = '0'
+    rib_ipv6_static_route2[sw1_intf4]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ipv6 route") route dictionary for the
     # route 2234:2234::1/128 and its next-hops.
@@ -582,20 +637,22 @@ def restart_zebra_without_config_change(sw1, sw2, step):
     route_ipv6_kernel_route2 = dict()
     route_ipv6_kernel_route2['Route'] = '2234:2234::1' + '/' + '128'
     route_ipv6_kernel_route2['NumberNexthops'] = '1'
-    route_ipv6_kernel_route2['4'] = dict()
-    route_ipv6_kernel_route2['4']['Distance'] = ''
-    route_ipv6_kernel_route2['4']['Metric'] = ''
-    route_ipv6_kernel_route2['4']['RouteType'] = 'zebra'
+    route_ipv6_kernel_route2[sw1_intf4] = dict()
+    route_ipv6_kernel_route2[sw1_intf4]['Distance'] = ''
+    route_ipv6_kernel_route2[sw1_intf4]['Metric'] = ''
+    route_ipv6_kernel_route2[sw1_intf4]['RouteType'] = \
+        'zebra'
 
     # Populate the expected RIB ("show rib") route dictionary for the
     # route 3234:3234::1/128 and its next-hops.
     rib_ipv6_static_route3 = dict()
     rib_ipv6_static_route3['Route'] = '3234:3234::1/128'
     rib_ipv6_static_route3['NumberNexthops'] = '1'
-    rib_ipv6_static_route3['2'] = dict()
-    rib_ipv6_static_route3['2']['Distance'] = '1'
-    rib_ipv6_static_route3['2']['Metric'] = '0'
-    rib_ipv6_static_route3['2']['RouteType'] = 'static'
+    rib_ipv6_static_route3[sw1_intf2] = dict()
+    rib_ipv6_static_route3[sw1_intf2]['Distance'] = '1'
+    rib_ipv6_static_route3[sw1_intf2]['Metric'] = '0'
+    rib_ipv6_static_route3[sw1_intf2]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ipv6 route") route dictionary for the
     # route 3234:3234::1/128 and its next-hops.
@@ -606,16 +663,18 @@ def restart_zebra_without_config_change(sw1, sw2, step):
     route_ipv6_kernel_route3 = dict()
     route_ipv6_kernel_route3['Route'] = '3234:3234::1' + '/' + '128'
     route_ipv6_kernel_route3['NumberNexthops'] = '1'
-    route_ipv6_kernel_route3['2'] = dict()
-    route_ipv6_kernel_route3['2']['Distance'] = ''
-    route_ipv6_kernel_route3['2']['Metric'] = ''
-    route_ipv6_kernel_route3['2']['RouteType'] = 'zebra'
+    route_ipv6_kernel_route3[sw1_intf2] = dict()
+    route_ipv6_kernel_route3[sw1_intf2]['Distance'] = ''
+    route_ipv6_kernel_route3[sw1_intf2]['Metric'] = ''
+    route_ipv6_kernel_route3[sw1_intf2]['RouteType'] = \
+        'zebra'
 
-    sleep(15)
+    sleep(ZEBRA_TEST_SLEEP_TIME)
 
     step("Verifying the IPv4 static routes onswitch 1")
 
     # Verify route 123.0.0.1/32 and next-hops in RIB and FIB
+    sw1("configure terminal")
     aux_route = route_ipv4_static_route1["Route"]
     verify_show_ip_route(sw1, aux_route, 'static', route_ipv4_static_route1)
     aux_route = rib_ipv4_static_route1["Route"]
@@ -667,14 +726,21 @@ def restart_zebra_without_config_change(sw1, sw2, step):
 
 
 # This test restarts zebra process and checks if the routes and next-hops show
-# correctly in the output of "show ip route/show rib" after zebra has restarted.
-# While zebra is not running,, we change the static route configuration by deleting
-# some routes and adding some new routes.
+# correctly in the output of "show ip route/show rib" after zebra has
+# restarted. While zebra is not running,, we change the static route
+# configuration by deleting some routes and adding some new routes.
 def restart_zebra_with_config_change(sw1, sw2, step):
+
+    sw1_intf1 = format(sw1.ports["if01"])
+    sw1_intf2 = format(sw1.ports["if02"])
+    sw1_intf3 = format(sw1.ports["if03"])
+    sw1_intf4 = format(sw1.ports["if04"])
 
     step("######### Restarting zebra with config changes on switch 1#########")
 
-    step("######### Restarting zebra. Stopping ops-zebra service on switch 1#########")
+    step(
+        "######### Restarting zebra. Stopping ops-zebra service on switch 1"
+        "#########")
 
     # Execute the command to stop zebra on the Linux bash interface
     sw1(zebra_stop_command_string, shell='bash')
@@ -688,47 +754,48 @@ def restart_zebra_with_config_change(sw1, sw2, step):
     sw1('no ip route 123.0.0.1/32 1.1.1.2')
 
     # Un-configure IPv4 route 123.0.0.1/32 with next-hop 2
-    sw1('no ip route 123.0.0.1/32 2')
+    sw1('no ip route 123.0.0.1/32 %s' % sw1_intf2)
 
     # Un-configure IPv4 route 143.0.0.1/32 next-hop 4.4.4.1.
     sw1('no ip route 143.0.0.1/32 4.4.4.1')
 
     # Un-configure IPv6 route a234:a234::1/128 with next-hop 1.
-    sw1("no ipv6 route a234:a234::1/128 1")
+    sw1("no ipv6 route a234:a234::1/128 %s" % sw1_intf1)
 
     # Un-configure IPv6 route a234:a234::1/128 with next-hop 2.
-    sw1("no ipv6 route a234:a234::1/128 2")
+    sw1("no ipv6 route a234:a234::1/128 %s" % sw1_intf2)
 
     # un-configure IPv6 route 3234:3234::1/128 with next-hop 2.
-    sw1("no ipv6 route 3234:3234::1/128 2")
+    sw1("no ipv6 route 3234:3234::1/128 %s" % sw1_intf2)
 
     # Configure IPv4 route 173.0.0.1/32 with next-hop 1.1.1.2
     sw1('ip route 173.0.0.1/32 1.1.1.2')
 
     # Configure IPv4 route 173.0.0.1/32 with next-hop 3
-    sw1('ip route 173.0.0.1/32 3')
+    sw1('ip route 173.0.0.1/32 %s' % sw1_intf3)
 
     # Configure IPv4 route 183.0.0.1/32 next-hop 4.4.4.1.
     sw1('ip route 183.0.0.1/32 4.4.4.1')
 
     # Configure IPv6 route 7234:7234::1/128 with next-hop 1.
-    sw1('ipv6 route 7234:7234::1/128 1')
+    sw1('ipv6 route 7234:7234::1/128 %s' % sw1_intf1)
 
     # Configure IPv6 route 7234:7234::1/128 with next-hop 3.
-    sw1('ipv6 route 7234:7234::1/128 3')
+    sw1('ipv6 route 7234:7234::1/128 %s' % sw1_intf3)
 
     # Configure IPv6 route 8234:8234::1/128 with next-hop 2.
-    sw1('ipv6 route 8234:8234::1/128 2')
+    sw1('ipv6 route 8234:8234::1/128 %s' % sw1_intf2)
 
     # Populate the expected RIB ("show rib") route dictionary for the route
     # 123.0.0.1/32 and its next-hops.
     rib_ipv4_static_route1 = dict()
     rib_ipv4_static_route1['Route'] = '123.0.0.1/32'
     rib_ipv4_static_route1['NumberNexthops'] = '2'
-    rib_ipv4_static_route1['3'] = dict()
-    rib_ipv4_static_route1['3']['Distance'] = '1'
-    rib_ipv4_static_route1['3']['Metric'] = '0'
-    rib_ipv4_static_route1['3']['RouteType'] = 'static'
+    rib_ipv4_static_route1[sw1_intf3] = dict()
+    rib_ipv4_static_route1[sw1_intf3]['Distance'] = '1'
+    rib_ipv4_static_route1[sw1_intf3]['Metric'] = '0'
+    rib_ipv4_static_route1[sw1_intf3]['RouteType'] = \
+        'static'
     rib_ipv4_static_route1['4.4.4.1'] = dict()
     rib_ipv4_static_route1['4.4.4.1']['Distance'] = '1'
     rib_ipv4_static_route1['4.4.4.1']['Metric'] = '0'
@@ -743,10 +810,11 @@ def restart_zebra_with_config_change(sw1, sw2, step):
     route_ipv4_kernel_route1 = dict()
     route_ipv4_kernel_route1['Route'] = '123.0.0.1/32'
     route_ipv4_kernel_route1['NumberNexthops'] = '2'
-    route_ipv4_kernel_route1['3'] = dict()
-    route_ipv4_kernel_route1['3']['Distance'] = ''
-    route_ipv4_kernel_route1['3']['Metric'] = ''
-    route_ipv4_kernel_route1['3']['RouteType'] = 'zebra'
+    route_ipv4_kernel_route1[sw1_intf3] = dict()
+    route_ipv4_kernel_route1[sw1_intf3]['Distance'] = ''
+    route_ipv4_kernel_route1[sw1_intf3]['Metric'] = ''
+    route_ipv4_kernel_route1[sw1_intf3]['RouteType'] = \
+        'zebra'
     route_ipv4_kernel_route1['4.4.4.1'] = dict()
     route_ipv4_kernel_route1['4.4.4.1']['Distance'] = ''
     route_ipv4_kernel_route1['4.4.4.1']['Metric'] = ''
@@ -770,10 +838,11 @@ def restart_zebra_with_config_change(sw1, sw2, step):
     rib_ipv4_static_route3 = dict()
     rib_ipv4_static_route3['Route'] = '163.0.0.1/32'
     rib_ipv4_static_route3['NumberNexthops'] = '1'
-    rib_ipv4_static_route3['2'] = dict()
-    rib_ipv4_static_route3['2']['Distance'] = '1'
-    rib_ipv4_static_route3['2']['Metric'] = '0'
-    rib_ipv4_static_route3['2']['RouteType'] = 'static'
+    rib_ipv4_static_route3[sw1_intf2] = dict()
+    rib_ipv4_static_route3[sw1_intf2]['Distance'] = '1'
+    rib_ipv4_static_route3[sw1_intf2]['Metric'] = '0'
+    rib_ipv4_static_route3[sw1_intf2]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ip route") route dictionary for the
     # route 163.0.0.1/32 and its next-hops.
@@ -784,20 +853,22 @@ def restart_zebra_with_config_change(sw1, sw2, step):
     route_ipv4_kernel_route3 = dict()
     route_ipv4_kernel_route3['Route'] = '163.0.0.1' + '/' + '32'
     route_ipv4_kernel_route3['NumberNexthops'] = '1'
-    route_ipv4_kernel_route3['2'] = dict()
-    route_ipv4_kernel_route3['2']['Distance'] = ''
-    route_ipv4_kernel_route3['2']['Metric'] = ''
-    route_ipv4_kernel_route3['2']['RouteType'] = 'zebra'
+    route_ipv4_kernel_route3[sw1_intf2] = dict()
+    route_ipv4_kernel_route3[sw1_intf2]['Distance'] = ''
+    route_ipv4_kernel_route3[sw1_intf2]['Metric'] = ''
+    route_ipv4_kernel_route3[sw1_intf2]['RouteType'] = \
+        'zebra'
 
     # Populate the expected RIB ("show rib") route dictionary for the route
     # 173.0.0.1/32 and its next-hops.
     rib_ipv4_static_route4 = dict()
     rib_ipv4_static_route4['Route'] = '173.0.0.1/32'
     rib_ipv4_static_route4['NumberNexthops'] = '2'
-    rib_ipv4_static_route4['3'] = dict()
-    rib_ipv4_static_route4['3']['Distance'] = '1'
-    rib_ipv4_static_route4['3']['Metric'] = '0'
-    rib_ipv4_static_route4['3']['RouteType'] = 'static'
+    rib_ipv4_static_route4[sw1_intf3] = dict()
+    rib_ipv4_static_route4[sw1_intf3]['Distance'] = '1'
+    rib_ipv4_static_route4[sw1_intf3]['Metric'] = '0'
+    rib_ipv4_static_route4[sw1_intf3]['RouteType'] = \
+        'static'
     rib_ipv4_static_route4['1.1.1.2'] = dict()
     rib_ipv4_static_route4['1.1.1.2']['Distance'] = '1'
     rib_ipv4_static_route4['1.1.1.2']['Metric'] = '0'
@@ -812,10 +883,11 @@ def restart_zebra_with_config_change(sw1, sw2, step):
     route_ipv4_kernel_route4 = dict()
     route_ipv4_kernel_route4['Route'] = '173.0.0.1' + '/' + '32'
     route_ipv4_kernel_route4['NumberNexthops'] = '2'
-    route_ipv4_kernel_route4['3'] = dict()
-    route_ipv4_kernel_route4['3']['Distance'] = ''
-    route_ipv4_kernel_route4['3']['Metric'] = ''
-    route_ipv4_kernel_route4['3']['RouteType'] = 'zebra'
+    route_ipv4_kernel_route4[sw1_intf3] = dict()
+    route_ipv4_kernel_route4[sw1_intf3]['Distance'] = ''
+    route_ipv4_kernel_route4[sw1_intf3]['Metric'] = ''
+    route_ipv4_kernel_route4[sw1_intf3]['RouteType'] = \
+        'zebra'
     route_ipv4_kernel_route4['1.1.1.2'] = dict()
     route_ipv4_kernel_route4['1.1.1.2']['Distance'] = ''
     route_ipv4_kernel_route4['1.1.1.2']['Metric'] = ''
@@ -850,14 +922,16 @@ def restart_zebra_with_config_change(sw1, sw2, step):
     rib_ipv6_static_route1 = dict()
     rib_ipv6_static_route1['Route'] = 'a234:a234::1/128'
     rib_ipv6_static_route1['NumberNexthops'] = '2'
-    rib_ipv6_static_route1['3'] = dict()
-    rib_ipv6_static_route1['3']['Distance'] = '1'
-    rib_ipv6_static_route1['3']['Metric'] = '0'
-    rib_ipv6_static_route1['3']['RouteType'] = 'static'
-    rib_ipv6_static_route1['4'] = dict()
-    rib_ipv6_static_route1['4']['Distance'] = '1'
-    rib_ipv6_static_route1['4']['Metric'] = '0'
-    rib_ipv6_static_route1['4']['RouteType'] = 'static'
+    rib_ipv6_static_route1[sw1_intf3] = dict()
+    rib_ipv6_static_route1[sw1_intf3]['Distance'] = '1'
+    rib_ipv6_static_route1[sw1_intf3]['Metric'] = '0'
+    rib_ipv6_static_route1[sw1_intf3]['RouteType'] = \
+        'static'
+    rib_ipv6_static_route1[sw1_intf4] = dict()
+    rib_ipv6_static_route1[sw1_intf4]['Distance'] = '1'
+    rib_ipv6_static_route1[sw1_intf4]['Metric'] = '0'
+    rib_ipv6_static_route1[sw1_intf4]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ipv6 route") route dictionary for the
     # route a234:a234::1/128 and its next-hops.
@@ -868,24 +942,27 @@ def restart_zebra_with_config_change(sw1, sw2, step):
     route_ipv6_kernel_route1 = dict()
     route_ipv6_kernel_route1['Route'] = 'a234:a234::1' + '/' + '128'
     route_ipv6_kernel_route1['NumberNexthops'] = '2'
-    route_ipv6_kernel_route1['3'] = dict()
-    route_ipv6_kernel_route1['3']['Distance'] = ''
-    route_ipv6_kernel_route1['3']['Metric'] = ''
-    route_ipv6_kernel_route1['3']['RouteType'] = 'zebra'
-    route_ipv6_kernel_route1['4'] = dict()
-    route_ipv6_kernel_route1['4']['Distance'] = ''
-    route_ipv6_kernel_route1['4']['Metric'] = ''
-    route_ipv6_kernel_route1['4']['RouteType'] = 'zebra'
+    route_ipv6_kernel_route1[sw1_intf3] = dict()
+    route_ipv6_kernel_route1[sw1_intf3]['Distance'] = ''
+    route_ipv6_kernel_route1[sw1_intf3]['Metric'] = ''
+    route_ipv6_kernel_route1[sw1_intf3]['RouteType'] = \
+        'zebra'
+    route_ipv6_kernel_route1[sw1_intf4] = dict()
+    route_ipv6_kernel_route1[sw1_intf4]['Distance'] = ''
+    route_ipv6_kernel_route1[sw1_intf4]['Metric'] = ''
+    route_ipv6_kernel_route1[sw1_intf4]['RouteType'] = \
+        'zebra'
 
     # Populate the expected RIB ("show rib") route dictionary for the
     # route 2234:2234::1/128 and its next-hops.
     rib_ipv6_static_route2 = dict()
     rib_ipv6_static_route2['Route'] = '2234:2234::1/128'
     rib_ipv6_static_route2['NumberNexthops'] = '1'
-    rib_ipv6_static_route2['4'] = dict()
-    rib_ipv6_static_route2['4']['Distance'] = '1'
-    rib_ipv6_static_route2['4']['Metric'] = '0'
-    rib_ipv6_static_route2['4']['RouteType'] = 'static'
+    rib_ipv6_static_route2[sw1_intf4] = dict()
+    rib_ipv6_static_route2[sw1_intf4]['Distance'] = '1'
+    rib_ipv6_static_route2[sw1_intf4]['Metric'] = '0'
+    rib_ipv6_static_route2[sw1_intf4]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ipv6 route") route dictionary for the
     # route 2234:2234::1/128 and its next-hops.
@@ -896,10 +973,11 @@ def restart_zebra_with_config_change(sw1, sw2, step):
     route_ipv6_kernel_route2 = dict()
     route_ipv6_kernel_route2['Route'] = '2234:2234::1' + '/' + '128'
     route_ipv6_kernel_route2['NumberNexthops'] = '1'
-    route_ipv6_kernel_route2['4'] = dict()
-    route_ipv6_kernel_route2['4']['Distance'] = ''
-    route_ipv6_kernel_route2['4']['Metric'] = ''
-    route_ipv6_kernel_route2['4']['RouteType'] = 'zebra'
+    route_ipv6_kernel_route2[sw1_intf4] = dict()
+    route_ipv6_kernel_route2[sw1_intf4]['Distance'] = ''
+    route_ipv6_kernel_route2[sw1_intf4]['Metric'] = ''
+    route_ipv6_kernel_route2[sw1_intf4]['RouteType'] = \
+        'zebra'
 
     # Populate the expected RIB ("show rib") route dictionary for the
     # route 3234:3234::1/128 and its next-hops.
@@ -919,14 +997,16 @@ def restart_zebra_with_config_change(sw1, sw2, step):
     rib_ipv6_static_route4 = dict()
     rib_ipv6_static_route4['Route'] = '7234:7234::1/128'
     rib_ipv6_static_route4['NumberNexthops'] = '2'
-    rib_ipv6_static_route4['3'] = dict()
-    rib_ipv6_static_route4['3']['Distance'] = '1'
-    rib_ipv6_static_route4['3']['Metric'] = '0'
-    rib_ipv6_static_route4['3']['RouteType'] = 'static'
-    rib_ipv6_static_route4['1'] = dict()
-    rib_ipv6_static_route4['1']['Distance'] = '1'
-    rib_ipv6_static_route4['1']['Metric'] = '0'
-    rib_ipv6_static_route4['1']['RouteType'] = 'static'
+    rib_ipv6_static_route4[sw1_intf1] = dict()
+    rib_ipv6_static_route4[sw1_intf1]['Distance'] = '1'
+    rib_ipv6_static_route4[sw1_intf1]['Metric'] = '0'
+    rib_ipv6_static_route4[sw1_intf1]['RouteType'] = \
+        'static'
+    rib_ipv6_static_route4[sw1_intf3] = dict()
+    rib_ipv6_static_route4[sw1_intf3]['Distance'] = '1'
+    rib_ipv6_static_route4[sw1_intf3]['Metric'] = '0'
+    rib_ipv6_static_route4[sw1_intf3]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ipv6 route") route dictionary for the
     # route 7234:7234::1/128 and its next-hops.
@@ -937,24 +1017,27 @@ def restart_zebra_with_config_change(sw1, sw2, step):
     route_ipv6_kernel_route4 = dict()
     route_ipv6_kernel_route4['Route'] = '7234:7234::1' + '/' + '128'
     route_ipv6_kernel_route4['NumberNexthops'] = '2'
-    route_ipv6_kernel_route4['3'] = dict()
-    route_ipv6_kernel_route4['3']['Distance'] = ''
-    route_ipv6_kernel_route4['3']['Metric'] = ''
-    route_ipv6_kernel_route4['3']['RouteType'] = 'zebra'
-    route_ipv6_kernel_route4['1'] = dict()
-    route_ipv6_kernel_route4['1']['Distance'] = ''
-    route_ipv6_kernel_route4['1']['Metric'] = ''
-    route_ipv6_kernel_route4['1']['RouteType'] = 'zebra'
+    route_ipv6_kernel_route4[sw1_intf1] = dict()
+    route_ipv6_kernel_route4[sw1_intf1]['Distance'] = ''
+    route_ipv6_kernel_route4[sw1_intf1]['Metric'] = ''
+    route_ipv6_kernel_route4[sw1_intf1]['RouteType'] = \
+        'zebra'
+    route_ipv6_kernel_route4[sw1_intf3] = dict()
+    route_ipv6_kernel_route4[sw1_intf3]['Distance'] = ''
+    route_ipv6_kernel_route4[sw1_intf3]['Metric'] = ''
+    route_ipv6_kernel_route4[sw1_intf3]['RouteType'] = \
+        'zebra'
 
     # Populate the expected RIB ("show rib") route dictionary for the
     # route 8234:8234::1/128 and its next-hops.
     rib_ipv6_static_route5 = dict()
     rib_ipv6_static_route5['Route'] = '8234:8234::1/128'
     rib_ipv6_static_route5['NumberNexthops'] = '1'
-    rib_ipv6_static_route5['2'] = dict()
-    rib_ipv6_static_route5['2']['Distance'] = '1'
-    rib_ipv6_static_route5['2']['Metric'] = '0'
-    rib_ipv6_static_route5['2']['RouteType'] = 'static'
+    rib_ipv6_static_route5[sw1_intf2] = dict()
+    rib_ipv6_static_route5[sw1_intf2]['Distance'] = '1'
+    rib_ipv6_static_route5[sw1_intf2]['Metric'] = '0'
+    rib_ipv6_static_route5[sw1_intf2]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ipv6 route") route dictionary for the
     # route 8234:8234::1/128 and its next-hops.
@@ -965,21 +1048,25 @@ def restart_zebra_with_config_change(sw1, sw2, step):
     route_ipv6_kernel_route5 = dict()
     route_ipv6_kernel_route5['Route'] = '8234:8234::1' + '/' + '128'
     route_ipv6_kernel_route5['NumberNexthops'] = '1'
-    route_ipv6_kernel_route5['2'] = dict()
-    route_ipv6_kernel_route5['2']['Distance'] = ''
-    route_ipv6_kernel_route5['2']['Metric'] = ''
-    route_ipv6_kernel_route5['2']['RouteType'] = 'zebra'
+    route_ipv6_kernel_route5[sw1_intf2] = dict()
+    route_ipv6_kernel_route5[sw1_intf2]['Distance'] = ''
+    route_ipv6_kernel_route5[sw1_intf2]['Metric'] = ''
+    route_ipv6_kernel_route5[sw1_intf2]['RouteType'] = \
+        'zebra'
 
-    step("######### Restarting zebra. Starting ops-zebra service on switch 1#########")
+    step(
+        "######### Restarting zebra. Starting ops-zebra service on switch 1"
+        "#########")
 
     # Execute the command to start zebra on the Linux bash interface
     sw1(zebra_start_command_string, shell='bash')
 
-    sleep(15)
+    sleep(ZEBRA_TEST_SLEEP_TIME)
 
     step("Verifying the IPv4 static routes on switch 1")
 
     # Verify route 123.0.0.1/32 and next-hops in RIB and FIB
+    sw1("configure terminal")
     aux_route = route_ipv4_static_route1["Route"]
     verify_show_ip_route(sw1, aux_route, 'static', route_ipv4_static_route1)
     aux_route = rib_ipv4_static_route1["Route"]
@@ -1063,10 +1150,15 @@ def restart_zebra_with_config_change(sw1, sw2, step):
 
 
 # This test restarts zebra process and checks if the routes and next-hops show
-# correctly in the output of "show ip route/show rib" after zebra has restarted.
-# After zebra has come back up from restart, we change the static route configuration
-# by deleting some routes and adding some new routes.
+# correctly in the output of "show ip route/show rib" after zebra has
+# restarted. After zebra has come back up from restart, we change the static
+# route configuration by deleting some routes and adding some new routes.
 def config_change_after_zebra_restart(sw1, sw2, step):
+
+    sw1_intf1 = format(sw1.ports["if01"])
+    sw1_intf2 = format(sw1.ports["if02"])
+    sw1_intf3 = format(sw1.ports["if03"])
+    sw1_intf4 = format(sw1.ports["if04"])
 
     step("\n\n\n######### Restarting zebra. Stopping ops-zebra service on"
          "switch 1#########")
@@ -1083,41 +1175,42 @@ def config_change_after_zebra_restart(sw1, sw2, step):
     step("\n\n\n######### Adding some static route configuration "
          " after zebra has restarted on switch 1#########")
 
+    sw1('configure terminal')
     # Configure IPv4 route 123.0.0.1/32 with next-hop 1.1.1.2
     sw1('ip route 123.0.0.1/32 1.1.1.2')
 
     # Configure IPv4 route 123.0.0.1/32 with next-hop 2
-    sw1('ip route 123.0.0.1/32 2')
+    sw1('ip route 123.0.0.1/32 %s' % sw1_intf2)
 
     # Configure IPv4 route 143.0.0.1/32 next-hop 4.4.4.1.
     sw1('ip route 143.0.0.1/32 4.4.4.1')
 
     # Configure IPv6 route a234:a234::1/128 with next-hop 1.
-    sw1("ipv6 route a234:a234::1/128 1")
+    sw1("ipv6 route a234:a234::1/128 %s" % sw1_intf1)
 
     # Configure IPv6 route a234:a234::1/128 with next-hop 2.
-    sw1("ipv6 route a234:a234::1/128 2")
+    sw1("ipv6 route a234:a234::1/128 %s" % sw1_intf2)
 
     # Configure IPv6 route 3234:3234::1/128 with next-hop 2.
-    sw1("ipv6 route 3234:3234::1/128 2")
+    sw1("ipv6 route 3234:3234::1/128 %s" % sw1_intf2)
 
     # Un-configure IPv4 route 173.0.0.1/32 with next-hop 1.1.1.2
     sw1('no ip route 173.0.0.1/32 1.1.1.2')
 
     # Un-configure IPv4 route 173.0.0.1/32 with next-hop 3
-    sw1('no ip route 173.0.0.1/32 3')
+    sw1('no ip route 173.0.0.1/32 %s' % sw1_intf3)
 
     # Un-configure IPv4 route 183.0.0.1/32 next-hop 4.4.4.1.
     sw1('no ip route 183.0.0.1/32 4.4.4.1')
 
     # Un-configure IPv6 route 7234:7234::1/128 with next-hop 1.
-    sw1('no ipv6 route 7234:7234::1/128 1')
+    sw1('no ipv6 route 7234:7234::1/128 %s' % sw1_intf1)
 
     # Un-configure IPv6 route 7234:7234::1/128 with next-hop 3.
-    sw1('no ipv6 route 7234:7234::1/128 3')
+    sw1('no ipv6 route 7234:7234::1/128 %s' % sw1_intf3)
 
     # Un-configure IPv6 route 8234:8234::1/128 with next-hop 2.
-    sw1('no ipv6 route 8234:8234::1/128 2')
+    sw1('no ipv6 route 8234:8234::1/128 %s' % sw1_intf2)
 
     # Populate the expected RIB ("show rib") route dictionary for the route
     # 123.0.0.1/32 and its next-hops.
@@ -1128,14 +1221,16 @@ def config_change_after_zebra_restart(sw1, sw2, step):
     rib_ipv4_static_route1['1.1.1.2']['Distance'] = '1'
     rib_ipv4_static_route1['1.1.1.2']['Metric'] = '0'
     rib_ipv4_static_route1['1.1.1.2']['RouteType'] = 'static'
-    rib_ipv4_static_route1['2'] = dict()
-    rib_ipv4_static_route1['2']['Distance'] = '1'
-    rib_ipv4_static_route1['2']['Metric'] = '0'
-    rib_ipv4_static_route1['2']['RouteType'] = 'static'
-    rib_ipv4_static_route1['3'] = dict()
-    rib_ipv4_static_route1['3']['Distance'] = '1'
-    rib_ipv4_static_route1['3']['Metric'] = '0'
-    rib_ipv4_static_route1['3']['RouteType'] = 'static'
+    rib_ipv4_static_route1[sw1_intf2] = dict()
+    rib_ipv4_static_route1[sw1_intf2]['Distance'] = '1'
+    rib_ipv4_static_route1[sw1_intf2]['Metric'] = '0'
+    rib_ipv4_static_route1[sw1_intf2]['RouteType'] = \
+        'static'
+    rib_ipv4_static_route1[sw1_intf3] = dict()
+    rib_ipv4_static_route1[sw1_intf3]['Distance'] = '1'
+    rib_ipv4_static_route1[sw1_intf3]['Metric'] = '0'
+    rib_ipv4_static_route1[sw1_intf3]['RouteType'] = \
+        'static'
     rib_ipv4_static_route1['4.4.4.1'] = dict()
     rib_ipv4_static_route1['4.4.4.1']['Distance'] = '1'
     rib_ipv4_static_route1['4.4.4.1']['Metric'] = '0'
@@ -1154,14 +1249,16 @@ def config_change_after_zebra_restart(sw1, sw2, step):
     route_ipv4_kernel_route1['1.1.1.2']['Distance'] = ''
     route_ipv4_kernel_route1['1.1.1.2']['Metric'] = ''
     route_ipv4_kernel_route1['1.1.1.2']['RouteType'] = 'zebra'
-    route_ipv4_kernel_route1['2'] = dict()
-    route_ipv4_kernel_route1['2']['Distance'] = ''
-    route_ipv4_kernel_route1['2']['Metric'] = ''
-    route_ipv4_kernel_route1['2']['RouteType'] = 'zebra'
-    route_ipv4_kernel_route1['3'] = dict()
-    route_ipv4_kernel_route1['3']['Distance'] = ''
-    route_ipv4_kernel_route1['3']['Metric'] = ''
-    route_ipv4_kernel_route1['3']['RouteType'] = 'zebra'
+    route_ipv4_kernel_route1[sw1_intf2] = dict()
+    route_ipv4_kernel_route1[sw1_intf2]['Distance'] = ''
+    route_ipv4_kernel_route1[sw1_intf2]['Metric'] = ''
+    route_ipv4_kernel_route1[sw1_intf2]['RouteType'] = \
+        'zebra'
+    route_ipv4_kernel_route1[sw1_intf3] = dict()
+    route_ipv4_kernel_route1[sw1_intf3]['Distance'] = ''
+    route_ipv4_kernel_route1[sw1_intf3]['Metric'] = ''
+    route_ipv4_kernel_route1[sw1_intf3]['RouteType'] = \
+        'zebra'
     route_ipv4_kernel_route1['4.4.4.1'] = dict()
     route_ipv4_kernel_route1['4.4.4.1']['Distance'] = ''
     route_ipv4_kernel_route1['4.4.4.1']['Metric'] = ''
@@ -1196,10 +1293,11 @@ def config_change_after_zebra_restart(sw1, sw2, step):
     rib_ipv4_static_route3 = dict()
     rib_ipv4_static_route3['Route'] = '163.0.0.1/32'
     rib_ipv4_static_route3['NumberNexthops'] = '1'
-    rib_ipv4_static_route3['2'] = dict()
-    rib_ipv4_static_route3['2']['Distance'] = '1'
-    rib_ipv4_static_route3['2']['Metric'] = '0'
-    rib_ipv4_static_route3['2']['RouteType'] = 'static'
+    rib_ipv4_static_route3[sw1_intf2] = dict()
+    rib_ipv4_static_route3[sw1_intf2]['Distance'] = '1'
+    rib_ipv4_static_route3[sw1_intf2]['Metric'] = '0'
+    rib_ipv4_static_route3[sw1_intf2]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ip route") route dictionary for the
     # route 163.0.0.1/32 and its next-hops.
@@ -1210,10 +1308,11 @@ def config_change_after_zebra_restart(sw1, sw2, step):
     route_ipv4_kernel_route3 = dict()
     route_ipv4_kernel_route3['Route'] = '163.0.0.1' + '/' + '32'
     route_ipv4_kernel_route3['NumberNexthops'] = '1'
-    route_ipv4_kernel_route3['2'] = dict()
-    route_ipv4_kernel_route3['2']['Distance'] = ''
-    route_ipv4_kernel_route3['2']['Metric'] = ''
-    route_ipv4_kernel_route3['2']['RouteType'] = 'zebra'
+    route_ipv4_kernel_route3[sw1_intf2] = dict()
+    route_ipv4_kernel_route3[sw1_intf2]['Distance'] = ''
+    route_ipv4_kernel_route3[sw1_intf2]['Metric'] = ''
+    route_ipv4_kernel_route3[sw1_intf2]['RouteType'] = \
+        'zebra'
 
     # Populate the expected RIB ("show rib") route dictionary for the route
     # 173.0.0.1/32 and its next-hops.
@@ -1246,22 +1345,26 @@ def config_change_after_zebra_restart(sw1, sw2, step):
     rib_ipv6_static_route1 = dict()
     rib_ipv6_static_route1['Route'] = 'a234:a234::1/128'
     rib_ipv6_static_route1['NumberNexthops'] = '4'
-    rib_ipv6_static_route1['1'] = dict()
-    rib_ipv6_static_route1['1']['Distance'] = '1'
-    rib_ipv6_static_route1['1']['Metric'] = '0'
-    rib_ipv6_static_route1['1']['RouteType'] = 'static'
-    rib_ipv6_static_route1['2'] = dict()
-    rib_ipv6_static_route1['2']['Distance'] = '1'
-    rib_ipv6_static_route1['2']['Metric'] = '0'
-    rib_ipv6_static_route1['2']['RouteType'] = 'static'
-    rib_ipv6_static_route1['3'] = dict()
-    rib_ipv6_static_route1['3']['Distance'] = '1'
-    rib_ipv6_static_route1['3']['Metric'] = '0'
-    rib_ipv6_static_route1['3']['RouteType'] = 'static'
-    rib_ipv6_static_route1['4'] = dict()
-    rib_ipv6_static_route1['4']['Distance'] = '1'
-    rib_ipv6_static_route1['4']['Metric'] = '0'
-    rib_ipv6_static_route1['4']['RouteType'] = 'static'
+    rib_ipv6_static_route1[sw1_intf1] = dict()
+    rib_ipv6_static_route1[sw1_intf1]['Distance'] = '1'
+    rib_ipv6_static_route1[sw1_intf1]['Metric'] = '0'
+    rib_ipv6_static_route1[sw1_intf1]['RouteType'] = \
+        'static'
+    rib_ipv6_static_route1[sw1_intf2] = dict()
+    rib_ipv6_static_route1[sw1_intf2]['Distance'] = '1'
+    rib_ipv6_static_route1[sw1_intf2]['Metric'] = '0'
+    rib_ipv6_static_route1[sw1_intf2]['RouteType'] = \
+        'static'
+    rib_ipv6_static_route1[sw1_intf3] = dict()
+    rib_ipv6_static_route1[sw1_intf3]['Distance'] = '1'
+    rib_ipv6_static_route1[sw1_intf3]['Metric'] = '0'
+    rib_ipv6_static_route1[sw1_intf3]['RouteType'] = \
+        'static'
+    rib_ipv6_static_route1[sw1_intf4] = dict()
+    rib_ipv6_static_route1[sw1_intf4]['Distance'] = '1'
+    rib_ipv6_static_route1[sw1_intf4]['Metric'] = '0'
+    rib_ipv6_static_route1[sw1_intf4]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ipv6 route") route dictionary for the
     # route a234:a234::1/128 and its next-hops.
@@ -1272,32 +1375,37 @@ def config_change_after_zebra_restart(sw1, sw2, step):
     route_ipv6_kernel_route1 = dict()
     route_ipv6_kernel_route1['Route'] = 'a234:a234::1' + '/' + '128'
     route_ipv6_kernel_route1['NumberNexthops'] = '4'
-    route_ipv6_kernel_route1['1'] = dict()
-    route_ipv6_kernel_route1['1']['Distance'] = ''
-    route_ipv6_kernel_route1['1']['Metric'] = ''
-    route_ipv6_kernel_route1['1']['RouteType'] = 'zebra'
-    route_ipv6_kernel_route1['2'] = dict()
-    route_ipv6_kernel_route1['2']['Distance'] = ''
-    route_ipv6_kernel_route1['2']['Metric'] = ''
-    route_ipv6_kernel_route1['2']['RouteType'] = 'zebra'
-    route_ipv6_kernel_route1['3'] = dict()
-    route_ipv6_kernel_route1['3']['Distance'] = ''
-    route_ipv6_kernel_route1['3']['Metric'] = ''
-    route_ipv6_kernel_route1['3']['RouteType'] = 'zebra'
-    route_ipv6_kernel_route1['4'] = dict()
-    route_ipv6_kernel_route1['4']['Distance'] = ''
-    route_ipv6_kernel_route1['4']['Metric'] = ''
-    route_ipv6_kernel_route1['4']['RouteType'] = 'zebra'
+    route_ipv6_kernel_route1[sw1_intf1] = dict()
+    route_ipv6_kernel_route1[sw1_intf1]['Distance'] = ''
+    route_ipv6_kernel_route1[sw1_intf1]['Metric'] = ''
+    route_ipv6_kernel_route1[sw1_intf1]['RouteType'] = \
+        'zebra'
+    route_ipv6_kernel_route1[sw1_intf2] = dict()
+    route_ipv6_kernel_route1[sw1_intf2]['Distance'] = ''
+    route_ipv6_kernel_route1[sw1_intf2]['Metric'] = ''
+    route_ipv6_kernel_route1[sw1_intf2]['RouteType'] = \
+        'zebra'
+    route_ipv6_kernel_route1[sw1_intf3] = dict()
+    route_ipv6_kernel_route1[sw1_intf3]['Distance'] = ''
+    route_ipv6_kernel_route1[sw1_intf3]['Metric'] = ''
+    route_ipv6_kernel_route1[sw1_intf3]['RouteType'] = \
+        'zebra'
+    route_ipv6_kernel_route1[sw1_intf4] = dict()
+    route_ipv6_kernel_route1[sw1_intf4]['Distance'] = ''
+    route_ipv6_kernel_route1[sw1_intf4]['Metric'] = ''
+    route_ipv6_kernel_route1[sw1_intf4]['RouteType'] = \
+        'zebra'
 
     # Populate the expected RIB ("show rib") route dictionary for the
     # route 2234:2234::1/128 and its next-hops.
     rib_ipv6_static_route2 = dict()
     rib_ipv6_static_route2['Route'] = '2234:2234::1/128'
     rib_ipv6_static_route2['NumberNexthops'] = '1'
-    rib_ipv6_static_route2['4'] = dict()
-    rib_ipv6_static_route2['4']['Distance'] = '1'
-    rib_ipv6_static_route2['4']['Metric'] = '0'
-    rib_ipv6_static_route2['4']['RouteType'] = 'static'
+    rib_ipv6_static_route2[sw1_intf4] = dict()
+    rib_ipv6_static_route2[sw1_intf4]['Distance'] = '1'
+    rib_ipv6_static_route2[sw1_intf4]['Metric'] = '0'
+    rib_ipv6_static_route2[sw1_intf4]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ipv6 route") route dictionary for the
     # route 2234:2234::1/128 and its next-hops.
@@ -1308,20 +1416,22 @@ def config_change_after_zebra_restart(sw1, sw2, step):
     route_ipv6_kernel_route2 = dict()
     route_ipv6_kernel_route2['Route'] = '2234:2234::1' + '/' + '128'
     route_ipv6_kernel_route2['NumberNexthops'] = '1'
-    route_ipv6_kernel_route2['4'] = dict()
-    route_ipv6_kernel_route2['4']['Distance'] = ''
-    route_ipv6_kernel_route2['4']['Metric'] = ''
-    route_ipv6_kernel_route2['4']['RouteType'] = 'zebra'
+    route_ipv6_kernel_route2[sw1_intf4] = dict()
+    route_ipv6_kernel_route2[sw1_intf4]['Distance'] = ''
+    route_ipv6_kernel_route2[sw1_intf4]['Metric'] = ''
+    route_ipv6_kernel_route2[sw1_intf4]['RouteType'] = \
+        'zebra'
 
     # Populate the expected RIB ("show rib") route dictionary for the
     # route 3234:3234::1/128 and its next-hops.
     rib_ipv6_static_route3 = dict()
     rib_ipv6_static_route3['Route'] = '3234:3234::1/128'
     rib_ipv6_static_route3['NumberNexthops'] = '1'
-    rib_ipv6_static_route3['2'] = dict()
-    rib_ipv6_static_route3['2']['Distance'] = '1'
-    rib_ipv6_static_route3['2']['Metric'] = '0'
-    rib_ipv6_static_route3['2']['RouteType'] = 'static'
+    rib_ipv6_static_route3[sw1_intf2] = dict()
+    rib_ipv6_static_route3[sw1_intf2]['Distance'] = '1'
+    rib_ipv6_static_route3[sw1_intf2]['Metric'] = '0'
+    rib_ipv6_static_route3[sw1_intf2]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ipv6 route") route dictionary for the
     # route 3234:3234::1/128 and its next-hops.
@@ -1332,10 +1442,11 @@ def config_change_after_zebra_restart(sw1, sw2, step):
     route_ipv6_kernel_route3 = dict()
     route_ipv6_kernel_route3['Route'] = '3234:3234::1' + '/' + '128'
     route_ipv6_kernel_route3['NumberNexthops'] = '1'
-    route_ipv6_kernel_route3['2'] = dict()
-    route_ipv6_kernel_route3['2']['Distance'] = ''
-    route_ipv6_kernel_route3['2']['Metric'] = ''
-    route_ipv6_kernel_route3['2']['RouteType'] = 'zebra'
+    route_ipv6_kernel_route3[sw1_intf2] = dict()
+    route_ipv6_kernel_route3[sw1_intf2]['Distance'] = ''
+    route_ipv6_kernel_route3[sw1_intf2]['Metric'] = ''
+    route_ipv6_kernel_route3[sw1_intf2]['RouteType'] = \
+        'zebra'
 
     # Populate the expected RIB ("show rib") route dictionary for the
     # route 7234:7234::1/128 and its next-hops.
@@ -1363,7 +1474,7 @@ def config_change_after_zebra_restart(sw1, sw2, step):
     # for the route 8234:8234::1/128 and its next-hops.
     route_ipv6_kernel_route5 = route_ipv6_static_route5
 
-    sleep(15)
+    sleep(ZEBRA_TEST_SLEEP_TIME)
 
     step("Verifying the IPv4 static routes onswitch 1")
 
@@ -1451,9 +1562,15 @@ def config_change_after_zebra_restart(sw1, sw2, step):
 
 
 # This test restarts zebra process and checks if the routes and next-hops show
-# correctly in the output of "show ip route/show rib" after zebra has restarted.
-# Before zebra has come back up from restart, we shutdown some next-hop interfaces.
+# correctly in the output of "show ip route/show rib" after zebra has
+# restarted. Before zebra has come back up from restart, we shutdown some
+# next-hop interfaces.
 def interface_down_before_zebra_restart(sw1, sw2, step):
+
+    sw1_intf1 = format(sw1.ports["if01"])
+    sw1_intf2 = format(sw1.ports["if02"])
+    sw1_intf3 = format(sw1.ports["if03"])
+    sw1_intf4 = format(sw1.ports["if04"])
 
     step("\n\n\n######### Restarting zebra and shutting down"
          " some next-hop interfaces on switch1.#########")
@@ -1465,7 +1582,8 @@ def interface_down_before_zebra_restart(sw1, sw2, step):
     sw1(zebra_stop_command_string, shell='bash')
 
     # Shut down interface 2 on switch1
-    sw1("interface 2")
+    sw1('configure terminal')
+    sw1("interface %s" % sw1_intf2)
     sw1('shutdown')
 
     step("\n\n\n######### Restarting zebra. Starting ops-zebra service on"
@@ -1483,14 +1601,16 @@ def interface_down_before_zebra_restart(sw1, sw2, step):
     rib_ipv4_static_route1['1.1.1.2']['Distance'] = '1'
     rib_ipv4_static_route1['1.1.1.2']['Metric'] = '0'
     rib_ipv4_static_route1['1.1.1.2']['RouteType'] = 'static'
-    rib_ipv4_static_route1['2'] = dict()
-    rib_ipv4_static_route1['2']['Distance'] = '1'
-    rib_ipv4_static_route1['2']['Metric'] = '0'
-    rib_ipv4_static_route1['2']['RouteType'] = 'static'
-    rib_ipv4_static_route1['3'] = dict()
-    rib_ipv4_static_route1['3']['Distance'] = '1'
-    rib_ipv4_static_route1['3']['Metric'] = '0'
-    rib_ipv4_static_route1['3']['RouteType'] = 'static'
+    rib_ipv4_static_route1[sw1_intf2] = dict()
+    rib_ipv4_static_route1[sw1_intf2]['Distance'] = '1'
+    rib_ipv4_static_route1[sw1_intf2]['Metric'] = '0'
+    rib_ipv4_static_route1[sw1_intf2]['RouteType'] = \
+        'static'
+    rib_ipv4_static_route1[sw1_intf3] = dict()
+    rib_ipv4_static_route1[sw1_intf3]['Distance'] = '1'
+    rib_ipv4_static_route1[sw1_intf3]['Metric'] = '0'
+    rib_ipv4_static_route1[sw1_intf3]['RouteType'] = \
+        'static'
     rib_ipv4_static_route1['4.4.4.1'] = dict()
     rib_ipv4_static_route1['4.4.4.1']['Distance'] = '1'
     rib_ipv4_static_route1['4.4.4.1']['Metric'] = '0'
@@ -1505,10 +1625,11 @@ def interface_down_before_zebra_restart(sw1, sw2, step):
     route_ipv4_static_route1['1.1.1.2']['Distance'] = '1'
     route_ipv4_static_route1['1.1.1.2']['Metric'] = '0'
     route_ipv4_static_route1['1.1.1.2']['RouteType'] = 'static'
-    route_ipv4_static_route1['3'] = dict()
-    route_ipv4_static_route1['3']['Distance'] = '1'
-    route_ipv4_static_route1['3']['Metric'] = '0'
-    route_ipv4_static_route1['3']['RouteType'] = 'static'
+    route_ipv4_static_route1[sw1_intf3] = dict()
+    route_ipv4_static_route1[sw1_intf3]['Distance'] = '1'
+    route_ipv4_static_route1[sw1_intf3]['Metric'] = '0'
+    route_ipv4_static_route1[sw1_intf3]['RouteType'] = \
+        'static'
     route_ipv4_static_route1['4.4.4.1'] = dict()
     route_ipv4_static_route1['4.4.4.1']['Distance'] = '1'
     route_ipv4_static_route1['4.4.4.1']['Metric'] = '0'
@@ -1523,10 +1644,11 @@ def interface_down_before_zebra_restart(sw1, sw2, step):
     route_ipv4_kernel_route1['1.1.1.2']['Distance'] = ''
     route_ipv4_kernel_route1['1.1.1.2']['Metric'] = ''
     route_ipv4_kernel_route1['1.1.1.2']['RouteType'] = 'zebra'
-    route_ipv4_kernel_route1['3'] = dict()
-    route_ipv4_kernel_route1['3']['Distance'] = ''
-    route_ipv4_kernel_route1['3']['Metric'] = ''
-    route_ipv4_kernel_route1['3']['RouteType'] = 'zebra'
+    route_ipv4_kernel_route1[sw1_intf3] = dict()
+    route_ipv4_kernel_route1[sw1_intf3]['Distance'] = ''
+    route_ipv4_kernel_route1[sw1_intf3]['Metric'] = ''
+    route_ipv4_kernel_route1[sw1_intf3]['RouteType'] = \
+        'zebra'
     route_ipv4_kernel_route1['4.4.4.1'] = dict()
     route_ipv4_kernel_route1['4.4.4.1']['Distance'] = ''
     route_ipv4_kernel_route1['4.4.4.1']['Metric'] = ''
@@ -1561,10 +1683,11 @@ def interface_down_before_zebra_restart(sw1, sw2, step):
     rib_ipv4_static_route3 = dict()
     rib_ipv4_static_route3['Route'] = '163.0.0.1/32'
     rib_ipv4_static_route3['NumberNexthops'] = '1'
-    rib_ipv4_static_route3['2'] = dict()
-    rib_ipv4_static_route3['2']['Distance'] = '1'
-    rib_ipv4_static_route3['2']['Metric'] = '0'
-    rib_ipv4_static_route3['2']['RouteType'] = 'static'
+    rib_ipv4_static_route3[sw1_intf2] = dict()
+    rib_ipv4_static_route3[sw1_intf2]['Distance'] = '1'
+    rib_ipv4_static_route3[sw1_intf2]['Metric'] = '0'
+    rib_ipv4_static_route3[sw1_intf2]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ip route") route dictionary for the
     # route 163.0.0.1/32 and its next-hops.
@@ -1581,68 +1704,79 @@ def interface_down_before_zebra_restart(sw1, sw2, step):
     rib_ipv6_static_route1 = dict()
     rib_ipv6_static_route1['Route'] = 'a234:a234::1/128'
     rib_ipv6_static_route1['NumberNexthops'] = '4'
-    rib_ipv6_static_route1['1'] = dict()
-    rib_ipv6_static_route1['1']['Distance'] = '1'
-    rib_ipv6_static_route1['1']['Metric'] = '0'
-    rib_ipv6_static_route1['1']['RouteType'] = 'static'
-    rib_ipv6_static_route1['2'] = dict()
-    rib_ipv6_static_route1['2']['Distance'] = '1'
-    rib_ipv6_static_route1['2']['Metric'] = '0'
-    rib_ipv6_static_route1['2']['RouteType'] = 'static'
-    rib_ipv6_static_route1['3'] = dict()
-    rib_ipv6_static_route1['3']['Distance'] = '1'
-    rib_ipv6_static_route1['3']['Metric'] = '0'
-    rib_ipv6_static_route1['3']['RouteType'] = 'static'
-    rib_ipv6_static_route1['4'] = dict()
-    rib_ipv6_static_route1['4']['Distance'] = '1'
-    rib_ipv6_static_route1['4']['Metric'] = '0'
-    rib_ipv6_static_route1['4']['RouteType'] = 'static'
+    rib_ipv6_static_route1[sw1_intf1] = dict()
+    rib_ipv6_static_route1[sw1_intf1]['Distance'] = '1'
+    rib_ipv6_static_route1[sw1_intf1]['Metric'] = '0'
+    rib_ipv6_static_route1[sw1_intf1]['RouteType'] = \
+        'static'
+    rib_ipv6_static_route1[sw1_intf2] = dict()
+    rib_ipv6_static_route1[sw1_intf2]['Distance'] = '1'
+    rib_ipv6_static_route1[sw1_intf2]['Metric'] = '0'
+    rib_ipv6_static_route1[sw1_intf2]['RouteType'] = \
+        'static'
+    rib_ipv6_static_route1[sw1_intf3] = dict()
+    rib_ipv6_static_route1[sw1_intf3]['Distance'] = '1'
+    rib_ipv6_static_route1[sw1_intf3]['Metric'] = '0'
+    rib_ipv6_static_route1[sw1_intf3]['RouteType'] = \
+        'static'
+    rib_ipv6_static_route1[sw1_intf4] = dict()
+    rib_ipv6_static_route1[sw1_intf4]['Distance'] = '1'
+    rib_ipv6_static_route1[sw1_intf4]['Metric'] = '0'
+    rib_ipv6_static_route1[sw1_intf4]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ipv6 route") route dictionary for the
     # route a234:a234::1/128 and its next-hops.
     route_ipv6_static_route1 = dict()
     route_ipv6_static_route1['Route'] = 'a234:a234::1/128'
     route_ipv6_static_route1['NumberNexthops'] = '3'
-    route_ipv6_static_route1['1'] = dict()
-    route_ipv6_static_route1['1']['Distance'] = '1'
-    route_ipv6_static_route1['1']['Metric'] = '0'
-    route_ipv6_static_route1['1']['RouteType'] = 'static'
-    route_ipv6_static_route1['3'] = dict()
-    route_ipv6_static_route1['3']['Distance'] = '1'
-    route_ipv6_static_route1['3']['Metric'] = '0'
-    route_ipv6_static_route1['3']['RouteType'] = 'static'
-    route_ipv6_static_route1['4'] = dict()
-    route_ipv6_static_route1['4']['Distance'] = '1'
-    route_ipv6_static_route1['4']['Metric'] = '0'
-    route_ipv6_static_route1['4']['RouteType'] = 'static'
+    route_ipv6_static_route1[sw1_intf1] = dict()
+    route_ipv6_static_route1[sw1_intf1]['Distance'] = '1'
+    route_ipv6_static_route1[sw1_intf1]['Metric'] = '0'
+    route_ipv6_static_route1[sw1_intf1]['RouteType'] = \
+        'static'
+    route_ipv6_static_route1[sw1_intf3] = dict()
+    route_ipv6_static_route1[sw1_intf3]['Distance'] = '1'
+    route_ipv6_static_route1[sw1_intf3]['Metric'] = '0'
+    route_ipv6_static_route1[sw1_intf3]['RouteType'] = \
+        'static'
+    route_ipv6_static_route1[sw1_intf4] = dict()
+    route_ipv6_static_route1[sw1_intf4]['Distance'] = '1'
+    route_ipv6_static_route1[sw1_intf4]['Metric'] = '0'
+    route_ipv6_static_route1[sw1_intf4]['RouteType'] = \
+        'static'
 
     # Populate the version of the route in kernel in the route dictionary
     # for the route a234:a234::1/128 and its next-hops.
     route_ipv6_kernel_route1 = dict()
     route_ipv6_kernel_route1['Route'] = 'a234:a234::1' + '/' + '128'
     route_ipv6_kernel_route1['NumberNexthops'] = '3'
-    route_ipv6_kernel_route1['1'] = dict()
-    route_ipv6_kernel_route1['1']['Distance'] = ''
-    route_ipv6_kernel_route1['1']['Metric'] = ''
-    route_ipv6_kernel_route1['1']['RouteType'] = 'zebra'
-    route_ipv6_kernel_route1['3'] = dict()
-    route_ipv6_kernel_route1['3']['Distance'] = ''
-    route_ipv6_kernel_route1['3']['Metric'] = ''
-    route_ipv6_kernel_route1['3']['RouteType'] = 'zebra'
-    route_ipv6_kernel_route1['4'] = dict()
-    route_ipv6_kernel_route1['4']['Distance'] = ''
-    route_ipv6_kernel_route1['4']['Metric'] = ''
-    route_ipv6_kernel_route1['4']['RouteType'] = 'zebra'
+    route_ipv6_kernel_route1[sw1_intf1] = dict()
+    route_ipv6_kernel_route1[sw1_intf1]['Distance'] = ''
+    route_ipv6_kernel_route1[sw1_intf1]['Metric'] = ''
+    route_ipv6_kernel_route1[sw1_intf1]['RouteType'] = \
+        'zebra'
+    route_ipv6_kernel_route1[sw1_intf3] = dict()
+    route_ipv6_kernel_route1[sw1_intf3]['Distance'] = ''
+    route_ipv6_kernel_route1[sw1_intf3]['Metric'] = ''
+    route_ipv6_kernel_route1[sw1_intf3]['RouteType'] = \
+        'zebra'
+    route_ipv6_kernel_route1[sw1_intf4] = dict()
+    route_ipv6_kernel_route1[sw1_intf4]['Distance'] = ''
+    route_ipv6_kernel_route1[sw1_intf4]['Metric'] = ''
+    route_ipv6_kernel_route1[sw1_intf4]['RouteType'] = \
+        'zebra'
 
     # Populate the expected RIB ("show rib") route dictionary for the
     # route 2234:2234::1/128 and its next-hops.
     rib_ipv6_static_route2 = dict()
     rib_ipv6_static_route2['Route'] = '2234:2234::1/128'
     rib_ipv6_static_route2['NumberNexthops'] = '1'
-    rib_ipv6_static_route2['4'] = dict()
-    rib_ipv6_static_route2['4']['Distance'] = '1'
-    rib_ipv6_static_route2['4']['Metric'] = '0'
-    rib_ipv6_static_route2['4']['RouteType'] = 'static'
+    rib_ipv6_static_route2[sw1_intf4] = dict()
+    rib_ipv6_static_route2[sw1_intf4]['Distance'] = '1'
+    rib_ipv6_static_route2[sw1_intf4]['Metric'] = '0'
+    rib_ipv6_static_route2[sw1_intf4]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ipv6 route") route dictionary for the
     # route 2234:2234::1/128 and its next-hops.
@@ -1653,20 +1787,22 @@ def interface_down_before_zebra_restart(sw1, sw2, step):
     route_ipv6_kernel_route2 = dict()
     route_ipv6_kernel_route2['Route'] = '2234:2234::1' + '/' + '128'
     route_ipv6_kernel_route2['NumberNexthops'] = '1'
-    route_ipv6_kernel_route2['4'] = dict()
-    route_ipv6_kernel_route2['4']['Distance'] = ''
-    route_ipv6_kernel_route2['4']['Metric'] = ''
-    route_ipv6_kernel_route2['4']['RouteType'] = 'zebra'
+    route_ipv6_kernel_route2[sw1_intf4] = dict()
+    route_ipv6_kernel_route2[sw1_intf4]['Distance'] = ''
+    route_ipv6_kernel_route2[sw1_intf4]['Metric'] = ''
+    route_ipv6_kernel_route2[sw1_intf4]['RouteType'] = \
+        'zebra'
 
     # Populate the expected RIB ("show rib") route dictionary for the
     # route 3234:3234::1/128 and its next-hops.
     rib_ipv6_static_route3 = dict()
     rib_ipv6_static_route3['Route'] = '3234:3234::1/128'
     rib_ipv6_static_route3['NumberNexthops'] = '1'
-    rib_ipv6_static_route3['2'] = dict()
-    rib_ipv6_static_route3['2']['Distance'] = '1'
-    rib_ipv6_static_route3['2']['Metric'] = '0'
-    rib_ipv6_static_route3['2']['RouteType'] = 'static'
+    rib_ipv6_static_route3[sw1_intf2] = dict()
+    rib_ipv6_static_route3[sw1_intf2]['Distance'] = '1'
+    rib_ipv6_static_route3[sw1_intf2]['Metric'] = '0'
+    rib_ipv6_static_route3[sw1_intf2]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ipv6 route") route dictionary for the
     # route 3234:3234::1/128 and its next-hops.
@@ -1678,11 +1814,12 @@ def interface_down_before_zebra_restart(sw1, sw2, step):
     route_ipv6_kernel_route3 = dict()
     route_ipv6_kernel_route3['Route'] = '3234:3234::1' + '/' + '128'
 
-    sleep(15)
+    sleep(ZEBRA_TEST_SLEEP_TIME)
 
     step("Verifying the IPv4 static routes onswitch 1")
 
     # Verify route 123.0.0.1/32 and next-hops in RIB and FIB
+    sw1('configure terminal')
     aux_route = route_ipv4_static_route1["Route"]
     verify_show_ip_route(sw1, aux_route, 'static', route_ipv4_static_route1)
     aux_route = rib_ipv4_static_route1["Route"]
@@ -1734,9 +1871,15 @@ def interface_down_before_zebra_restart(sw1, sw2, step):
 
 
 # This test restarts zebra process and checks if the routes and next-hops show
-# correctly in the output of "show ip route/show rib" after zebra has restarted.
-# Before zebra has come back up from restart, we un-shutdown some next-hop interfaces.
+# correctly in the output of "show ip route/show rib" after zebra has
+# restarted. Before zebra has come back up from restart, we un-shutdown some
+# next-hop interfaces.
 def interface_up_before_zebra_restart(sw1, sw2, step):
+
+    sw1_intf1 = format(sw1.ports["if01"])
+    sw1_intf2 = format(sw1.ports["if02"])
+    sw1_intf3 = format(sw1.ports["if03"])
+    sw1_intf4 = format(sw1.ports["if04"])
 
     step("\n\n\n######### Restarting zebra and un-shutting"
          " some next-hop interfaces on switch1.#########")
@@ -1748,6 +1891,7 @@ def interface_up_before_zebra_restart(sw1, sw2, step):
     sw1(zebra_stop_command_string, shell='bash')
 
     # Shut down interface 2 on switch1
+    sw1('configure terminal')
     sw1("interface 2")
     sw1('no shutdown')
 
@@ -1766,14 +1910,16 @@ def interface_up_before_zebra_restart(sw1, sw2, step):
     rib_ipv4_static_route1['1.1.1.2']['Distance'] = '1'
     rib_ipv4_static_route1['1.1.1.2']['Metric'] = '0'
     rib_ipv4_static_route1['1.1.1.2']['RouteType'] = 'static'
-    rib_ipv4_static_route1['2'] = dict()
-    rib_ipv4_static_route1['2']['Distance'] = '1'
-    rib_ipv4_static_route1['2']['Metric'] = '0'
-    rib_ipv4_static_route1['2']['RouteType'] = 'static'
-    rib_ipv4_static_route1['3'] = dict()
-    rib_ipv4_static_route1['3']['Distance'] = '1'
-    rib_ipv4_static_route1['3']['Metric'] = '0'
-    rib_ipv4_static_route1['3']['RouteType'] = 'static'
+    rib_ipv4_static_route1[sw1_intf2] = dict()
+    rib_ipv4_static_route1[sw1_intf2]['Distance'] = '1'
+    rib_ipv4_static_route1[sw1_intf2]['Metric'] = '0'
+    rib_ipv4_static_route1[sw1_intf2]['RouteType'] = \
+        'static'
+    rib_ipv4_static_route1[sw1_intf3] = dict()
+    rib_ipv4_static_route1[sw1_intf3]['Distance'] = '1'
+    rib_ipv4_static_route1[sw1_intf3]['Metric'] = '0'
+    rib_ipv4_static_route1[sw1_intf3]['RouteType'] = \
+        'static'
     rib_ipv4_static_route1['4.4.4.1'] = dict()
     rib_ipv4_static_route1['4.4.4.1']['Distance'] = '1'
     rib_ipv4_static_route1['4.4.4.1']['Metric'] = '0'
@@ -1792,14 +1938,16 @@ def interface_up_before_zebra_restart(sw1, sw2, step):
     route_ipv4_kernel_route1['1.1.1.2']['Distance'] = ''
     route_ipv4_kernel_route1['1.1.1.2']['Metric'] = ''
     route_ipv4_kernel_route1['1.1.1.2']['RouteType'] = 'zebra'
-    route_ipv4_kernel_route1['2'] = dict()
-    route_ipv4_kernel_route1['2']['Distance'] = ''
-    route_ipv4_kernel_route1['2']['Metric'] = ''
-    route_ipv4_kernel_route1['2']['RouteType'] = 'zebra'
-    route_ipv4_kernel_route1['3'] = dict()
-    route_ipv4_kernel_route1['3']['Distance'] = ''
-    route_ipv4_kernel_route1['3']['Metric'] = ''
-    route_ipv4_kernel_route1['3']['RouteType'] = 'zebra'
+    route_ipv4_kernel_route1[sw1_intf2] = dict()
+    route_ipv4_kernel_route1[sw1_intf2]['Distance'] = ''
+    route_ipv4_kernel_route1[sw1_intf2]['Metric'] = ''
+    route_ipv4_kernel_route1[sw1_intf2]['RouteType'] = \
+        'zebra'
+    route_ipv4_kernel_route1[sw1_intf3] = dict()
+    route_ipv4_kernel_route1[sw1_intf3]['Distance'] = ''
+    route_ipv4_kernel_route1[sw1_intf3]['Metric'] = ''
+    route_ipv4_kernel_route1[sw1_intf3]['RouteType'] = \
+        'zebra'
     route_ipv4_kernel_route1['4.4.4.1'] = dict()
     route_ipv4_kernel_route1['4.4.4.1']['Distance'] = ''
     route_ipv4_kernel_route1['4.4.4.1']['Metric'] = ''
@@ -1834,10 +1982,11 @@ def interface_up_before_zebra_restart(sw1, sw2, step):
     rib_ipv4_static_route3 = dict()
     rib_ipv4_static_route3['Route'] = '163.0.0.1/32'
     rib_ipv4_static_route3['NumberNexthops'] = '1'
-    rib_ipv4_static_route3['2'] = dict()
-    rib_ipv4_static_route3['2']['Distance'] = '1'
-    rib_ipv4_static_route3['2']['Metric'] = '0'
-    rib_ipv4_static_route3['2']['RouteType'] = 'static'
+    rib_ipv4_static_route3[sw1_intf2] = dict()
+    rib_ipv4_static_route3[sw1_intf2]['Distance'] = '1'
+    rib_ipv4_static_route3[sw1_intf2]['Metric'] = '0'
+    rib_ipv4_static_route3[sw1_intf2]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ip route") route dictionary for the
     # route 163.0.0.1/32 and its next-hops.
@@ -1848,32 +1997,37 @@ def interface_up_before_zebra_restart(sw1, sw2, step):
     route_ipv4_kernel_route3 = dict()
     route_ipv4_kernel_route3['Route'] = '163.0.0.1' + '/' + '32'
     route_ipv4_kernel_route3['NumberNexthops'] = '1'
-    route_ipv4_kernel_route3['2'] = dict()
-    route_ipv4_kernel_route3['2']['Distance'] = ''
-    route_ipv4_kernel_route3['2']['Metric'] = ''
-    route_ipv4_kernel_route3['2']['RouteType'] = 'zebra'
+    route_ipv4_kernel_route3[sw1_intf2] = dict()
+    route_ipv4_kernel_route3[sw1_intf2]['Distance'] = ''
+    route_ipv4_kernel_route3[sw1_intf2]['Metric'] = ''
+    route_ipv4_kernel_route3[sw1_intf2]['RouteType'] = \
+        'zebra'
 
     # Populate the expected RIB ("show rib") route dictionary for the
     # route a234:a234::1/128 and its next-hops.
     rib_ipv6_static_route1 = dict()
     rib_ipv6_static_route1['Route'] = 'a234:a234::1/128'
     rib_ipv6_static_route1['NumberNexthops'] = '4'
-    rib_ipv6_static_route1['1'] = dict()
-    rib_ipv6_static_route1['1']['Distance'] = '1'
-    rib_ipv6_static_route1['1']['Metric'] = '0'
-    rib_ipv6_static_route1['1']['RouteType'] = 'static'
-    rib_ipv6_static_route1['2'] = dict()
-    rib_ipv6_static_route1['2']['Distance'] = '1'
-    rib_ipv6_static_route1['2']['Metric'] = '0'
-    rib_ipv6_static_route1['2']['RouteType'] = 'static'
-    rib_ipv6_static_route1['3'] = dict()
-    rib_ipv6_static_route1['3']['Distance'] = '1'
-    rib_ipv6_static_route1['3']['Metric'] = '0'
-    rib_ipv6_static_route1['3']['RouteType'] = 'static'
-    rib_ipv6_static_route1['4'] = dict()
-    rib_ipv6_static_route1['4']['Distance'] = '1'
-    rib_ipv6_static_route1['4']['Metric'] = '0'
-    rib_ipv6_static_route1['4']['RouteType'] = 'static'
+    rib_ipv6_static_route1[sw1_intf1] = dict()
+    rib_ipv6_static_route1[sw1_intf1]['Distance'] = '1'
+    rib_ipv6_static_route1[sw1_intf1]['Metric'] = '0'
+    rib_ipv6_static_route1[sw1_intf1]['RouteType'] = \
+        'static'
+    rib_ipv6_static_route1[sw1_intf2] = dict()
+    rib_ipv6_static_route1[sw1_intf2]['Distance'] = '1'
+    rib_ipv6_static_route1[sw1_intf2]['Metric'] = '0'
+    rib_ipv6_static_route1[sw1_intf2]['RouteType'] = \
+        'static'
+    rib_ipv6_static_route1[sw1_intf3] = dict()
+    rib_ipv6_static_route1[sw1_intf3]['Distance'] = '1'
+    rib_ipv6_static_route1[sw1_intf3]['Metric'] = '0'
+    rib_ipv6_static_route1[sw1_intf3]['RouteType'] = \
+        'static'
+    rib_ipv6_static_route1[sw1_intf4] = dict()
+    rib_ipv6_static_route1[sw1_intf4]['Distance'] = '1'
+    rib_ipv6_static_route1[sw1_intf4]['Metric'] = '0'
+    rib_ipv6_static_route1[sw1_intf4]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ipv6 route") route dictionary for the
     # route a234:a234::1/128 and its next-hops.
@@ -1884,32 +2038,37 @@ def interface_up_before_zebra_restart(sw1, sw2, step):
     route_ipv6_kernel_route1 = dict()
     route_ipv6_kernel_route1['Route'] = 'a234:a234::1' + '/' + '128'
     route_ipv6_kernel_route1['NumberNexthops'] = '4'
-    route_ipv6_kernel_route1['1'] = dict()
-    route_ipv6_kernel_route1['1']['Distance'] = ''
-    route_ipv6_kernel_route1['1']['Metric'] = ''
-    route_ipv6_kernel_route1['1']['RouteType'] = 'zebra'
-    route_ipv6_kernel_route1['2'] = dict()
-    route_ipv6_kernel_route1['2']['Distance'] = ''
-    route_ipv6_kernel_route1['2']['Metric'] = ''
-    route_ipv6_kernel_route1['2']['RouteType'] = 'zebra'
-    route_ipv6_kernel_route1['3'] = dict()
-    route_ipv6_kernel_route1['3']['Distance'] = ''
-    route_ipv6_kernel_route1['3']['Metric'] = ''
-    route_ipv6_kernel_route1['3']['RouteType'] = 'zebra'
-    route_ipv6_kernel_route1['4'] = dict()
-    route_ipv6_kernel_route1['4']['Distance'] = ''
-    route_ipv6_kernel_route1['4']['Metric'] = ''
-    route_ipv6_kernel_route1['4']['RouteType'] = 'zebra'
+    route_ipv6_kernel_route1[sw1_intf1] = dict()
+    route_ipv6_kernel_route1[sw1_intf1]['Distance'] = ''
+    route_ipv6_kernel_route1[sw1_intf1]['Metric'] = ''
+    route_ipv6_kernel_route1[sw1_intf1]['RouteType'] = \
+        'zebra'
+    route_ipv6_kernel_route1[sw1_intf2] = dict()
+    route_ipv6_kernel_route1[sw1_intf2]['Distance'] = ''
+    route_ipv6_kernel_route1[sw1_intf2]['Metric'] = ''
+    route_ipv6_kernel_route1[sw1_intf2]['RouteType'] = \
+        'zebra'
+    route_ipv6_kernel_route1[sw1_intf3] = dict()
+    route_ipv6_kernel_route1[sw1_intf3]['Distance'] = ''
+    route_ipv6_kernel_route1[sw1_intf3]['Metric'] = ''
+    route_ipv6_kernel_route1[sw1_intf3]['RouteType'] = \
+        'zebra'
+    route_ipv6_kernel_route1[sw1_intf4] = dict()
+    route_ipv6_kernel_route1[sw1_intf4]['Distance'] = ''
+    route_ipv6_kernel_route1[sw1_intf4]['Metric'] = ''
+    route_ipv6_kernel_route1[sw1_intf4]['RouteType'] = \
+        'zebra'
 
     # Populate the expected RIB ("show rib") route dictionary for the
     # route 2234:2234::1/128 and its next-hops.
     rib_ipv6_static_route2 = dict()
     rib_ipv6_static_route2['Route'] = '2234:2234::1/128'
     rib_ipv6_static_route2['NumberNexthops'] = '1'
-    rib_ipv6_static_route2['4'] = dict()
-    rib_ipv6_static_route2['4']['Distance'] = '1'
-    rib_ipv6_static_route2['4']['Metric'] = '0'
-    rib_ipv6_static_route2['4']['RouteType'] = 'static'
+    rib_ipv6_static_route2[sw1_intf4] = dict()
+    rib_ipv6_static_route2[sw1_intf4]['Distance'] = '1'
+    rib_ipv6_static_route2[sw1_intf4]['Metric'] = '0'
+    rib_ipv6_static_route2[sw1_intf4]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ipv6 route") route dictionary for the
     # route 2234:2234::1/128 and its next-hops.
@@ -1920,20 +2079,22 @@ def interface_up_before_zebra_restart(sw1, sw2, step):
     route_ipv6_kernel_route2 = dict()
     route_ipv6_kernel_route2['Route'] = '2234:2234::1' + '/' + '128'
     route_ipv6_kernel_route2['NumberNexthops'] = '1'
-    route_ipv6_kernel_route2['4'] = dict()
-    route_ipv6_kernel_route2['4']['Distance'] = ''
-    route_ipv6_kernel_route2['4']['Metric'] = ''
-    route_ipv6_kernel_route2['4']['RouteType'] = 'zebra'
+    route_ipv6_kernel_route2[sw1_intf4] = dict()
+    route_ipv6_kernel_route2[sw1_intf4]['Distance'] = ''
+    route_ipv6_kernel_route2[sw1_intf4]['Metric'] = ''
+    route_ipv6_kernel_route2[sw1_intf4]['RouteType'] = \
+        'zebra'
 
     # Populate the expected RIB ("show rib") route dictionary for the
     # route 3234:3234::1/128 and its next-hops.
     rib_ipv6_static_route3 = dict()
     rib_ipv6_static_route3['Route'] = '3234:3234::1/128'
     rib_ipv6_static_route3['NumberNexthops'] = '1'
-    rib_ipv6_static_route3['2'] = dict()
-    rib_ipv6_static_route3['2']['Distance'] = '1'
-    rib_ipv6_static_route3['2']['Metric'] = '0'
-    rib_ipv6_static_route3['2']['RouteType'] = 'static'
+    rib_ipv6_static_route3[sw1_intf2] = dict()
+    rib_ipv6_static_route3[sw1_intf2]['Distance'] = '1'
+    rib_ipv6_static_route3[sw1_intf2]['Metric'] = '0'
+    rib_ipv6_static_route3[sw1_intf2]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ipv6 route") route dictionary for the
     # route 3234:3234::1/128 and its next-hops.
@@ -1944,16 +2105,18 @@ def interface_up_before_zebra_restart(sw1, sw2, step):
     route_ipv6_kernel_route3 = dict()
     route_ipv6_kernel_route3['Route'] = '3234:3234::1' + '/' + '128'
     route_ipv6_kernel_route3['NumberNexthops'] = '1'
-    route_ipv6_kernel_route3['2'] = dict()
-    route_ipv6_kernel_route3['2']['Distance'] = ''
-    route_ipv6_kernel_route3['2']['Metric'] = ''
-    route_ipv6_kernel_route3['2']['RouteType'] = 'zebra'
+    route_ipv6_kernel_route3[sw1_intf2] = dict()
+    route_ipv6_kernel_route3[sw1_intf2]['Distance'] = ''
+    route_ipv6_kernel_route3[sw1_intf2]['Metric'] = ''
+    route_ipv6_kernel_route3[sw1_intf2]['RouteType'] = \
+        'zebra'
 
-    sleep(15)
+    sleep(ZEBRA_TEST_SLEEP_TIME)
 
     step("Verifying the IPv4 static routes onswitch 1")
 
     # Verify route 123.0.0.1/32 and next-hops in RIB and FIB
+    sw1('configure terminal')
     aux_route = route_ipv4_static_route1["Route"]
     verify_show_ip_route(sw1, aux_route, 'static', route_ipv4_static_route1)
     aux_route = rib_ipv4_static_route1["Route"]
@@ -2005,10 +2168,15 @@ def interface_up_before_zebra_restart(sw1, sw2, step):
 
 
 # This test restarts zebra process and checks if the routes and next-hops show
-# correctly in the output of "show ip route/show rib" after zebra has restarted.
-# Before zebra has come back up from restart, we change interface addresses on
-# some interfaces.
+# correctly in the output of "show ip route/show rib" after zebra has
+# restarted. Before zebra has come back up from restart, we change interface
+# addresses on some interfaces.
 def interface_addr_change_before_zebra_restart(sw1, sw2, step):
+
+    sw1_intf1 = format(sw1.ports["if01"])
+    sw1_intf2 = format(sw1.ports["if02"])
+    sw1_intf3 = format(sw1.ports["if03"])
+    sw1_intf4 = format(sw1.ports["if04"])
 
     step("\n\n\n######### Restarting zebra and changing "
          " some interface addresses on switch1.#########")
@@ -2020,7 +2188,8 @@ def interface_addr_change_before_zebra_restart(sw1, sw2, step):
     sw1(zebra_stop_command_string, shell='bash')
 
     # Re-configure IPv4 and IPv6 address on interface 1 on switch1
-    sw1("interface 1")
+    sw1('configure terminal')
+    sw1("interface %s" % sw1_intf1)
     sw1('ip address 9.9.9.9/24')
     sw1('ipv6 address 999:999::9/64')
 
@@ -2039,14 +2208,16 @@ def interface_addr_change_before_zebra_restart(sw1, sw2, step):
     rib_ipv4_static_route1['1.1.1.2']['Distance'] = '1'
     rib_ipv4_static_route1['1.1.1.2']['Metric'] = '0'
     rib_ipv4_static_route1['1.1.1.2']['RouteType'] = 'static'
-    rib_ipv4_static_route1['2'] = dict()
-    rib_ipv4_static_route1['2']['Distance'] = '1'
-    rib_ipv4_static_route1['2']['Metric'] = '0'
-    rib_ipv4_static_route1['2']['RouteType'] = 'static'
-    rib_ipv4_static_route1['3'] = dict()
-    rib_ipv4_static_route1['3']['Distance'] = '1'
-    rib_ipv4_static_route1['3']['Metric'] = '0'
-    rib_ipv4_static_route1['3']['RouteType'] = 'static'
+    rib_ipv4_static_route1[sw1_intf2] = dict()
+    rib_ipv4_static_route1[sw1_intf2]['Distance'] = '1'
+    rib_ipv4_static_route1[sw1_intf2]['Metric'] = '0'
+    rib_ipv4_static_route1[sw1_intf2]['RouteType'] = \
+        'static'
+    rib_ipv4_static_route1[sw1_intf3] = dict()
+    rib_ipv4_static_route1[sw1_intf3]['Distance'] = '1'
+    rib_ipv4_static_route1[sw1_intf3]['Metric'] = '0'
+    rib_ipv4_static_route1[sw1_intf3]['RouteType'] = \
+        'static'
     rib_ipv4_static_route1['4.4.4.1'] = dict()
     rib_ipv4_static_route1['4.4.4.1']['Distance'] = '1'
     rib_ipv4_static_route1['4.4.4.1']['Metric'] = '0'
@@ -2057,14 +2228,16 @@ def interface_addr_change_before_zebra_restart(sw1, sw2, step):
     route_ipv4_static_route1 = dict()
     route_ipv4_static_route1['Route'] = '123.0.0.1/32'
     route_ipv4_static_route1['NumberNexthops'] = '3'
-    route_ipv4_static_route1['2'] = dict()
-    route_ipv4_static_route1['2']['Distance'] = '1'
-    route_ipv4_static_route1['2']['Metric'] = '0'
-    route_ipv4_static_route1['2']['RouteType'] = 'static'
-    route_ipv4_static_route1['3'] = dict()
-    route_ipv4_static_route1['3']['Distance'] = '1'
-    route_ipv4_static_route1['3']['Metric'] = '0'
-    route_ipv4_static_route1['3']['RouteType'] = 'static'
+    route_ipv4_static_route1[sw1_intf2] = dict()
+    route_ipv4_static_route1[sw1_intf2]['Distance'] = '1'
+    route_ipv4_static_route1[sw1_intf2]['Metric'] = '0'
+    route_ipv4_static_route1[sw1_intf2]['RouteType'] = \
+        'static'
+    route_ipv4_static_route1[sw1_intf3] = dict()
+    route_ipv4_static_route1[sw1_intf3]['Distance'] = '1'
+    route_ipv4_static_route1[sw1_intf3]['Metric'] = '0'
+    route_ipv4_static_route1[sw1_intf3]['RouteType'] = \
+        'static'
     route_ipv4_static_route1['4.4.4.1'] = dict()
     route_ipv4_static_route1['4.4.4.1']['Distance'] = '1'
     route_ipv4_static_route1['4.4.4.1']['Metric'] = '0'
@@ -2075,14 +2248,16 @@ def interface_addr_change_before_zebra_restart(sw1, sw2, step):
     route_ipv4_kernel_route1 = dict()
     route_ipv4_kernel_route1['Route'] = '123.0.0.1' + '/' + '32'
     route_ipv4_kernel_route1['NumberNexthops'] = '3'
-    route_ipv4_kernel_route1['2'] = dict()
-    route_ipv4_kernel_route1['2']['Distance'] = ''
-    route_ipv4_kernel_route1['2']['Metric'] = ''
-    route_ipv4_kernel_route1['2']['RouteType'] = 'zebra'
-    route_ipv4_kernel_route1['3'] = dict()
-    route_ipv4_kernel_route1['3']['Distance'] = ''
-    route_ipv4_kernel_route1['3']['Metric'] = ''
-    route_ipv4_kernel_route1['3']['RouteType'] = 'zebra'
+    route_ipv4_kernel_route1[sw1_intf2] = dict()
+    route_ipv4_kernel_route1[sw1_intf2]['Distance'] = ''
+    route_ipv4_kernel_route1[sw1_intf2]['Metric'] = ''
+    route_ipv4_kernel_route1[sw1_intf2]['RouteType'] = \
+        'zebra'
+    route_ipv4_kernel_route1[sw1_intf3] = dict()
+    route_ipv4_kernel_route1[sw1_intf3]['Distance'] = ''
+    route_ipv4_kernel_route1[sw1_intf3]['Metric'] = ''
+    route_ipv4_kernel_route1[sw1_intf3]['RouteType'] = \
+        'zebra'
     route_ipv4_kernel_route1['4.4.4.1'] = dict()
     route_ipv4_kernel_route1['4.4.4.1']['Distance'] = ''
     route_ipv4_kernel_route1['4.4.4.1']['Metric'] = ''
@@ -2117,10 +2292,11 @@ def interface_addr_change_before_zebra_restart(sw1, sw2, step):
     rib_ipv4_static_route3 = dict()
     rib_ipv4_static_route3['Route'] = '163.0.0.1/32'
     rib_ipv4_static_route3['NumberNexthops'] = '1'
-    rib_ipv4_static_route3['2'] = dict()
-    rib_ipv4_static_route3['2']['Distance'] = '1'
-    rib_ipv4_static_route3['2']['Metric'] = '0'
-    rib_ipv4_static_route3['2']['RouteType'] = 'static'
+    rib_ipv4_static_route3[sw1_intf2] = dict()
+    rib_ipv4_static_route3[sw1_intf2]['Distance'] = '1'
+    rib_ipv4_static_route3[sw1_intf2]['Metric'] = '0'
+    rib_ipv4_static_route3[sw1_intf2]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ip route") route dictionary for the
     # route 163.0.0.1/32 and its next-hops.
@@ -2131,32 +2307,37 @@ def interface_addr_change_before_zebra_restart(sw1, sw2, step):
     route_ipv4_kernel_route3 = dict()
     route_ipv4_kernel_route3['Route'] = '163.0.0.1' + '/' + '32'
     route_ipv4_kernel_route3['NumberNexthops'] = '1'
-    route_ipv4_kernel_route3['2'] = dict()
-    route_ipv4_kernel_route3['2']['Distance'] = ''
-    route_ipv4_kernel_route3['2']['Metric'] = ''
-    route_ipv4_kernel_route3['2']['RouteType'] = 'zebra'
+    route_ipv4_kernel_route3[sw1_intf2] = dict()
+    route_ipv4_kernel_route3[sw1_intf2]['Distance'] = ''
+    route_ipv4_kernel_route3[sw1_intf2]['Metric'] = ''
+    route_ipv4_kernel_route3[sw1_intf2]['RouteType'] = \
+        'zebra'
 
     # Populate the expected RIB ("show rib") route dictionary for the
     # route a234:a234::1/128 and its next-hops.
     rib_ipv6_static_route1 = dict()
     rib_ipv6_static_route1['Route'] = 'a234:a234::1/128'
     rib_ipv6_static_route1['NumberNexthops'] = '4'
-    rib_ipv6_static_route1['1'] = dict()
-    rib_ipv6_static_route1['1']['Distance'] = '1'
-    rib_ipv6_static_route1['1']['Metric'] = '0'
-    rib_ipv6_static_route1['1']['RouteType'] = 'static'
-    rib_ipv6_static_route1['2'] = dict()
-    rib_ipv6_static_route1['2']['Distance'] = '1'
-    rib_ipv6_static_route1['2']['Metric'] = '0'
-    rib_ipv6_static_route1['2']['RouteType'] = 'static'
-    rib_ipv6_static_route1['3'] = dict()
-    rib_ipv6_static_route1['3']['Distance'] = '1'
-    rib_ipv6_static_route1['3']['Metric'] = '0'
-    rib_ipv6_static_route1['3']['RouteType'] = 'static'
-    rib_ipv6_static_route1['4'] = dict()
-    rib_ipv6_static_route1['4']['Distance'] = '1'
-    rib_ipv6_static_route1['4']['Metric'] = '0'
-    rib_ipv6_static_route1['4']['RouteType'] = 'static'
+    rib_ipv6_static_route1[sw1_intf1] = dict()
+    rib_ipv6_static_route1[sw1_intf1]['Distance'] = '1'
+    rib_ipv6_static_route1[sw1_intf1]['Metric'] = '0'
+    rib_ipv6_static_route1[sw1_intf1]['RouteType'] = \
+        'static'
+    rib_ipv6_static_route1[sw1_intf2] = dict()
+    rib_ipv6_static_route1[sw1_intf2]['Distance'] = '1'
+    rib_ipv6_static_route1[sw1_intf2]['Metric'] = '0'
+    rib_ipv6_static_route1[sw1_intf2]['RouteType'] = \
+        'static'
+    rib_ipv6_static_route1[sw1_intf3] = dict()
+    rib_ipv6_static_route1[sw1_intf3]['Distance'] = '1'
+    rib_ipv6_static_route1[sw1_intf3]['Metric'] = '0'
+    rib_ipv6_static_route1[sw1_intf3]['RouteType'] = \
+        'static'
+    rib_ipv6_static_route1[sw1_intf4] = dict()
+    rib_ipv6_static_route1[sw1_intf4]['Distance'] = '1'
+    rib_ipv6_static_route1[sw1_intf4]['Metric'] = '0'
+    rib_ipv6_static_route1[sw1_intf4]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ipv6 route") route dictionary for the
     # route a234:a234::1/128 and its next-hops.
@@ -2167,32 +2348,37 @@ def interface_addr_change_before_zebra_restart(sw1, sw2, step):
     route_ipv6_kernel_route1 = dict()
     route_ipv6_kernel_route1['Route'] = 'a234:a234::1' + '/' + '128'
     route_ipv6_kernel_route1['NumberNexthops'] = '4'
-    route_ipv6_kernel_route1['1'] = dict()
-    route_ipv6_kernel_route1['1']['Distance'] = ''
-    route_ipv6_kernel_route1['1']['Metric'] = ''
-    route_ipv6_kernel_route1['1']['RouteType'] = 'zebra'
-    route_ipv6_kernel_route1['2'] = dict()
-    route_ipv6_kernel_route1['2']['Distance'] = ''
-    route_ipv6_kernel_route1['2']['Metric'] = ''
-    route_ipv6_kernel_route1['2']['RouteType'] = 'zebra'
-    route_ipv6_kernel_route1['3'] = dict()
-    route_ipv6_kernel_route1['3']['Distance'] = ''
-    route_ipv6_kernel_route1['3']['Metric'] = ''
-    route_ipv6_kernel_route1['3']['RouteType'] = 'zebra'
-    route_ipv6_kernel_route1['4'] = dict()
-    route_ipv6_kernel_route1['4']['Distance'] = ''
-    route_ipv6_kernel_route1['4']['Metric'] = ''
-    route_ipv6_kernel_route1['4']['RouteType'] = 'zebra'
+    route_ipv6_kernel_route1[sw1_intf1] = dict()
+    route_ipv6_kernel_route1[sw1_intf1]['Distance'] = ''
+    route_ipv6_kernel_route1[sw1_intf1]['Metric'] = ''
+    route_ipv6_kernel_route1[sw1_intf1]['RouteType'] = \
+        'zebra'
+    route_ipv6_kernel_route1[sw1_intf2] = dict()
+    route_ipv6_kernel_route1[sw1_intf2]['Distance'] = ''
+    route_ipv6_kernel_route1[sw1_intf2]['Metric'] = ''
+    route_ipv6_kernel_route1[sw1_intf2]['RouteType'] = \
+        'zebra'
+    route_ipv6_kernel_route1[sw1_intf3] = dict()
+    route_ipv6_kernel_route1[sw1_intf3]['Distance'] = ''
+    route_ipv6_kernel_route1[sw1_intf3]['Metric'] = ''
+    route_ipv6_kernel_route1[sw1_intf3]['RouteType'] = \
+        'zebra'
+    route_ipv6_kernel_route1[sw1_intf4] = dict()
+    route_ipv6_kernel_route1[sw1_intf4]['Distance'] = ''
+    route_ipv6_kernel_route1[sw1_intf4]['Metric'] = ''
+    route_ipv6_kernel_route1[sw1_intf4]['RouteType'] = \
+        'zebra'
 
     # Populate the expected RIB ("show rib") route dictionary for the
     # route 2234:2234::1/128 and its next-hops.
     rib_ipv6_static_route2 = dict()
     rib_ipv6_static_route2['Route'] = '2234:2234::1/128'
     rib_ipv6_static_route2['NumberNexthops'] = '1'
-    rib_ipv6_static_route2['4'] = dict()
-    rib_ipv6_static_route2['4']['Distance'] = '1'
-    rib_ipv6_static_route2['4']['Metric'] = '0'
-    rib_ipv6_static_route2['4']['RouteType'] = 'static'
+    rib_ipv6_static_route2[sw1_intf4] = dict()
+    rib_ipv6_static_route2[sw1_intf4]['Distance'] = '1'
+    rib_ipv6_static_route2[sw1_intf4]['Metric'] = '0'
+    rib_ipv6_static_route2[sw1_intf4]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ipv6 route") route dictionary for the
     # route 2234:2234::1/128 and its next-hops.
@@ -2203,20 +2389,22 @@ def interface_addr_change_before_zebra_restart(sw1, sw2, step):
     route_ipv6_kernel_route2 = dict()
     route_ipv6_kernel_route2['Route'] = '2234:2234::1' + '/' + '128'
     route_ipv6_kernel_route2['NumberNexthops'] = '1'
-    route_ipv6_kernel_route2['4'] = dict()
-    route_ipv6_kernel_route2['4']['Distance'] = ''
-    route_ipv6_kernel_route2['4']['Metric'] = ''
-    route_ipv6_kernel_route2['4']['RouteType'] = 'zebra'
+    route_ipv6_kernel_route2[sw1_intf4] = dict()
+    route_ipv6_kernel_route2[sw1_intf4]['Distance'] = ''
+    route_ipv6_kernel_route2[sw1_intf4]['Metric'] = ''
+    route_ipv6_kernel_route2[sw1_intf4]['RouteType'] = \
+        'zebra'
 
     # Populate the expected RIB ("show rib") route dictionary for the
     # route 3234:3234::1/128 and its next-hops.
     rib_ipv6_static_route3 = dict()
     rib_ipv6_static_route3['Route'] = '3234:3234::1/128'
     rib_ipv6_static_route3['NumberNexthops'] = '1'
-    rib_ipv6_static_route3['2'] = dict()
-    rib_ipv6_static_route3['2']['Distance'] = '1'
-    rib_ipv6_static_route3['2']['Metric'] = '0'
-    rib_ipv6_static_route3['2']['RouteType'] = 'static'
+    rib_ipv6_static_route3[sw1_intf2] = dict()
+    rib_ipv6_static_route3[sw1_intf2]['Distance'] = '1'
+    rib_ipv6_static_route3[sw1_intf2]['Metric'] = '0'
+    rib_ipv6_static_route3[sw1_intf2]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ipv6 route") route dictionary for the
     # route 3234:3234::1/128 and its next-hops.
@@ -2227,16 +2415,18 @@ def interface_addr_change_before_zebra_restart(sw1, sw2, step):
     route_ipv6_kernel_route3 = dict()
     route_ipv6_kernel_route3['Route'] = '3234:3234::1' + '/' + '128'
     route_ipv6_kernel_route3['NumberNexthops'] = '1'
-    route_ipv6_kernel_route3['2'] = dict()
-    route_ipv6_kernel_route3['2']['Distance'] = ''
-    route_ipv6_kernel_route3['2']['Metric'] = ''
-    route_ipv6_kernel_route3['2']['RouteType'] = 'zebra'
+    route_ipv6_kernel_route3[sw1_intf2] = dict()
+    route_ipv6_kernel_route3[sw1_intf2]['Distance'] = ''
+    route_ipv6_kernel_route3[sw1_intf2]['Metric'] = ''
+    route_ipv6_kernel_route3[sw1_intf2]['RouteType'] = \
+        'zebra'
 
-    sleep(15)
+    sleep(ZEBRA_TEST_SLEEP_TIME)
 
     step("Verifying the IPv4 static routes onswitch 1")
 
     # Verify route 123.0.0.1/32 and next-hops in RIB and FIB
+    sw1('configure terminal')
     aux_route = route_ipv4_static_route1["Route"]
     verify_show_ip_route(sw1, aux_route, 'static', route_ipv4_static_route1)
     aux_route = rib_ipv4_static_route1["Route"]
@@ -2288,11 +2478,16 @@ def interface_addr_change_before_zebra_restart(sw1, sw2, step):
 
 
 # This test restarts zebra process and checks if the routes and next-hops show
-# correctly in the output of "show ip route/show rib" after zebra has restarted.
-# Before zebra has come back up from restart, we restore interface addresses on
-# the interfaces on which we changed the addresses on in the test case
-# interface_addr_change_before_zebra_restart.
+# correctly in the output of "show ip route/show rib" after zebra has
+# restarted. Before zebra has come back up from restart, we restore interface
+# addresses on the interfaces on which we changed the addresses on in the test
+# case interface_addr_change_before_zebra_restart.
 def interface_addr_restore_before_zebra_restart(sw1, sw2, step):
+
+    sw1_intf1 = format(sw1.ports["if01"])
+    sw1_intf2 = format(sw1.ports["if02"])
+    sw1_intf3 = format(sw1.ports["if03"])
+    sw1_intf4 = format(sw1.ports["if04"])
 
     step("\n\n\n######### Restarting zebra and restoring "
          " some interface addresses on switch1.#########")
@@ -2304,7 +2499,8 @@ def interface_addr_restore_before_zebra_restart(sw1, sw2, step):
     sw1(zebra_stop_command_string, shell='bash')
 
     # Re-configure IPv4 and IPv6 address on interface 1 on switch1
-    sw1("interface 1")
+    sw1('configure terminal')
+    sw1("interface %s" % sw1_intf1)
     sw1('ip address 1.1.1.1/24')
     sw1('ipv6 address 111:111::1/64')
 
@@ -2323,14 +2519,16 @@ def interface_addr_restore_before_zebra_restart(sw1, sw2, step):
     rib_ipv4_static_route1['1.1.1.2']['Distance'] = '1'
     rib_ipv4_static_route1['1.1.1.2']['Metric'] = '0'
     rib_ipv4_static_route1['1.1.1.2']['RouteType'] = 'static'
-    rib_ipv4_static_route1['2'] = dict()
-    rib_ipv4_static_route1['2']['Distance'] = '1'
-    rib_ipv4_static_route1['2']['Metric'] = '0'
-    rib_ipv4_static_route1['2']['RouteType'] = 'static'
-    rib_ipv4_static_route1['3'] = dict()
-    rib_ipv4_static_route1['3']['Distance'] = '1'
-    rib_ipv4_static_route1['3']['Metric'] = '0'
-    rib_ipv4_static_route1['3']['RouteType'] = 'static'
+    rib_ipv4_static_route1[sw1_intf2] = dict()
+    rib_ipv4_static_route1[sw1_intf2]['Distance'] = '1'
+    rib_ipv4_static_route1[sw1_intf2]['Metric'] = '0'
+    rib_ipv4_static_route1[sw1_intf2]['RouteType'] = \
+        'static'
+    rib_ipv4_static_route1[sw1_intf3] = dict()
+    rib_ipv4_static_route1[sw1_intf3]['Distance'] = '1'
+    rib_ipv4_static_route1[sw1_intf3]['Metric'] = '0'
+    rib_ipv4_static_route1[sw1_intf3]['RouteType'] = \
+        'static'
     rib_ipv4_static_route1['4.4.4.1'] = dict()
     rib_ipv4_static_route1['4.4.4.1']['Distance'] = '1'
     rib_ipv4_static_route1['4.4.4.1']['Metric'] = '0'
@@ -2349,14 +2547,16 @@ def interface_addr_restore_before_zebra_restart(sw1, sw2, step):
     route_ipv4_kernel_route1['1.1.1.2']['Distance'] = ''
     route_ipv4_kernel_route1['1.1.1.2']['Metric'] = ''
     route_ipv4_kernel_route1['1.1.1.2']['RouteType'] = 'zebra'
-    route_ipv4_kernel_route1['2'] = dict()
-    route_ipv4_kernel_route1['2']['Distance'] = ''
-    route_ipv4_kernel_route1['2']['Metric'] = ''
-    route_ipv4_kernel_route1['2']['RouteType'] = 'zebra'
-    route_ipv4_kernel_route1['3'] = dict()
-    route_ipv4_kernel_route1['3']['Distance'] = ''
-    route_ipv4_kernel_route1['3']['Metric'] = ''
-    route_ipv4_kernel_route1['3']['RouteType'] = 'zebra'
+    route_ipv4_kernel_route1[sw1_intf2] = dict()
+    route_ipv4_kernel_route1[sw1_intf2]['Distance'] = ''
+    route_ipv4_kernel_route1[sw1_intf2]['Metric'] = ''
+    route_ipv4_kernel_route1[sw1_intf2]['RouteType'] = \
+        'zebra'
+    route_ipv4_kernel_route1[sw1_intf3] = dict()
+    route_ipv4_kernel_route1[sw1_intf3]['Distance'] = ''
+    route_ipv4_kernel_route1[sw1_intf3]['Metric'] = ''
+    route_ipv4_kernel_route1[sw1_intf3]['RouteType'] = \
+        'zebra'
     route_ipv4_kernel_route1['4.4.4.1'] = dict()
     route_ipv4_kernel_route1['4.4.4.1']['Distance'] = ''
     route_ipv4_kernel_route1['4.4.4.1']['Metric'] = ''
@@ -2391,10 +2591,11 @@ def interface_addr_restore_before_zebra_restart(sw1, sw2, step):
     rib_ipv4_static_route3 = dict()
     rib_ipv4_static_route3['Route'] = '163.0.0.1/32'
     rib_ipv4_static_route3['NumberNexthops'] = '1'
-    rib_ipv4_static_route3['2'] = dict()
-    rib_ipv4_static_route3['2']['Distance'] = '1'
-    rib_ipv4_static_route3['2']['Metric'] = '0'
-    rib_ipv4_static_route3['2']['RouteType'] = 'static'
+    rib_ipv4_static_route3[sw1_intf2] = dict()
+    rib_ipv4_static_route3[sw1_intf2]['Distance'] = '1'
+    rib_ipv4_static_route3[sw1_intf2]['Metric'] = '0'
+    rib_ipv4_static_route3[sw1_intf2]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ip route") route dictionary for the
     # route 163.0.0.1/32 and its next-hops.
@@ -2405,32 +2606,37 @@ def interface_addr_restore_before_zebra_restart(sw1, sw2, step):
     route_ipv4_kernel_route3 = dict()
     route_ipv4_kernel_route3['Route'] = '163.0.0.1' + '/' + '32'
     route_ipv4_kernel_route3['NumberNexthops'] = '1'
-    route_ipv4_kernel_route3['2'] = dict()
-    route_ipv4_kernel_route3['2']['Distance'] = ''
-    route_ipv4_kernel_route3['2']['Metric'] = ''
-    route_ipv4_kernel_route3['2']['RouteType'] = 'zebra'
+    route_ipv4_kernel_route3[sw1_intf2] = dict()
+    route_ipv4_kernel_route3[sw1_intf2]['Distance'] = ''
+    route_ipv4_kernel_route3[sw1_intf2]['Metric'] = ''
+    route_ipv4_kernel_route3[sw1_intf2]['RouteType'] = \
+        'zebra'
 
     # Populate the expected RIB ("show rib") route dictionary for the
     # route a234:a234::1/128 and its next-hops.
     rib_ipv6_static_route1 = dict()
     rib_ipv6_static_route1['Route'] = 'a234:a234::1/128'
     rib_ipv6_static_route1['NumberNexthops'] = '4'
-    rib_ipv6_static_route1['1'] = dict()
-    rib_ipv6_static_route1['1']['Distance'] = '1'
-    rib_ipv6_static_route1['1']['Metric'] = '0'
-    rib_ipv6_static_route1['1']['RouteType'] = 'static'
-    rib_ipv6_static_route1['2'] = dict()
-    rib_ipv6_static_route1['2']['Distance'] = '1'
-    rib_ipv6_static_route1['2']['Metric'] = '0'
-    rib_ipv6_static_route1['2']['RouteType'] = 'static'
-    rib_ipv6_static_route1['3'] = dict()
-    rib_ipv6_static_route1['3']['Distance'] = '1'
-    rib_ipv6_static_route1['3']['Metric'] = '0'
-    rib_ipv6_static_route1['3']['RouteType'] = 'static'
-    rib_ipv6_static_route1['4'] = dict()
-    rib_ipv6_static_route1['4']['Distance'] = '1'
-    rib_ipv6_static_route1['4']['Metric'] = '0'
-    rib_ipv6_static_route1['4']['RouteType'] = 'static'
+    rib_ipv6_static_route1[sw1_intf1] = dict()
+    rib_ipv6_static_route1[sw1_intf1]['Distance'] = '1'
+    rib_ipv6_static_route1[sw1_intf1]['Metric'] = '0'
+    rib_ipv6_static_route1[sw1_intf1]['RouteType'] = \
+        'static'
+    rib_ipv6_static_route1[sw1_intf2] = dict()
+    rib_ipv6_static_route1[sw1_intf2]['Distance'] = '1'
+    rib_ipv6_static_route1[sw1_intf2]['Metric'] = '0'
+    rib_ipv6_static_route1[sw1_intf2]['RouteType'] = \
+        'static'
+    rib_ipv6_static_route1[sw1_intf3] = dict()
+    rib_ipv6_static_route1[sw1_intf3]['Distance'] = '1'
+    rib_ipv6_static_route1[sw1_intf3]['Metric'] = '0'
+    rib_ipv6_static_route1[sw1_intf3]['RouteType'] = \
+        'static'
+    rib_ipv6_static_route1[sw1_intf4] = dict()
+    rib_ipv6_static_route1[sw1_intf4]['Distance'] = '1'
+    rib_ipv6_static_route1[sw1_intf4]['Metric'] = '0'
+    rib_ipv6_static_route1[sw1_intf4]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ipv6 route") route dictionary for the
     # route a234:a234::1/128 and its next-hops.
@@ -2441,32 +2647,37 @@ def interface_addr_restore_before_zebra_restart(sw1, sw2, step):
     route_ipv6_kernel_route1 = dict()
     route_ipv6_kernel_route1['Route'] = 'a234:a234::1' + '/' + '128'
     route_ipv6_kernel_route1['NumberNexthops'] = '4'
-    route_ipv6_kernel_route1['1'] = dict()
-    route_ipv6_kernel_route1['1']['Distance'] = ''
-    route_ipv6_kernel_route1['1']['Metric'] = ''
-    route_ipv6_kernel_route1['1']['RouteType'] = 'zebra'
-    route_ipv6_kernel_route1['2'] = dict()
-    route_ipv6_kernel_route1['2']['Distance'] = ''
-    route_ipv6_kernel_route1['2']['Metric'] = ''
-    route_ipv6_kernel_route1['2']['RouteType'] = 'zebra'
-    route_ipv6_kernel_route1['3'] = dict()
-    route_ipv6_kernel_route1['3']['Distance'] = ''
-    route_ipv6_kernel_route1['3']['Metric'] = ''
-    route_ipv6_kernel_route1['3']['RouteType'] = 'zebra'
-    route_ipv6_kernel_route1['4'] = dict()
-    route_ipv6_kernel_route1['4']['Distance'] = ''
-    route_ipv6_kernel_route1['4']['Metric'] = ''
-    route_ipv6_kernel_route1['4']['RouteType'] = 'zebra'
+    route_ipv6_kernel_route1[sw1_intf1] = dict()
+    route_ipv6_kernel_route1[sw1_intf1]['Distance'] = ''
+    route_ipv6_kernel_route1[sw1_intf1]['Metric'] = ''
+    route_ipv6_kernel_route1[sw1_intf1]['RouteType'] = \
+        'zebra'
+    route_ipv6_kernel_route1[sw1_intf2] = dict()
+    route_ipv6_kernel_route1[sw1_intf2]['Distance'] = ''
+    route_ipv6_kernel_route1[sw1_intf2]['Metric'] = ''
+    route_ipv6_kernel_route1[sw1_intf2]['RouteType'] = \
+        'zebra'
+    route_ipv6_kernel_route1[sw1_intf3] = dict()
+    route_ipv6_kernel_route1[sw1_intf3]['Distance'] = ''
+    route_ipv6_kernel_route1[sw1_intf3]['Metric'] = ''
+    route_ipv6_kernel_route1[sw1_intf3]['RouteType'] = \
+        'zebra'
+    route_ipv6_kernel_route1[sw1_intf4] = dict()
+    route_ipv6_kernel_route1[sw1_intf4]['Distance'] = ''
+    route_ipv6_kernel_route1[sw1_intf4]['Metric'] = ''
+    route_ipv6_kernel_route1[sw1_intf4]['RouteType'] = \
+        'zebra'
 
     # Populate the expected RIB ("show rib") route dictionary for the
     # route 2234:2234::1/128 and its next-hops.
     rib_ipv6_static_route2 = dict()
     rib_ipv6_static_route2['Route'] = '2234:2234::1/128'
     rib_ipv6_static_route2['NumberNexthops'] = '1'
-    rib_ipv6_static_route2['4'] = dict()
-    rib_ipv6_static_route2['4']['Distance'] = '1'
-    rib_ipv6_static_route2['4']['Metric'] = '0'
-    rib_ipv6_static_route2['4']['RouteType'] = 'static'
+    rib_ipv6_static_route2[sw1_intf4] = dict()
+    rib_ipv6_static_route2[sw1_intf4]['Distance'] = '1'
+    rib_ipv6_static_route2[sw1_intf4]['Metric'] = '0'
+    rib_ipv6_static_route2[sw1_intf4]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ipv6 route") route dictionary for the
     # route 2234:2234::1/128 and its next-hops.
@@ -2477,20 +2688,22 @@ def interface_addr_restore_before_zebra_restart(sw1, sw2, step):
     route_ipv6_kernel_route2 = dict()
     route_ipv6_kernel_route2['Route'] = '2234:2234::1' + '/' + '128'
     route_ipv6_kernel_route2['NumberNexthops'] = '1'
-    route_ipv6_kernel_route2['4'] = dict()
-    route_ipv6_kernel_route2['4']['Distance'] = ''
-    route_ipv6_kernel_route2['4']['Metric'] = ''
-    route_ipv6_kernel_route2['4']['RouteType'] = 'zebra'
+    route_ipv6_kernel_route2[sw1_intf4] = dict()
+    route_ipv6_kernel_route2[sw1_intf4]['Distance'] = ''
+    route_ipv6_kernel_route2[sw1_intf4]['Metric'] = ''
+    route_ipv6_kernel_route2[sw1_intf4]['RouteType'] = \
+        'zebra'
 
     # Populate the expected RIB ("show rib") route dictionary for the
     # route 3234:3234::1/128 and its next-hops.
     rib_ipv6_static_route3 = dict()
     rib_ipv6_static_route3['Route'] = '3234:3234::1/128'
     rib_ipv6_static_route3['NumberNexthops'] = '1'
-    rib_ipv6_static_route3['2'] = dict()
-    rib_ipv6_static_route3['2']['Distance'] = '1'
-    rib_ipv6_static_route3['2']['Metric'] = '0'
-    rib_ipv6_static_route3['2']['RouteType'] = 'static'
+    rib_ipv6_static_route3[sw1_intf2] = dict()
+    rib_ipv6_static_route3[sw1_intf2]['Distance'] = '1'
+    rib_ipv6_static_route3[sw1_intf2]['Metric'] = '0'
+    rib_ipv6_static_route3[sw1_intf2]['RouteType'] = \
+        'static'
 
     # Populate the expected FIB ("show ipv6 route") route dictionary for the
     # route 3234:3234::1/128 and its next-hops.
@@ -2501,16 +2714,18 @@ def interface_addr_restore_before_zebra_restart(sw1, sw2, step):
     route_ipv6_kernel_route3 = dict()
     route_ipv6_kernel_route3['Route'] = '3234:3234::1' + '/' + '128'
     route_ipv6_kernel_route3['NumberNexthops'] = '1'
-    route_ipv6_kernel_route3['2'] = dict()
-    route_ipv6_kernel_route3['2']['Distance'] = ''
-    route_ipv6_kernel_route3['2']['Metric'] = ''
-    route_ipv6_kernel_route3['2']['RouteType'] = 'zebra'
+    route_ipv6_kernel_route3[sw1_intf2] = dict()
+    route_ipv6_kernel_route3[sw1_intf2]['Distance'] = ''
+    route_ipv6_kernel_route3[sw1_intf2]['Metric'] = ''
+    route_ipv6_kernel_route3[sw1_intf2]['RouteType'] = \
+        'zebra'
 
-    sleep(15)
+    sleep(ZEBRA_TEST_SLEEP_TIME)
 
-    step("Verifying the IPv4 static routes onswitch 1")
+    step("Verifying the IPv4 static routes on switch 1")
 
     # Verify route 123.0.0.1/32 and next-hops in RIB and FIB
+    sw1('configure terminal')
     aux_route = route_ipv4_static_route1["Route"]
     verify_show_ip_route(sw1, aux_route, 'static', route_ipv4_static_route1)
     aux_route = rib_ipv4_static_route1["Route"]
@@ -2566,6 +2781,11 @@ def interface_addr_restore_before_zebra_restart(sw1, sw2, step):
 # the Kernel from the deleted static routes.
 def all_configuration_deleted_before_zebra_restart(sw1, sw2, step):
 
+    sw1_intf1 = format(sw1.ports["if01"])
+    sw1_intf2 = format(sw1.ports["if02"])
+    sw1_intf3 = format(sw1.ports["if03"])
+    sw1_intf4 = format(sw1.ports["if04"])
+
     step("\n\n\n######### Restarting zebra and deleting all"
          " route configuration on switch1.#########")
 
@@ -2576,28 +2796,29 @@ def all_configuration_deleted_before_zebra_restart(sw1, sw2, step):
     sw1(zebra_stop_command_string, shell='bash')
 
     # Un-configure IPv4 route 123.0.0.1/32 and all its next-hops
+    sw1('configure terminal')
     sw1('no ip route 123.0.0.1/32 1.1.1.2')
-    sw1('no ip route 123.0.0.1/32 2')
-    sw1('no ip route 123.0.0.1/32 3')
+    sw1('no ip route 123.0.0.1/32 %s' % sw1_intf2)
+    sw1('no ip route 123.0.0.1/32 %s' % sw1_intf3)
     sw1('no ip route 123.0.0.1/32 4.4.4.1')
 
     # Un-configure IPv4 route 143.0.0.1/32 next-hop 4.4.4.1.
     sw1('no ip route 143.0.0.1/32 4.4.4.1')
 
     # Un-configure IPv4 route 163.0.0.1/32 next-hop 2.
-    sw1('no ip route 163.0.0.1/32 2')
+    sw1('no ip route 163.0.0.1/32 %s' % sw1_intf2)
 
     # Un-configure IPv6 route a234:a234::1/128 and all its next-hops
-    sw1("no ipv6 route a234:a234::1/128 1")
-    sw1("no ipv6 route a234:a234::1/128 2")
-    sw1("no ipv6 route a234:a234::1/128 3")
-    sw1("no ipv6 route a234:a234::1/128 4")
+    sw1("no ipv6 route a234:a234::1/128 %s" % sw1_intf1)
+    sw1("no ipv6 route a234:a234::1/128 %s" % sw1_intf2)
+    sw1("no ipv6 route a234:a234::1/128 %s" % sw1_intf3)
+    sw1("no ipv6 route a234:a234::1/128 %s" % sw1_intf4)
 
     # Un-configure IPv6 route 2234:2234::1/128 with next-hop 1.
-    sw1('no ipv6 route 2234:2234::1/128 4')
+    sw1('no ipv6 route 2234:2234::1/128 %s' % sw1_intf4)
 
     # un-configure IPv6 route 3234:3234::1/128 with next-hop 2.
-    sw1("no ipv6 route 3234:3234::1/128 2")
+    sw1("no ipv6 route 3234:3234::1/128 %s" % sw1_intf2)
 
     step("\n\n\n######### Restarting zebra. Starting ops-zebra service on"
          "switch 1#########")
@@ -2683,11 +2904,12 @@ def all_configuration_deleted_before_zebra_restart(sw1, sw2, step):
     # for the route 3234:3234::1/128 and its next-hops.
     route_ipv6_kernel_route3 = route_ipv6_static_route3
 
-    sleep(15)
+    sleep(ZEBRA_TEST_SLEEP_TIME)
 
     step("Verifying the IPv4 static routes on switch 1")
 
     # Verify route 123.0.0.1/32 and next-hops in RIB and FIB
+    sw1('configure terminal')
     aux_route = route_ipv4_static_route1["Route"]
     verify_show_ip_route(sw1, aux_route, 'static', route_ipv4_static_route1)
     aux_route = rib_ipv4_static_route1["Route"]
@@ -2738,6 +2960,7 @@ def all_configuration_deleted_before_zebra_restart(sw1, sw2, step):
                                       route_ipv6_kernel_route3, 'zebra')
 
 
+@mark.timeout(ZEBRA_DEFAULT_TIMEOUT)
 def test_zebra_ct_restartability(topology, step):
     sw1 = topology.get("sw1")
     sw2 = topology.get("sw2")

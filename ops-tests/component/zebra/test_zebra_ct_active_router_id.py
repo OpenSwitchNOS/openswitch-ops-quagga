@@ -18,6 +18,7 @@
 # 02111-1307, USA.
 
 
+from pytest import mark
 TOPOLOGY = """
 #
 # +-------+
@@ -29,7 +30,6 @@ TOPOLOGY = """
 [type=openswitch name="Switch 1"] sw1
 
 """
-from time import sleep
 
 #  This is basic configuration required for the test, it verifies zebra
 #  deamon is running and configures one interface with IPv4 address.
@@ -48,7 +48,6 @@ def configure_interface(sw1, step):
     sw1("no shutdown")
     sw1("ip address {}/{}".format(interface_addr1, masklen))
     sw1("exit")
-    sleep(5)
 
 #  This test verifies active_router_id column in VRF table is same
 #  as the interface 1 IPv4 address.
@@ -75,7 +74,6 @@ def verify_loopback_interface(sw1, step):
     sw1("interface loopback 3")
     sw1("ip address {}/{}".format(loopback_ip, masklen2))
     sw1("exit")
-    sleep(5)
     output = sw1("ovsdb-client dump VRF", shell='bash')
     assert active_router_id3 in output
 
@@ -97,7 +95,6 @@ def verify_unconfigure_loopback_interface(sw1, step):
     sw1("interface loopback 3")
     sw1("no ip address {}/{}".format(loopback_ip, masklen2))
     sw1("exit")
-    sleep(5)
     output = sw1("ovsdb-client dump VRF", shell='bash')
     assert active_router_id1 in output
 
@@ -119,7 +116,6 @@ def verify_unconfigure_interface(sw1, step):
     sw1("no shutdown")
     sw1("ip address {}/{}".format(interface_addr2, masklen))
     sw1("exit")
-    sleep(5)
     output = sw1("ovsdb-client dump VRF", shell='bash')
     assert active_router_id2 in output
 
@@ -146,10 +142,10 @@ def verify_no_change_for_new_added_interfaces(sw1, step):
     sw1("interface loopback 5")
     sw1("ip address {}/{}".format(interface_lo_addr3, masklen2))
     sw1("exit")
-    sleep(5)
     output = sw1("ovsdb-client dump VRF", shell='bash')
     assert active_router_id2 in output
 
+@mark.timeout(300)
 def test_zebra_ct_active_router_id(topology, step):
     sw1 = topology.get("sw1")
     assert sw1 is not None

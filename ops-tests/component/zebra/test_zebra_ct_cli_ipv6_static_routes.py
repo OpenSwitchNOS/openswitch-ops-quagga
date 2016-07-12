@@ -15,8 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from re import match
-from re import findall
+from pytest import mark
 
 TOPOLOGY = """
 #
@@ -39,6 +38,7 @@ sw2:if02
 """
 
 
+@mark.timeout(300)
 def test_ipv6_static_route_config(topology, step):
     '''
     This test verifies various ipv6 static route configurations by validating
@@ -105,33 +105,34 @@ def test_ipv6_static_route_config(topology, step):
            'Prefix format verification failed'
 
     step('### Verify ipv6 route configuration with nexthop interface ###')
-    sw1('ipv6 route 2002::/120 2 2')
+    sw1('ipv6 route 2002::/120 {sw1p2} 2'.format(**locals()))
     ret = sw1('do show running-config')
 
-    assert 'ipv6 route 2002::/120 2 2' in ret, \
+    assert 'ipv6 route 2002::/120 {sw1p2} 2'.format(**locals()) in ret, \
            'IPv6 route configuration failed with nexthop[ interface'
 
     step('### Verify deletion of ipv6 route with nexthop interface ###')
-    sw1('no ipv6 route 2002::/120 2 2')
+    sw1('no ipv6 route 2002::/120 {sw1p2} 2'.format(**locals()))
     ret = sw1('do show running-config')
 
-    assert 'ipv6 route 2002::/120 2 2' not in ret, \
+    assert 'ipv6 route 2002::/120 {sw1p2} 2'.format(**locals()) not in ret, \
            'Deletion of ipv6 routes failed with nexthop interface'
 
     step('### Verify setting of multiple nexthops for a given prefix ###')
-    sw1('ipv6 route 2002::/120 1')
-    sw1('ipv6 route 2002::/120 2')
+    sw1('ipv6 route 2002::/120 {sw1p1}'.format(**locals()))
+    sw1('ipv6 route 2002::/120 {sw1p2}'.format(**locals()))
     ret = sw1('do show running-config')
 
-    assert 'ipv6 route 2002::/120 1' in ret and 'ipv6 route 2002::/120 2' \
-           in ret, 'Multiple nexthops prefix verification failed'
+    assert 'ipv6 route 2002::/120 {sw1p1}'.format(**locals()) in ret and \
+        'ipv6 route 2002::/120 {sw1p2}'.format(**locals()) in ret, \
+        'Multiple nexthops prefix verification failed'
 
     step(''' ### Verify if nexthop is not assigned locally to an interface '''
          '''as a primary ipv6 address ###\n''')
     sw1('ipv6 route 2002::/120 2001::1')
     ret = sw1('do show running-config')
-    assert not 'ipv6 route 2002::/120 2001::1' in ret, \
-            'Primary ipv6 address check for nexthop failed'
+    assert 'ipv6 route 2002::/120 2001::1' not in ret, \
+        'Primary ipv6 address check for nexthop failed'
 
     step(''' ### Verify if nexthop is not assigned locally to an interface '''
          '''as a secondary ipv6 address ###\n''')
@@ -140,8 +141,8 @@ def test_ipv6_static_route_config(topology, step):
     sw1('exit')
     sw1('ipv6 route 2002::/120 3000::3')
     ret = sw1('do show running-config')
-    assert not 'ipv6 route 2002::/120 2001::3' in ret, \
-            'Secondary ipv6 address check for nexthop failed'
+    assert 'ipv6 route 2002::/120 2001::3' not in ret, \
+        'Secondary ipv6 address check for nexthop failed'
     sw1('interface {sw1p1}'.format(**locals()))
     sw1('no ipv6 address 3000::3/120 secondary')
     sw1('exit')
@@ -150,47 +151,47 @@ def test_ipv6_static_route_config(topology, step):
          ''' ###\n''')
     sw1('ipv6 route ff00::/128 2001::1')
     ret = sw1('do show running-config')
-    assert not 'ipv6 route ff00::/128 2001::1' in ret, \
-            'Multicast address check for prefix failed'
+    assert 'ipv6 route ff00::/128 2001::1' not in ret, \
+        'Multicast address check for prefix failed'
 
     step(''' ### Verify if multicast address cannot be assigned as a nexthop'''
          ''' ###\n''')
     sw1('ipv6 route 12ff::/128 ff00::1')
     ret = sw1('do show running-config')
-    assert not 'ipv6 route 12ff::/128 ff00::1' in ret, \
-            'Multicast address check for nexthop failed'
+    assert 'ipv6 route 12ff::/128 ff00::1' not in ret, \
+        'Multicast address check for nexthop failed'
 
     step(''' ### Verify if linklocal address cannot be assigned as a prefix'''
          ''' ###\n''')
     sw1('ipv6 route fe80::/10 2001::1')
     ret = sw1('do show running-config')
-    assert not 'ipv6 route ::1/128 2001::1' in ret, \
-            'Linklocal address check for prefix failed'
+    assert 'ipv6 route ::1/128 2001::1' not in ret, \
+        'Linklocal address check for prefix failed'
 
     step(''' ### Verify if linklocal address cannot be assigned as a nexthop'''
          ''' ###\n''')
     sw1('ipv6 route 12ff::/128 fe80::')
     ret = sw1('do show running-config')
-    assert not 'ipv6 route 12ff::/128 ::1' in ret, \
-            'Linklocal address check for nexthop failed'
+    assert 'ipv6 route 12ff::/128 ::1' not in ret, \
+        'Linklocal address check for nexthop failed'
 
     step(''' ### Verify if loopback address cannot be assigned as a prefix'''
          ''' ###\n''')
     sw1('ipv6 route ::1/128 2001::1')
     ret = sw1('do show running-config')
-    assert not 'ipv6 route ::1/128 2001::1' in ret, \
-            'Loopback address check for prefix failed'
+    assert 'ipv6 route ::1/128 2001::1' not in ret, \
+        'Loopback address check for prefix failed'
 
     step(''' ### Verify if loopback address cannot be assigned as a nexthop'''
          ''' ###\n''')
     sw1('ipv6 route 12ff::/128 ::1')
     ret = sw1('do show running-config')
-    assert not 'ipv6 route 12ff::/128 ::1' in ret, \
-            'Loopback address check for nexthop failed'
+    assert 'ipv6 route 12ff::/128 ::1' not in ret, \
+        'Loopback address check for nexthop failed'
 
     step(''' ### Verify if unspecified address cannot be assigned as a '''
          '''nexthop ###\n''')
     sw1('ipv6 route 2002::/120 ::')
     ret = sw1('do show running-config')
-    assert not 'ipv6 route 2002::/120 ::' in ret, \
-            'Unspecified address check for nexthop failed'
+    assert 'ipv6 route 2002::/120 ::' not in ret, \
+        'Unspecified address check for nexthop failed'

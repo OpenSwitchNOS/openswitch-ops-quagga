@@ -15,9 +15,14 @@
 # specific language governing permissions and limitations
 # under the License.
 
+from zebra_routing import (
+    verify_show_ip_route,
+    verify_show_ipv6_route,
+    verify_show_rib
+)
 from re import match
 from re import findall
-from time import sleep
+from pytest import mark
 
 TOPOLOGY = """
 #
@@ -59,6 +64,7 @@ def get_vrf_uuid(switch, vrf_name, step):
     assert vrf_uuid is not None
     return vrf_uuid.group(3).rstrip('\r')
 
+
 def get_prefix_uuid(switch, prefix_value, step):
     """
     This function takes a switch and a prefix value as inputs and returns
@@ -76,6 +82,8 @@ def get_prefix_uuid(switch, prefix_value, step):
     assert prefix_uuid is not None
     return prefix_uuid.group(3).rstrip('\r')
 
+
+@mark.timeout(300)
 def test_static_route_config(topology, step):
     '''
     This test cases verifies sorted(lexicographic) retrieval of the ip routes
@@ -94,10 +102,6 @@ def test_static_route_config(topology, step):
     sw1p4 = sw1.ports['if04']
     sw2p1 = sw2.ports['if01']
     sw2p2 = sw2.ports['if02']
-
-    # Accounting for the time required to bring up the switch and get the
-    # daemons up and running
-    sleep(15)
 
     step("### Verify that the static routes are retrieved in sorted order ###")
     # Configure switch 1
@@ -118,25 +122,130 @@ def test_static_route_config(topology, step):
     sw1('no shutdown')
     sw1('exit')
 
-    step("### Adding IPv4 routes with various prefixes and nexthops ###")
-    sw1("ip route 20.20.20.0/24 2")
-    sw1("ip route 10.0.0.0/24 2")
-    sw1("ip route 10.0.0.0/32 1")
-    sw1("ip route 30.30.0.0/16 1")
+    # Populate the expected RIB ("show rib") route dictionary for the connected
+    # IPv4 route for layer-3 interface '1'.
+    rib_ipv4_layer3_connected_route_1 = dict()
+    rib_ipv4_layer3_connected_route_1['Route'] = '11.0.0.0/24'
+    rib_ipv4_layer3_connected_route_1['NumberNexthops'] = '1'
+    rib_ipv4_layer3_connected_route_1['1'] = dict()
+    rib_ipv4_layer3_connected_route_1['1']['Distance'] = '0'
+    rib_ipv4_layer3_connected_route_1['1']['Metric'] = '0'
+    rib_ipv4_layer3_connected_route_1['1']['RouteType'] = 'connected'
 
-    step("### Adding IPv6 routes with various prefixes and nexthops ###")
-    sw1('ipv6 route  2001::/32 2')
-    sw1('ipv6 route  2001::/96 2')
-    sw1('ipv6 route  ::/128 1')
-    sw1('ipv6 route  1:1::/127 1')
+    # Populate the expected FIB ("show ip route") route dictionary for the
+    # connected IPv4 route for layer-3 interface '1'.
+    fib_ipv4_layer3_connected_route_1 = rib_ipv4_layer3_connected_route_1
 
-    # Accounting for the time required to set the configuration in DB and
-    # let zebra install the connected and the static routes in the kernel
-    sleep(10)
+    # Populate the expected RIB ("show rib") route dictionary for the connected
+    # IPv6 route for layer-3 interface '1'.
+    rib_ipv6_layer3_connected_route_1 = dict()
+    rib_ipv6_layer3_connected_route_1['Route'] = '1001::/120'
+    rib_ipv6_layer3_connected_route_1['NumberNexthops'] = '1'
+    rib_ipv6_layer3_connected_route_1['1'] = dict()
+    rib_ipv6_layer3_connected_route_1['1']['Distance'] = '0'
+    rib_ipv6_layer3_connected_route_1['1']['Metric'] = '0'
+    rib_ipv6_layer3_connected_route_1['1']['RouteType'] = 'connected'
+
+    # Populate the expected FIB ("show ipv6 route") route dictionary for the
+    # connected IPv6 route for layer-3 interface '1'.
+    fib_ipv6_layer3_connected_route_1 = rib_ipv6_layer3_connected_route_1
+
+    # Populate the expected RIB ("show rib") route dictionary for the connected
+    # IPv4 route for layer-3 interface '2'.
+    rib_ipv4_layer3_connected_route_2 = dict()
+    rib_ipv4_layer3_connected_route_2['Route'] = '22.0.0.0/24'
+    rib_ipv4_layer3_connected_route_2['NumberNexthops'] = '2'
+    rib_ipv4_layer3_connected_route_2['2'] = dict()
+    rib_ipv4_layer3_connected_route_2['2']['Distance'] = '0'
+    rib_ipv4_layer3_connected_route_2['2']['Metric'] = '0'
+    rib_ipv4_layer3_connected_route_2['2']['RouteType'] = 'connected'
+
+    # Populate the expected RIB ("show ip route") route dictionary for the
+    # connected IPv4 route for layer-3 interface '2'.
+    fib_ipv4_layer3_connected_route_2 = rib_ipv4_layer3_connected_route_2
+
+    # Populate the expected RIB ("show rib") route dictionary for the connected
+    # IPv6 route for layer-3 interface '2'.
+    rib_ipv6_layer3_connected_route_2 = dict()
+    rib_ipv6_layer3_connected_route_2['Route'] = '2001::/120'
+    rib_ipv6_layer3_connected_route_2['NumberNexthops'] = '2'
+    rib_ipv6_layer3_connected_route_2['2'] = dict()
+    rib_ipv6_layer3_connected_route_2['2']['Distance'] = '0'
+    rib_ipv6_layer3_connected_route_2['2']['Metric'] = '0'
+    rib_ipv6_layer3_connected_route_2['2']['RouteType'] = 'connected'
+
+    # Populate the expected FIB ("show ipv6 route") route dictionary for the
+    # connected IPv6 route for layer-3 interface '2'.
+    fib_ipv6_layer3_connected_route_2 = rib_ipv6_layer3_connected_route_2
+
+    # Populate the expected RIB ("show rib") route dictionary for the connected
+    # IPv4 route for layer-3 interface '3'.
+    rib_ipv4_layer3_connected_route_3 = dict()
+    rib_ipv4_layer3_connected_route_3['Route'] = '33.0.0.0/24'
+    rib_ipv4_layer3_connected_route_3['NumberNexthops'] = '3'
+    rib_ipv4_layer3_connected_route_3['3'] = dict()
+    rib_ipv4_layer3_connected_route_3['3']['Distance'] = '0'
+    rib_ipv4_layer3_connected_route_3['3']['Metric'] = '0'
+    rib_ipv4_layer3_connected_route_3['3']['RouteType'] = 'connected'
+
+    # Populate the expected FIB ("show ip route") route dictionary for the
+    # connected IPv4 route for layer-3 interface '3'.
+    fib_ipv4_layer3_connected_route_3 = rib_ipv4_layer3_connected_route_3
+
+    # Populate the expected RIB ("show rib") route dictionary for the connected
+    # IPv6 route for layer-3 interface '3'.
+    rib_ipv6_layer3_connected_route_3 = dict()
+    rib_ipv6_layer3_connected_route_3['Route'] = '3001::/120'
+    rib_ipv6_layer3_connected_route_3['NumberNexthops'] = '3'
+    rib_ipv6_layer3_connected_route_3['3'] = dict()
+    rib_ipv6_layer3_connected_route_3['3']['Distance'] = '0'
+    rib_ipv6_layer3_connected_route_3['3']['Metric'] = '0'
+    rib_ipv6_layer3_connected_route_3['3']['RouteType'] = 'connected'
+
+    # Populate the expected FIB ("show ipv6 route") route dictionary for the
+    # connected IPv6 route for layer-3 interface '3'.
+    fib_ipv6_layer3_connected_route_3 = rib_ipv6_layer3_connected_route_3
+
+    # Verifying the connected routes showing up in the "show ip/ipv6 route" and
+    # "show rib" CLI
+    aux_route = fib_ipv4_layer3_connected_route_1["Route"]
+    verify_show_ip_route(sw1, aux_route, 'connected',
+                         fib_ipv4_layer3_connected_route_1)
+    aux_route = rib_ipv4_layer3_connected_route_1["Route"]
+    verify_show_rib(
+        sw1,
+        aux_route,
+        'connected',
+        rib_ipv4_layer3_connected_route_1)
+
+    # Verify IPv6 route for layer-3 primary address and next-hops in RIB and
+    # FIB
+    aux_route = fib_ipv6_layer3_connected_route_1["Route"]
+    verify_show_ipv6_route(sw1, aux_route, 'connected',
+                           fib_ipv6_layer3_connected_route_1)
+    aux_route = rib_ipv6_layer3_connected_route_1["Route"]
+    verify_show_rib(
+        sw1,
+        aux_route,
+        'connected',
+        rib_ipv6_layer3_connected_route_1)
 
     # Stop zebra to turn 'on' the selected bit for the listed prefixes and to
     # popluate BGP and OSPF routes using ovsdb-client utility.
     sw1("systemctl stop ops-zebra", shell='bash')
+
+    step("### Adding IPv4 routes with various prefixes and nexthops ###")
+    sw1('configure terminal')
+    sw1('ip route 20.20.20.0/24 {sw1p2}'.format(**locals()))
+    sw1('ip route 10.0.0.0/24 {sw1p2}'.format(**locals()))
+    sw1('ip route 10.0.0.0/32 {sw1p1}'.format(**locals()))
+    sw1('ip route 30.30.0.0/16 {sw1p1}'.format(**locals()))
+
+    step("### Adding IPv6 routes with various prefixes and nexthops ###")
+    sw1('ipv6 route 2001::/32 {sw1p2}'.format(**locals()))
+    sw1('ipv6 route 2001::/96 {sw1p2}'.format(**locals()))
+    sw1('ipv6 route ::/128 {sw1p1}'.format(**locals()))
+    sw1('ipv6 route 1:1::/127 {sw1p1}'.format(**locals()))
 
     # 'show ip route' shows the routes selected by zebra for forwarding (FIB).
     # Significant amount of delay is seen when an interface is configured and
@@ -358,6 +467,7 @@ def test_static_route_config(topology, step):
     step('### Comparing output of "show ip route" with the expected'
          ' output ###')
     configured_ipv4_prefixes = []
+    sw1('configure terminal')
     ret = sw1('do show ip route')
     lines = ret.split('\n')
 
@@ -369,12 +479,12 @@ def test_static_route_config(topology, step):
 
     # Verifying configured_ipv4_prefixes[] with the expected_ipv4_prefixes[]
     assert expected_ipv4_prefixes == configured_ipv4_prefixes, \
-    "Expected ipv4 routes selected for FIB not present in the DB"
+        "Expected ipv4 routes selected for FIB not present in the DB"
 
     # List of expected ipv6 prefixes in sorted order
     expected_ipv6_prefixes = ['::/128', '1:1::/127', '1001::/120', '2001::/32',
-                              '2001::/96', '2001::/120', '3001::/48', '3001::/120',
-                              '4001::/128']
+                              '2001::/96', '2001::/120', '3001::/48',
+                              '3001::/120', '4001::/128']
 
     step('### Comparing output of "show ipv6 route" with the expected'
          ' output ###')
@@ -385,7 +495,7 @@ def test_static_route_config(topology, step):
 
     # Verifying configured_ipv6_prefixes[] with the expected_ipv6_prefixes[]
     assert expected_ipv6_prefixes == configured_ipv6_prefixes, \
-    "Expected ipv6 routes selected for FIB not present in the DB"
+        "Expected ipv6 routes selected for FIB not present in the DB"
 
     # List of expected ipv4 and ipv6 prefixes in sorted order. The prefixes
     # preceded with '*' are selected for forwarding and output is expected
@@ -406,19 +516,20 @@ def test_static_route_config(topology, step):
 
     # Verifying configured_rib_prefixes[] with the expected_rib_prefixes[]
     assert expected_rib_prefixes == configured_rib_prefixes, \
-    "Expected ipv4 and ipv6 routes in RIB not present in the DB"
+        "Expected ipv4 and ipv6 routes in RIB not present in the DB"
 
     step('### Comparing output of "show running-config" with the expected'
          ' output ###')
     # List of routes added expected in sorted manner
-    expected_showrun_prefixes = ['ip route 10.0.0.0/24 2',
-                                 'ip route 10.0.0.0/32 1',
-                                 'ip route 20.20.20.0/24 2',
-                                 'ip route 30.30.0.0/16 1',
-                                 'ipv6 route ::/128 1',
-                                 'ipv6 route 1:1::/127 1',
-                                 'ipv6 route 2001::/32 2',
-                                 'ipv6 route 2001::/96 2']
+    expected_showrun_prefixes = \
+        ['ip route 10.0.0.0/24 {sw1p2}'.format(**locals()),
+         'ip route 10.0.0.0/32 {sw1p1}'.format(**locals()),
+         'ip route 20.20.20.0/24 {sw1p2}'.format(**locals()),
+         'ip route 30.30.0.0/16 {sw1p1}'.format(**locals()),
+         'ipv6 route ::/128 {sw1p1}'.format(**locals()),
+         'ipv6 route 1:1::/127 {sw1p1}'.format(**locals()),
+         'ipv6 route 2001::/32 {sw1p2}'.format(**locals()),
+         'ipv6 route 2001::/96 {sw1p2}'.format(**locals())]
     configured_showrun_prefixes = []
     ret = sw1('do show running-config')
     lines = ret.split('\n')
@@ -429,4 +540,4 @@ def test_static_route_config(topology, step):
     # Verifying configured_showrun_prefixes[] with the
     # expected_showrun_prefixes[]
     assert expected_showrun_prefixes == configured_showrun_prefixes, \
-    "Expected routes in 'show running-config' not present in the DB"
+        "Expected routes in 'show running-config' not present in the DB"

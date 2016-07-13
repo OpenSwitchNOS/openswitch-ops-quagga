@@ -197,7 +197,7 @@ def verify_routemap_set_weight(step, switch1, switch2):
 
     dump = switch2("show ip bgp")
     set_weight_flag = False
-
+    sleep(20)
     lines = dump.split("\n")
     for line in lines:
         if "22" in line and "9.0.0.0" in line:
@@ -240,7 +240,7 @@ def verify_routemap_set_localpref(step, switch1, switch2):
 
     dump = switch2("show ip bgp")
     set_localpref_flag = False
-
+    sleep(5)
     lines = dump.split("\n")
     for line in lines:
         if "45" in line:

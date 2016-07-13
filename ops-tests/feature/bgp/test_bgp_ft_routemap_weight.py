@@ -152,6 +152,10 @@ def verify_bgp_routes(dut, network, next_hop):
 
 def wait_for_route(dut, network, next_hop, condition=True):
     for i in range(max_wait_time):
+        dump = dut("show ip bgp summary")
+        summary = dump.split("\r\n")
+        for line in summary:
+            print(line)
         found = verify_bgp_routes(dut, network, next_hop)
         if found == condition:
             if condition:
@@ -195,11 +199,16 @@ def verify_routemap_set_weight(step, switch1, switch2):
     wait_for_route(switch2, "11.0.0.0", "0.0.0.0")
     wait_for_route(switch2, "9.0.0.0", "8.0.0.1")
 
+    sleep(20)
+    summary = switch2("show ip bgp summary")
+    lines = summary.split("\n")
+    for line in lines:
+        print(line)
     dump = switch2("show ip bgp")
     set_weight_flag = False
-
     lines = dump.split("\n")
     for line in lines:
+        print(line)
         if "22" in line and "9.0.0.0" in line:
             set_weight_flag = True
 
@@ -238,11 +247,17 @@ def verify_routemap_set_localpref(step, switch1, switch2):
     wait_for_route(switch2, "11.0.0.0", "0.0.0.0")
     wait_for_route(switch2, "9.0.0.0", "8.0.0.1")
 
+    sleep(5)
+    summary = switch2("show ip bgp summary")
+    lines = summary.split("\n")
+    for line in lines:
+        print(line)
     dump = switch2("show ip bgp")
     set_localpref_flag = False
-
+    sleep(5)
     lines = dump.split("\n")
     for line in lines:
+        print(line)
         if "45" in line:
             set_localpref_flag = True
 

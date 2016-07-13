@@ -145,7 +145,7 @@ def test_ospf_best_route(topology, configuration, step):
 
     step('######step 7 - Verifying static route from show running config'
          ' ######')
-    retval = verify_ip_route(sw1, '192.168.1.0', '24', '1 100')
+    retval = verify_ip_route(sw1, '192.168.1.0', '24', '1')
     if retval is True:
         step('Static route 192.168.1.0/24 updated in running configuration')
     else:

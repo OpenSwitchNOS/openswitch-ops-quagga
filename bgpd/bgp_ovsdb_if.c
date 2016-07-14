@@ -66,6 +66,7 @@
 #include  <diag_dump.h>
 #include "bgpd/bgp_fsm.h"
 #include "bgp_vty.h"
+#include "if.h"
 /*
  * Local structure to hold the master thread
  * and counters for read/write callbacks
@@ -378,6 +379,10 @@ bgp_ovsdb_tables_init (struct ovsdb_idl *idl)
     ovsdb_idl_add_table(idl, &ovsrec_table_bgp_nexthop);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_nexthop_col_ip_address);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_nexthop_col_type);
+
+    ovsdb_idl_add_table(idl, &ovsrec_table_interface);
+    ovsdb_idl_add_column(idl, &ovsrec_interface_col_name);
+    ovsdb_idl_add_column(idl, &ovsrec_interface_col_link_state);
 }
 
 /*
@@ -1860,6 +1865,73 @@ bgp_apply_bgp_router_changes (struct ovsdb_idl *idl)
     bgp_router_read_ovsdb_apply_changes(idl);
 }
 
+static void
+bgp_handle_interface_updown (struct ovsdb_idl *idl)
+{
+    const struct ovsrec_interface *interface_row = NULL;
+    struct listnode *node, *nnode, *mnode;
+    struct bgp *bgp;
+    struct peer *peer;
+    struct interface *ifp;
+    struct connected *c;
+
+    /*
+     * Check if any table changes present.
+     * If no change just return from here
+     */
+    if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_interface_col_link_state, idl_seqno))
+    {
+        OVSREC_INTERFACE_FOR_EACH (interface_row, idl){
+            if (OVSREC_IDL_IS_ROW_MODIFIED(interface_row, idl_seqno))
+            {
+                ifp = if_lookup_by_name (interface_row->name);
+                if (!ifp)
+                    return;
+
+                VLOG_DBG("Interface %s has been modified to %s",
+                         interface_row->name, interface_row->link_state);
+
+                if(interface_row->link_state)
+                {
+                    if(!strcmp(interface_row->link_state, OVSREC_INTERFACE_LINK_STATE_DOWN))
+                    {
+                        if (BGP_DEBUG(zebra, ZEBRA))
+                            VLOG_DBG("BGP rcvd: interface %s down", ifp->name);
+
+                        for (ALL_LIST_ELEMENTS (ifp->connected, node, nnode, c))
+                            bgp_connected_delete (c);
+
+                        /*Fast external failover*/
+                        {
+                            bgp = bgp_lookup_by_name(NULL);
+                            if (CHECK_FLAG (bgp->flags, BGP_FLAG_NO_FAST_EXT_FAILOVER))
+                                continue;
+
+                            for (ALL_LIST_ELEMENTS (bgp->peer, node, nnode, peer))
+                            {
+                                if ((peer->ttl != 1) && (peer->gtsm_hops != 1))
+                                    continue;
+                                if (peer->nexthop.ifp)
+                                    if (!strcmp(interface_row->name, peer->nexthop.ifp->name))
+                                        BGP_EVENT_ADD (peer, BGP_Stop);
+                            }
+                        }
+                    }
+                    else if(!strcmp(interface_row->link_state, OVSREC_INTERFACE_LINK_STATE_UP))
+                    {
+                        if (BGP_DEBUG(zebra, ZEBRA))
+                            VLOG_DBG("BGP rcvd: interface %s up", ifp->name);
+
+                        for (ALL_LIST_ELEMENTS (ifp->connected, node, nnode, c))
+                            bgp_connected_add (c);
+                    }
+                }
+            }
+        }
+    }
+}
+
+
 /*
  * Iterate through all the peers of the BGP and check against
  * ovsdb to identify which neighbor has been deleted. If it doesn't exist
@@ -2931,6 +3003,8 @@ bgp_reconfigure (struct ovsdb_idl *idl)
     bgp_apply_global_changes();
     bgp_apply_bgp_router_changes(idl);
     bgp_apply_bgp_neighbor_changes(idl);
+
+    bgp_handle_interface_updown(idl);
 
     /* Scan active route transaction list and handle completions */
     bgp_txn_complete_processing();

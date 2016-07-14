@@ -796,8 +796,8 @@ show_routes (struct vty *vty, char * ip_addr_family)
                                     row_route->nexthops[i]->ports[0]->name);
                           vty_out (vty, "\tvia %s", str);
                         }
-
-                      vty_out (vty, ",  [%ld", *row_route->distance);
+                      if(row_route->distance)
+                        vty_out (vty, ",  [%ld", *row_route->distance);
 
                       if (row_route->metric)
                         vty_out (vty, "/%ld]", *row_route->metric);

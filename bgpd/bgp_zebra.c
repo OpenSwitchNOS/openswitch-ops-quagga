@@ -111,73 +111,6 @@ bgp_interface_delete (int command, struct zclient *zclient,
 }
 
 static int
-bgp_interface_up (int command, struct zclient *zclient, zebra_size_t length)
-{
-  struct stream *s;
-  struct interface *ifp;
-  struct connected *c;
-  struct listnode *node, *nnode;
-
-  s = zclient->ibuf;
-  ifp = zebra_interface_state_read (s);
-
-  if (! ifp)
-    return 0;
-
-  if (BGP_DEBUG(zebra, ZEBRA))
-    zlog_debug("Zebra rcvd: interface %s up", ifp->name);
-
-  for (ALL_LIST_ELEMENTS (ifp->connected, node, nnode, c))
-    bgp_connected_add (c);
-
-  return 0;
-}
-
-static int
-bgp_interface_down (int command, struct zclient *zclient, zebra_size_t length)
-{
-  struct stream *s;
-  struct interface *ifp;
-  struct connected *c;
-  struct listnode *node, *nnode;
-
-  s = zclient->ibuf;
-  ifp = zebra_interface_state_read (s);
-  if (! ifp)
-    return 0;
-
-  if (BGP_DEBUG(zebra, ZEBRA))
-    zlog_debug("Zebra rcvd: interface %s down", ifp->name);
-
-  for (ALL_LIST_ELEMENTS (ifp->connected, node, nnode, c))
-    bgp_connected_delete (c);
-
-  /* Fast external-failover */
-  {
-    struct listnode *mnode;
-    struct bgp *bgp;
-    struct peer *peer;
-
-    for (ALL_LIST_ELEMENTS_RO (bm->bgp, mnode, bgp))
-      {
-	if (CHECK_FLAG (bgp->flags, BGP_FLAG_NO_FAST_EXT_FAILOVER))
-	  continue;
-
-	for (ALL_LIST_ELEMENTS (bgp->peer, node, nnode, peer))
-	  {
-	    if ((peer->ttl != 1) && (peer->gtsm_hops != 1))
-	      continue;
-
-	    if (ifp == peer->nexthop.ifp)
-	      BGP_EVENT_ADD (peer, BGP_Stop);
-	  }
-      }
-  }
-
-  return 0;
-}
-
-static int
 bgp_interface_address_add (int command, struct zclient *zclient,
 			   zebra_size_t length)
 {
@@ -1107,8 +1040,6 @@ bgp_zebra_init (void)
   zclient->interface_address_delete = bgp_interface_address_delete;
   zclient->ipv4_route_add = zebra_read_ipv4;
   zclient->ipv4_route_delete = zebra_read_ipv4;
-  zclient->interface_up = bgp_interface_up;
-  zclient->interface_down = bgp_interface_down;
 #ifdef HAVE_IPV6
   zclient->ipv6_route_add = zebra_read_ipv6;
   zclient->ipv6_route_delete = zebra_read_ipv6;

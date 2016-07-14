@@ -46,6 +46,8 @@ sw1:if04 -- sw2:if04
 """
 
 
+# The number of routes under test should be greater than the batch size
+# being used within zebra
 MAX_IPV4_ROUTE = 250
 TOTAL_TIME = 8
 SAMPLING_TIME = 2

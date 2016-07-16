@@ -31,103 +31,6 @@ IPV6_ROUTE = "ipv6 route"
 RIB = "rib"
 
 
-def route_exists(switch=None, next_hop=None, bgp_network=None):
-    """
-    Checks if route exists.
-
-    :param switch: device to check.
-    :type enode: topology.platforms.base.BaseNode
-    :param str next_hop: IPv4 or IPv6 address to check on route:
-     - IPv4 address to check on route:
-     ``'192.168.20.20'``.
-     - IPv6 address to check on route:
-     ``'2001::1'``.
-    :param str network: IPv4 or IPv6 address to check on route:
-     - IPv4 address to check on route:
-     ``'192.168.20.20'``.
-     - IPv6 address to check on route:
-     ``'2001::1'``.
-    """
-    assert switch is not None
-    assert next_hop is not None
-    assert bgp_network is not None
-    route_exists = False
-    route_max_wait_time = 300
-    while route_max_wait_time > 0 and not route_exists:
-        output = switch("do show ip bgp")
-        lines = output.splitlines()
-        for line in lines:
-            if bgp_network in line and next_hop in line:
-                route_exists = True
-                break
-        sleep(1)
-        route_max_wait_time -= 1
-    assert route_exists
-
-
-def route_not_exists(switch, next_hop, bgp_network):
-    """
-    Checks if route does not exists.
-
-    :param switch: device to check.
-    :type enode: topology.platforms.base.BaseNode
-    :param str next_hop: IPv4 or IPv6 address to check is not on route:
-     - IPv4 address to check is not on route:
-     ``'192.168.20.20'``.
-     - IPv6 address to check is not on route:
-     ``'2001::1'``.
-    :param str network: IPv4 or IPv6 address to check is not on route:
-     - IPv4 address to check is not on route:
-     ``'192.168.20.20'``.
-     - IPv6 address to check is not on route:
-     ``'2001::1'``.
-    """
-    assert switch is not None
-    assert next_hop is not None
-    assert bgp_network is not None
-    route_exists = True
-    route_max_wait_time = 300
-    while route_max_wait_time > 0 and route_exists:
-        output = switch("do show ip bgp")
-        lines = output.splitlines()
-        for line in lines:
-            if bgp_network in line and next_hop in line:
-                break
-        else:
-            route_exists = False
-        sleep(1)
-        route_max_wait_time -= 1
-    assert not route_exists
-
-
-def wait_for_route(switch, next_hop, bgp_network, exists=True):
-    """
-    Checks the existance or non-existance of a route in a switch.
-
-    :param switch: device to check.
-    :type enode: topology.platforms.base.BaseNode
-    :param str next_hop: IPv4 or IPv6 address to check on route:
-    - IPv4 address to check on route:
-    ``'192.168.20.20'``.
-    - IPv6 address to check on route:
-    ``'2001::1'``.
-    :param str network: IPv4 or IPv6 address to check on route:
-    - IPv4 address to check on route:
-    ``'192.168.20.20'``.
-    - IPv6 address to check on route:
-    ``'2001::1'``.
-    :param bool exists: True looks for existance and False for
-    non-existance of a route.
-    """
-    assert switch is not None
-    assert next_hop is not None
-    assert bgp_network is not None
-    if exists:
-        route_exists(switch, next_hop, bgp_network)
-    else:
-        route_not_exists(switch, next_hop, bgp_network)
-
-
 def get_route_and_nexthops_from_output(output, route, route_type):
     """
     Library function to get the show dump for a route in the command
@@ -298,26 +201,43 @@ def verify_show(sw1, route, route_type, p_dict, show):
     :type  route_type : string
     :param show : type of show to be checked
     :type show : string
+    :param routes_found : list of routes if found
+    :type routes_found : bool
+    :param num_of_iterations : number of iterations of while loop executed
+    :type num_of_iterations : integer
     """
-    # Get the actual route dictionary for the route
-    dict_from_show = get_route_from_show(sw1,
-                                         route,
-                                         route_type,
-                                         show)
-
-    # Parsing the obtained dictionary so we can compare it easily
-    dict_from_show = sorted(dict_from_show.items(), key=itemgetter(0))
-
     # Parsing the received dictionary so we can compare it easily
     p_dict = sorted(p_dict.items(), key=itemgetter(0))
 
-    # Prints for debug purposes
-    print("Actual: {}\n".format(str(dict_from_show)))
+    # Get the actual route dictionary for the route. Execute the show command
+    # until the routes are seen in the show output, else sleep for a second in
+    # every iteration to allow processing by zebra.
+    routes_found = False
+    num_of_iterations = 0
+    while routes_found is not True:
+        dict_from_show = get_route_from_show(sw1,
+                                             route,
+                                             route_type,
+                                             show)
 
-    print("Expected: {}\n".format(str(p_dict)))
+        # Parsing the obtained dictionary so we can compare it easily
+        dict_from_show = sorted(dict_from_show.items(), key=itemgetter(0))
 
-    # Comparing dictionaries, if not equals, assertion will fail
-    assert p_dict == dict_from_show
+        # Prints for debug purposes
+        num_of_iterations = num_of_iterations + 1
+        print("number of iterations = %d\n" % num_of_iterations)
+        print("Actual: {}\n".format(str(dict_from_show)))
+
+        print("Expected: {}\n".format(str(p_dict)))
+
+        # Comparing dictionaries, if not equals, assertion will fail
+        print(
+            "****************************************************************")
+        if p_dict == dict_from_show:
+            routes_found = True
+            break
+
+        sleep(1)
 
 
 def verify_show_ip_route(sw1, route, route_type, p_dict):
@@ -581,11 +501,11 @@ def get_route_from_show_kernel_route(**kwargs):
     kernel_route_buffer = sw(kernel_route_command, shell="bash")
 
     # Initialize the return route dictionary
-    RouteDict = dict()
+    route_dict = dict()
 
     # Add the prefix and the mask length of the route in the return
     # dictionary
-    RouteDict['Route'] = route
+    route_dict['Route'] = route
 
     # Split the route into prefix and mask length
     [prefix, masklen] = route.split('/')
@@ -600,9 +520,9 @@ def get_route_from_show_kernel_route(**kwargs):
     # 10.0.0.0/24 -> 10.0.0.0/24
     # 123:1::/64 -> 123:1::/64
     #
-    #That's why the logic below is put to handle this case.
+    # That's why the logic below is put to handle this case.
     route_string = ""
-    if if_ipv4 == True:
+    if if_ipv4:
         if int(masklen) >= 32:
             route_string = prefix
         else:
@@ -621,12 +541,14 @@ def get_route_from_show_kernel_route(**kwargs):
     # populate the return route distionary
     for line in lines:
 
-        commandLine = match("ip netns exec swns ip", line)
+        commandline = match("ip netns exec swns ip", line)
 
-        if commandLine:
+        if commandline:
             continue
 
-        routeline = match("(%s)(.*)(proto %s)" %(route_string, route_type), line)
+        routeline = match(
+            "(%s)(.*)(proto %s)" %
+            (route_string, route_type), line)
 
         nexthop_string = ""
 
@@ -638,7 +560,7 @@ def get_route_from_show_kernel_route(**kwargs):
 
             if nexthopipline:
                 nexthop_string = nexthopipline.group(2)
-            else :
+            else:
                 nexthopifline = match("(.*)dev (\d+) (.*)", line)
 
                 if nexthopifline:
@@ -654,20 +576,20 @@ def get_route_from_show_kernel_route(**kwargs):
         if nexthopifline:
             nexthop_string = nexthopifline.group(2)
 
-        if len(nexthop_string) > 0 and if_route_found == True:
+        if len(nexthop_string) > 0 and if_route_found:
 
-            RouteDict[nexthop_string.rstrip(' ')] = dict()
-            RouteDict[nexthop_string.rstrip(' ')]['Distance'] = ""
-            RouteDict[nexthop_string.rstrip(' ')]['Metric'] = ""
-            RouteDict[nexthop_string.rstrip(' ')]['RouteType'] = route_type
+            route_dict[nexthop_string.rstrip(' ')] = dict()
+            route_dict[nexthop_string.rstrip(' ')]['Distance'] = ""
+            route_dict[nexthop_string.rstrip(' ')]['Metric'] = ""
+            route_dict[nexthop_string.rstrip(' ')]['RouteType'] = route_type
 
             nexthop_number = nexthop_number + 1
 
     if nexthop_number > 0:
-        RouteDict['NumberNexthops'] = str(nexthop_number)
+        route_dict['NumberNexthops'] = str(nexthop_number)
 
     # Return the kernel route dictionary
-    return RouteDict
+    return route_dict
 
 
 def verify_route_in_show_kernel_route(sw, if_ipv4, expected_route_dict,
@@ -697,23 +619,25 @@ def verify_route_in_show_kernel_route(sw, if_ipv4, expected_route_dict,
 
     # Get the actual route dictionary for the route
     actual_route_dict = get_route_from_show_kernel_route(
-                                           switch=sw,
-                                           if_ipv4=if_ipv4,
-                                           route=expected_route_dict['Route'],
-                                           route_type=route_type)
+        switch=sw,
+        if_ipv4=if_ipv4,
+        route=expected_route_dict['Route'],
+        route_type=route_type)
 
     # If there was error getting the actual route dictionary, then assert and
     # fail the test case
     if actual_route_dict is None:
-       assert False,  "Failed to get the dictionary for route " + \
-                      expected_route_dict['Route'] + " and route type " \
-                      + route_type
+        assert False,  "Failed to get the dictionary for route " + \
+                       expected_route_dict['Route'] + " and route type " \
+                       + route_type
 
     # Sort the actual route dictionary
     actual_route_dict = sorted(actual_route_dict.items(), key=itemgetter(0))
 
     # Sort the expected route dictionary
-    expected_route_dict = sorted(expected_route_dict.items(), key=itemgetter(0))
+    expected_route_dict = sorted(
+        expected_route_dict.items(),
+        key=itemgetter(0))
 
     # Print the actual and expected route dictionaries for debugging purposes
     print("\nThe expected kernel route dictionary is:")

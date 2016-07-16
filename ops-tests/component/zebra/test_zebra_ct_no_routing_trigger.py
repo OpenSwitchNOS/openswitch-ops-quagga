@@ -17,7 +17,7 @@
 # Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 # 02111-1307, USA.
 
-from helpers_routing import (
+from zebra_routing import (
     route_and_nexthop_in_show_running_config,
     verify_show_ip_route,
     verify_show_ipv6_route,

@@ -383,6 +383,15 @@ bgp_ovsdb_tables_init (struct ovsdb_idl *idl)
     ovsdb_idl_add_table(idl, &ovsrec_table_interface);
     ovsdb_idl_add_column(idl, &ovsrec_interface_col_name);
     ovsdb_idl_add_column(idl, &ovsrec_interface_col_link_state);
+
+     /* Port table for getting ip addresses */
+     ovsdb_idl_add_table(idl, &ovsrec_table_port);
+     ovsdb_idl_add_column(idl, &ovsrec_port_col_name);
+     ovsdb_idl_add_column(idl, &ovsrec_port_col_ip6_address);
+     ovsdb_idl_add_column(idl, &ovsrec_port_col_ip4_address);
+     ovsdb_idl_add_column(idl, &ovsrec_port_col_ip4_address_secondary);
+     ovsdb_idl_add_column(idl, &ovsrec_port_col_ip6_address_secondary);
+     ovsdb_idl_add_column(idl, &ovsrec_port_col_interfaces);
 }
 
 /*
@@ -1865,6 +1874,62 @@ bgp_apply_bgp_router_changes (struct ovsdb_idl *idl)
     bgp_router_read_ovsdb_apply_changes(idl);
 }
 
+/*
+ * Returns port_row for the matching interface_name.
+ */
+static const struct ovsrec_port *
+get_l3_port_form_interface_name(const char *interface_name)
+{
+    const struct ovsrec_port *port_row;
+    OVSREC_PORT_FOR_EACH(port_row, idl) {
+        int i;
+        for (i = 0; i < port_row->n_interfaces; i++) {
+            if ((strcmp(port_row->interfaces[i]->name, interface_name) == 0)
+                    && ((port_row->ip4_address != NULL) ||
+                        (port_row->n_ip4_address_secondary > 0))) {
+                return port_row;
+            }
+        }
+    }
+    return NULL;
+}
+
+/**
+ * Returns true if one of the primary or secondary ipv4 address of the port IPv4 address
+ * prefix matches with peer host's ip address.
+ */
+static bool
+is_peer_host_match_port_address_prefix(const struct ovsrec_port *port_row,
+                                        const char *peer_host)
+{
+    struct prefix pr1, pr2;
+    int i = 0;
+
+    if (port_row->ip4_address){
+        str2prefix(port_row->ip4_address, &pr1);
+        str2prefix(peer_host, &pr2);
+
+        return prefix_match(&pr1, &pr2);
+    }
+    else if ((port_row->n_ip4_address_secondary) > 0)
+    {
+        for (i = 0; i < port_row->n_ip4_address_secondary; i++)
+        {
+            if (port_row->ip4_address_secondary[i] == NULL)
+            {
+              VLOG_DBG("Secondary address not found\n");
+              continue;
+            }
+            str2prefix(port_row->ip4_address_secondary[i], &pr1);
+            str2prefix(peer_host, &pr2);
+
+            if (prefix_match(&pr1, &pr2))
+                return true;
+        }
+    }
+    return false;
+}
+
 static void
 bgp_handle_interface_updown (struct ovsdb_idl *idl)
 {
@@ -1874,6 +1939,7 @@ bgp_handle_interface_updown (struct ovsdb_idl *idl)
     struct peer *peer;
     struct interface *ifp;
     struct connected *c;
+    const struct ovsrec_port *port_row = NULL;
 
     /*
      * Check if any table changes present.
@@ -1890,7 +1956,8 @@ bgp_handle_interface_updown (struct ovsdb_idl *idl)
 
                 VLOG_DBG("Interface %s has been modified to %s",
                          interface_row->name, interface_row->link_state);
-                if(!strcmp(interface_row->link_state, OVSREC_INTERFACE_LINK_STATE_DOWN))
+                if((interface_row->link_state != NULL) &&
+                        !strcmp(interface_row->link_state, OVSREC_INTERFACE_LINK_STATE_DOWN))
                 {
                     if (BGP_DEBUG(zebra, ZEBRA))
                         VLOG_DBG("BGP rcvd: interface %s down", ifp->name);
@@ -1916,13 +1983,31 @@ bgp_handle_interface_updown (struct ovsdb_idl *idl)
                         }
                     }
                 }
-                else if(!strcmp(interface_row->link_state, OVSREC_INTERFACE_LINK_STATE_UP))
+                else if ((interface_row->link_state != NULL) &&
+                      !strcmp(interface_row->link_state, OVSREC_INTERFACE_LINK_STATE_UP))
                 {
-                    if (BGP_DEBUG(zebra, ZEBRA))
-                        VLOG_DBG("BGP rcvd: interface %s up", ifp->name);
+                    /* make the appropriate BGP session start and stop */
+                    port_row = get_l3_port_form_interface_name(interface_row->name);
 
-                    for (ALL_LIST_ELEMENTS (ifp->connected, node, nnode, c))
-                        bgp_connected_add (c);
+                    if (port_row != NULL)
+                    {
+                        for (ALL_LIST_ELEMENTS_RO (bm->bgp, mnode, bgp))
+                        {
+                            for (ALL_LIST_ELEMENTS (bgp->peer, node, nnode, peer))
+                            {
+                                if (is_peer_host_match_port_address_prefix(port_row, peer->host))
+                                {
+                                    VLOG_DBG("Prefix matched for Port ip = %s and peer host = %s\n",
+                                         port_row->ip4_address, peer->host);
+                                    VLOG_DBG("Restarting Peer host %s", peer->host);
+                                    BGP_EVENT_ADD (peer, BGP_Stop);
+                                    BGP_EVENT_ADD (peer, BGP_Start);
+                                }
+                            }
+                        }
+                    }
+                    else
+                        VLOG_DBG("Port not found for interface %s", interface_row->name);
                 }
             }
         }

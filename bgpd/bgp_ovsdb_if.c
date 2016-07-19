@@ -339,6 +339,20 @@ bgp_ovsdb_tables_init (struct ovsdb_idl *idl)
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_ttl_security_hops);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_update_source);
 
+    /* Interface table */
+    ovsdb_idl_add_table(idl, &ovsrec_table_interface);
+    ovsdb_idl_add_column(idl, &ovsrec_interface_col_name);
+    ovsdb_idl_add_column(idl, &ovsrec_interface_col_link_state);
+
+    /* Port table */
+    ovsdb_idl_add_table(idl, &ovsrec_table_port);
+    ovsdb_idl_add_column(idl, &ovsrec_port_col_name);
+    ovsdb_idl_add_column(idl, &ovsrec_port_col_ip6_address);
+    ovsdb_idl_add_column(idl, &ovsrec_port_col_ip4_address);
+    ovsdb_idl_add_column(idl, &ovsrec_port_col_ip4_address_secondary);
+    ovsdb_idl_add_column(idl, &ovsrec_port_col_ip6_address_secondary);
+    ovsdb_idl_add_column(idl, &ovsrec_port_col_interfaces);
+
     /* BGP policy */
     bgp_policy_ovsdb_init(idl);
 
@@ -380,9 +394,6 @@ bgp_ovsdb_tables_init (struct ovsdb_idl *idl)
     ovsdb_idl_add_column(idl, &ovsrec_bgp_nexthop_col_ip_address);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_nexthop_col_type);
 
-    ovsdb_idl_add_table(idl, &ovsrec_table_interface);
-    ovsdb_idl_add_column(idl, &ovsrec_interface_col_name);
-    ovsdb_idl_add_column(idl, &ovsrec_interface_col_link_state);
 }
 
 /*
@@ -631,6 +642,21 @@ bgp_dump_summary (struct ds *ds, struct bgp *bgp, int afi, int safi)
     }
 }
 
+/*
+ * Returns port_row for the matching interface_name.
+ */
+static const struct ovsrec_port*
+bgp_ovsdb_find_port(const char *if_name)
+{
+    const struct ovsrec_port *port_row = NULL;
+    OVSREC_PORT_FOR_EACH(port_row, idl) {
+        if (strcmp(port_row->name, if_name) == 0) {
+            return port_row;
+       }
+    }
+    return NULL;
+}
+
 static void
 bgp_dump_peer(struct ds *ds, struct peer *p)
 {
@@ -746,8 +772,8 @@ bgp_dump_peer(struct ds *ds, struct peer *p)
             p->last_reset = LOCAL_INTERFACE_DOWN;
         }
         ds_put_format(ds, "  Last reset %s, due to %s\n",
-        peer_uptime (p->resettime, timebuf, BGP_UPTIME_LEN),
-        peer_down_str[(int) p->last_reset]);
+            peer_uptime (p->resettime, timebuf, BGP_UPTIME_LEN),
+            peer_down_str[(int) p->last_reset]);
     }
 
     if(CHECK_FLAG (p->sflags, PEER_STATUS_PREFIX_OVERFLOW)) {
@@ -1865,8 +1891,57 @@ bgp_apply_bgp_router_changes (struct ovsdb_idl *idl)
     bgp_router_read_ovsdb_apply_changes(idl);
 }
 
+/**
+ * Returns true if one of the primary or secondary ip addresses of the port
+ * prefix matches with peer host's ip address.
+ */
+static bool
+bgp_ovsdb_match_peer_to_port_addr(const struct ovsrec_port *port_row,
+                                                const char *peer_host)
+{
+    struct prefix port_prefix, host_prefix;
+    int i = 0;
+
+    str2prefix(peer_host, &host_prefix);
+
+    if (port_row->ip4_address) {
+        str2prefix(port_row->ip4_address, &port_prefix);
+        if (prefix_match(&port_prefix, &host_prefix))
+            return true;
+    }
+    if ((port_row->n_ip4_address_secondary) > 0) {
+        for (i = 0; i < port_row->n_ip4_address_secondary; i++) {
+            if (port_row->ip4_address_secondary[i]) {
+                str2prefix(port_row->ip4_address_secondary[i], &port_prefix);
+                if (prefix_match(&port_prefix, &host_prefix))
+                    return true;
+            }
+        }
+    }
+    if (port_row->ip6_address) {
+        str2prefix(port_row->ip6_address, &port_prefix);
+        if (prefix_match(&port_prefix, &host_prefix))
+            return true;
+    }
+    if ((port_row->n_ip6_address_secondary) > 0) {
+        for (i = 0; i < port_row->n_ip6_address_secondary; i++) {
+            if (port_row->ip6_address_secondary[i]) {
+                str2prefix(port_row->ip6_address_secondary[i], &port_prefix);
+                if (prefix_match(&port_prefix, &host_prefix))
+                    return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+/*
+ * This function checkes for link state up/down notification and sets/resets
+ * BGP peers session accordignly
+ */
 static void
-bgp_handle_interface_updown (struct ovsdb_idl *idl)
+bgp_apply_interface_state_change (struct ovsdb_idl *idl)
 {
     const struct ovsrec_interface *interface_row = NULL;
     struct listnode *node, *nnode, *mnode;
@@ -1874,24 +1949,21 @@ bgp_handle_interface_updown (struct ovsdb_idl *idl)
     struct peer *peer;
     struct interface *ifp;
     struct connected *c;
+    const struct ovsrec_port *port_row = NULL;
 
     /*
      * Check if any table changes present.
      * If no change just return from here
      */
-    if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_interface_col_link_state, idl_seqno))
-    {
-        OVSREC_INTERFACE_FOR_EACH (interface_row, idl){
-            if (OVSREC_IDL_IS_ROW_MODIFIED(interface_row, idl_seqno))
-            {
-                ifp = if_lookup_by_name (interface_row->name);
-                if (!ifp)
-                    return;
+    if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_interface_col_link_state, idl_seqno)) {
+        OVSREC_INTERFACE_FOR_EACH (interface_row, idl) {
+            if (OVSREC_IDL_IS_ROW_MODIFIED(interface_row, idl_seqno)) {
+                if(interface_row->link_state &&
+                        !strcmp(interface_row->link_state, OVSREC_INTERFACE_LINK_STATE_DOWN)) {
+                    ifp = if_lookup_by_name (interface_row->name);
+                    if (!ifp)
+                        return;
 
-                VLOG_DBG("Interface %s has been modified to %s",
-                         interface_row->name, interface_row->link_state);
-                if(!strcmp(interface_row->link_state, OVSREC_INTERFACE_LINK_STATE_DOWN))
-                {
                     if (BGP_DEBUG(zebra, ZEBRA))
                         VLOG_DBG("BGP rcvd: interface %s down", ifp->name);
 
@@ -1900,13 +1972,11 @@ bgp_handle_interface_updown (struct ovsdb_idl *idl)
 
                     /*Fast external failover*/
                     {
-                        for (ALL_LIST_ELEMENTS_RO (bgpmaster->bgp, mnode, bgp))
-                        {
+                        for (ALL_LIST_ELEMENTS_RO (bgpmaster->bgp, mnode, bgp)) {
                             if (CHECK_FLAG (bgp->flags, BGP_FLAG_NO_FAST_EXT_FAILOVER))
                                 continue;
 
-                            for (ALL_LIST_ELEMENTS (bgp->peer, node, nnode, peer))
-                            {
+                            for (ALL_LIST_ELEMENTS (bgp->peer, node, nnode, peer)) {
                                 if ((peer->ttl != 1) && (peer->gtsm_hops != 1))
                                     continue;
 
@@ -1916,13 +1986,21 @@ bgp_handle_interface_updown (struct ovsdb_idl *idl)
                         }
                     }
                 }
-                else if(!strcmp(interface_row->link_state, OVSREC_INTERFACE_LINK_STATE_UP))
-                {
-                    if (BGP_DEBUG(zebra, ZEBRA))
-                        VLOG_DBG("BGP rcvd: interface %s up", ifp->name);
+                else if (interface_row->link_state &&
+                      !strcmp(interface_row->link_state, OVSREC_INTERFACE_LINK_STATE_UP)) {
+                    /* Start the appropriate BGP session */
+                    port_row = bgp_ovsdb_find_port(interface_row->name);
 
-                    for (ALL_LIST_ELEMENTS (ifp->connected, node, nnode, c))
-                        bgp_connected_add (c);
+                    if (port_row) {
+                        for (ALL_LIST_ELEMENTS_RO (bm->bgp, mnode, bgp)) {
+                            for (ALL_LIST_ELEMENTS (bgp->peer, node, nnode, peer)) {
+                                if (bgp_ovsdb_match_peer_to_port_addr(port_row, peer->host)) {
+                                    VLOG_DBG("Restarting Peer host %s", peer->host);
+                                    BGP_EVENT_ADD (peer, BGP_Start);
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -2997,7 +3075,7 @@ bgp_reconfigure (struct ovsdb_idl *idl)
     policy_rt_map_read_ovsdb_apply_changes(idl);
     policy_aspath_filter_read_ovsdb_apply_changes(idl);
 
-    bgp_handle_interface_updown(idl);
+    bgp_apply_interface_state_change(idl);
 
     /* Apply the changes */
     bgp_apply_global_changes();

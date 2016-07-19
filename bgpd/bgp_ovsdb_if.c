@@ -339,6 +339,26 @@ bgp_ovsdb_tables_init (struct ovsdb_idl *idl)
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_ttl_security_hops);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_update_source);
 
+    /* Interface table */
+    ovsdb_idl_add_table(idl, &ovsrec_table_interface);
+    ovsdb_idl_add_column(idl, &ovsrec_interface_col_name);
+    ovsdb_idl_add_column(idl, &ovsrec_interface_col_admin_state);
+    ovsdb_idl_add_column(idl, &ovsrec_interface_col_link_state);
+
+    /* Register for the vrf table to find the if the port is L2/L3 */
+    ovsdb_idl_add_table(idl, &ovsrec_table_vrf);
+    ovsdb_idl_add_column(idl, &ovsrec_vrf_col_name);
+    ovsdb_idl_add_column(idl, &ovsrec_vrf_col_ports);
+
+    /* Port table */
+    ovsdb_idl_add_table(idl, &ovsrec_table_port);
+    ovsdb_idl_add_column(idl, &ovsrec_port_col_name);
+    ovsdb_idl_add_column(idl, &ovsrec_port_col_ip6_address);
+    ovsdb_idl_add_column(idl, &ovsrec_port_col_ip4_address);
+    ovsdb_idl_add_column(idl, &ovsrec_port_col_ip4_address_secondary);
+    ovsdb_idl_add_column(idl, &ovsrec_port_col_ip6_address_secondary);
+    ovsdb_idl_add_column(idl, &ovsrec_port_col_interfaces);
+
     /* BGP policy */
     bgp_policy_ovsdb_init(idl);
 
@@ -380,9 +400,6 @@ bgp_ovsdb_tables_init (struct ovsdb_idl *idl)
     ovsdb_idl_add_column(idl, &ovsrec_bgp_nexthop_col_ip_address);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_nexthop_col_type);
 
-    ovsdb_idl_add_table(idl, &ovsrec_table_interface);
-    ovsdb_idl_add_column(idl, &ovsrec_interface_col_name);
-    ovsdb_idl_add_column(idl, &ovsrec_interface_col_link_state);
 }
 
 /*
@@ -403,6 +420,7 @@ ovsdb_init (const char *db_path)
     ovsdb_idl_add_column(idl, &ovsrec_system_col_cur_cfg);
     ovsdb_idl_add_column(idl, &ovsrec_system_col_hostname);
     ovsdb_idl_add_column(idl, &ovsrec_system_col_ecmp_config);
+    ovsdb_idl_add_column(idl, &ovsrec_system_col_vrfs);
 
     /* BGP tables */
     bgp_ovsdb_tables_init(idl);
@@ -631,10 +649,148 @@ bgp_dump_summary (struct ds *ds, struct bgp *bgp, int afi, int safi)
     }
 }
 
+/* Checks if interface is already part of a VRF. */
+bool
+check_iface_in_vrf(const char *if_name)
+{
+    const struct ovsrec_system *ovs_row = NULL;
+    struct ovsrec_vrf *vrf_cfg = NULL;
+    struct ovsrec_port *port_cfg = NULL;
+    struct ovsrec_interface *iface_cfg = NULL;
+    size_t i, j, k;
+    ovs_row = ovsrec_system_first(idl);
+    for (i = 0; i < ovs_row->n_vrfs; i++) {
+        vrf_cfg = ovs_row->vrfs[i];
+        for (j = 0; j < vrf_cfg->n_ports; j++) {
+            port_cfg = vrf_cfg->ports[j];
+            if (strcmp(if_name, port_cfg->name) == 0) {
+                return true;
+            }
+            for (k = 0; k < port_cfg->n_interfaces; k++) {
+                iface_cfg = port_cfg->interfaces[k];
+                if (strcmp(if_name, iface_cfg->name) == 0) {
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
+/*
+ * Returns VRF row for the matching port
+ */
+static const struct ovsrec_vrf*
+port_match_in_vrf (const struct ovsrec_port *port_row)
+{
+    const struct ovsrec_vrf *vrf_row = NULL;
+    size_t i;
+    OVSREC_VRF_FOR_EACH(vrf_row, idl)
+    {
+        for (i = 0; i < vrf_row->n_ports; i++)
+        {
+            if (vrf_row->ports[i] == port_row)
+              return vrf_row;
+         }
+    }
+    return NULL;
+}
+
+/*
+ * Returns port_row for the matching interface_name.
+ */
+static const struct ovsrec_port*
+port_find(const char *if_name)
+{
+    const struct ovsrec_port *port_row = NULL;
+    OVSREC_PORT_FOR_EACH(port_row, idl)
+    {
+        if (strcmp(port_row->name, if_name) == 0) {
+            return port_row;
+       }
+    }
+    return NULL;
+}
+
+/*
+ * Verify the reson for peer down in due to interface
+ * admin/link state down
+ */
+static bool
+peer_verify_local_interface_down (struct peer *p)
+{
+    const struct ovsrec_port *port_row;
+    const struct ovsrec_vrf *vrf_row;
+    size_t i;
+
+    const struct ovsrec_interface *interface_row = NULL;
+    char *if_addr;
+    char if_addr_buf[INET6_ADDRSTRLEN];
+
+    if (!p)
+        return false;
+
+    if (!p->su_local) {
+        return false;
+    }
+
+    if_addr = (char *)(sockunion2str (p->su_local, if_addr_buf, SU_ADDRSTRLEN));
+
+    if (if_addr[0] == '\0') {
+        return false;
+    }
+
+    OVSREC_INTERFACE_FOR_EACH (interface_row, idl) {
+        if(!strcmp(interface_row->admin_state, OVSREC_INTERFACE_ADMIN_STATE_DOWN)
+           || ((interface_row->link_state != NULL) &&
+               !strcmp(interface_row->link_state, OVSREC_INTERFACE_LINK_STATE_DOWN))) {
+
+            port_row = port_find(interface_row->name);
+
+            if (!port_row) {
+                continue;
+            }
+
+            if (check_iface_in_vrf(interface_row->name)) {
+                vrf_row = port_match_in_vrf(port_row);
+
+                if (port_row->ip4_address) {
+                    if (!strcmp(port_row->ip4_address, if_addr)) {
+                        return true;
+                    }
+                }
+
+                for (i = 0; i < port_row->n_ip4_address_secondary; i++) {
+                    if (!strcmp(port_row->ip4_address_secondary[i],
+                                if_addr)) {
+                        return true;
+                    }
+                }
+
+                if (port_row->ip6_address) {
+                    if (!strcmp(port_row->ip6_address, if_addr)) {
+                        return true;
+                    }
+                }
+
+                for (i = 0; i < port_row->n_ip6_address_secondary; i++) {
+                    if (!strcmp(port_row->ip6_address_secondary[i],
+                                if_addr)) {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+
+    return false;
+}
+
 static void
 bgp_dump_peer(struct ds *ds, struct peer *p)
 {
     struct bgp *bgp;
+    const struct ovsrec_interface *interface_row = NULL;
     char buf1[INET6_ADDRSTRLEN];
     char timebuf[BGP_UPTIME_LEN];
     afi_t afi;
@@ -744,10 +900,14 @@ bgp_dump_peer(struct ds *ds, struct peer *p)
         if ((peer_down_reason[0] == '\0') ||
              (!p->su_local)) {
             p->last_reset = LOCAL_INTERFACE_DOWN;
+        } else {
+            if (peer_verify_local_interface_down(p)) {
+                  p->last_reset = LOCAL_INTERFACE_DOWN;
+            }
+            ds_put_format(ds, "  Last reset %s, due to %s\n",
+            peer_uptime (p->resettime, timebuf, BGP_UPTIME_LEN),
+            peer_down_str[(int) p->last_reset]);
         }
-        ds_put_format(ds, "  Last reset %s, due to %s\n",
-        peer_uptime (p->resettime, timebuf, BGP_UPTIME_LEN),
-        peer_down_str[(int) p->last_reset]);
     }
 
     if(CHECK_FLAG (p->sflags, PEER_STATUS_PREFIX_OVERFLOW)) {
@@ -1865,6 +2025,56 @@ bgp_apply_bgp_router_changes (struct ovsdb_idl *idl)
     bgp_router_read_ovsdb_apply_changes(idl);
 }
 
+/**
+ * Returns true if one of the primary or secondary ipv4 address of the port
+ * prefix matches with peer host's ip address.
+ */
+static bool
+is_peer_host_match_port_address_prefix(const struct ovsrec_port *port_row,
+                                        const char *peer_host)
+{
+    struct prefix port_prefix, host_prefix;
+    int i = 0;
+
+    str2prefix(peer_host, &host_prefix);
+
+    if (port_row->ip4_address){
+        str2prefix(port_row->ip4_address, &port_prefix);
+    }
+    else if ((port_row->n_ip4_address_secondary) > 0)
+    {
+        for (i = 0; i < port_row->n_ip4_address_secondary; i++)
+        {
+            if (port_row->ip4_address_secondary[i] == NULL)
+            {
+              VLOG_DBG("Secondary ip4 address not found\n");
+              continue;
+            }
+            str2prefix(port_row->ip4_address_secondary[i], &port_prefix);
+        }
+    }
+    else if (port_row->ip6_address) {
+        str2prefix(port_row->ip6_address, &port_prefix);
+    }
+    else if ((port_row->n_ip6_address_secondary) > 0)
+    {
+        for (i = 0; i < port_row->n_ip6_address_secondary; i++)
+        {
+            if (port_row->ip6_address_secondary[i] == NULL)
+            {
+              VLOG_DBG("Secondary ip6 address not found\n");
+              continue;
+            }
+            str2prefix(port_row->ip6_address_secondary[i], &port_prefix);
+        }
+    }
+
+    if (prefix_match(&port_prefix, &host_prefix))
+        return true;
+    else
+        return false;
+}
+
 static void
 bgp_handle_interface_updown (struct ovsdb_idl *idl)
 {
@@ -1874,6 +2084,7 @@ bgp_handle_interface_updown (struct ovsdb_idl *idl)
     struct peer *peer;
     struct interface *ifp;
     struct connected *c;
+    const struct ovsrec_port *port_row = NULL;
 
     /*
      * Check if any table changes present.
@@ -1884,45 +2095,66 @@ bgp_handle_interface_updown (struct ovsdb_idl *idl)
         OVSREC_INTERFACE_FOR_EACH (interface_row, idl){
             if (OVSREC_IDL_IS_ROW_MODIFIED(interface_row, idl_seqno))
             {
-                ifp = if_lookup_by_name (interface_row->name);
-                if (!ifp)
-                    return;
+                if (check_iface_in_vrf(interface_row->name)) {
+                    ifp = if_lookup_by_name (interface_row->name);
+                    if (!ifp)
+                        return;
 
-                VLOG_DBG("Interface %s has been modified to %s",
-                         interface_row->name, interface_row->link_state);
-                if(!strcmp(interface_row->link_state, OVSREC_INTERFACE_LINK_STATE_DOWN))
-                {
-                    if (BGP_DEBUG(zebra, ZEBRA))
-                        VLOG_DBG("BGP rcvd: interface %s down", ifp->name);
-
-                    for (ALL_LIST_ELEMENTS (ifp->connected, node, nnode, c))
-                        bgp_connected_delete (c);
-
-                    /*Fast external failover*/
+                    VLOG_DBG("Interface %s has been modified to %s",
+                             interface_row->name, interface_row->link_state);
+                    if((interface_row->link_state != NULL) &&
+                            !strcmp(interface_row->link_state, OVSREC_INTERFACE_LINK_STATE_DOWN))
                     {
-                        for (ALL_LIST_ELEMENTS_RO (bgpmaster->bgp, mnode, bgp))
-                        {
-                            if (CHECK_FLAG (bgp->flags, BGP_FLAG_NO_FAST_EXT_FAILOVER))
-                                continue;
+                        if (BGP_DEBUG(zebra, ZEBRA))
+                            VLOG_DBG("BGP rcvd: interface %s down", ifp->name);
 
-                            for (ALL_LIST_ELEMENTS (bgp->peer, node, nnode, peer))
+                        for (ALL_LIST_ELEMENTS (ifp->connected, node, nnode, c))
+                            bgp_connected_delete (c);
+
+                        /*Fast external failover*/
+                        {
+                            for (ALL_LIST_ELEMENTS_RO (bgpmaster->bgp, mnode, bgp))
                             {
-                                if ((peer->ttl != 1) && (peer->gtsm_hops != 1))
+                                if (CHECK_FLAG (bgp->flags, BGP_FLAG_NO_FAST_EXT_FAILOVER))
                                     continue;
 
-                                if (!strcmp(interface_row->name, peer->nexthop.ifp->name))
-                                    BGP_EVENT_ADD (peer, BGP_Stop);
+                                for (ALL_LIST_ELEMENTS (bgp->peer, node, nnode, peer))
+                                {
+                                    if ((peer->ttl != 1) && (peer->gtsm_hops != 1))
+                                        continue;
+
+                                    if (!strcmp(interface_row->name, peer->nexthop.ifp->name))
+                                        BGP_EVENT_ADD (peer, BGP_Stop);
+                                }
                             }
                         }
                     }
-                }
-                else if(!strcmp(interface_row->link_state, OVSREC_INTERFACE_LINK_STATE_UP))
-                {
-                    if (BGP_DEBUG(zebra, ZEBRA))
-                        VLOG_DBG("BGP rcvd: interface %s up", ifp->name);
+                    else if ((interface_row->link_state != NULL) &&
+                          !strcmp(interface_row->link_state, OVSREC_INTERFACE_LINK_STATE_UP))
+                    {
+                        /* make the appropriate BGP session start and stop */
+                        port_row = port_find(interface_row->name);
 
-                    for (ALL_LIST_ELEMENTS (ifp->connected, node, nnode, c))
-                        bgp_connected_add (c);
+                        if (port_row != NULL)
+                        {
+                            for (ALL_LIST_ELEMENTS_RO (bm->bgp, mnode, bgp))
+                            {
+                                for (ALL_LIST_ELEMENTS (bgp->peer, node, nnode, peer))
+                                {
+                                    if (is_peer_host_match_port_address_prefix(port_row, peer->host))
+                                    {
+                                        VLOG_DBG("Prefix matched for Port ip = %s and peer host = %s\n",
+                                             port_row->ip4_address, peer->host);
+                                        VLOG_DBG("Restarting Peer host %s", peer->host);
+                                        BGP_EVENT_ADD (peer, BGP_Stop);
+                                        BGP_EVENT_ADD (peer, BGP_Start);
+                                    }
+                                }
+                            }
+                        }
+                        else
+                            VLOG_DBG("Port not found for interface %s", interface_row->name);
+                    }
                 }
             }
         }

@@ -474,13 +474,10 @@ bgp_ovsdb_set_rib_nexthop(struct ovsdb_idl_txn *txn,
     }
     nexthop_list = xmalloc(sizeof *rib->nexthops * nexthop_num);
     /* Set first nexthop */
-    pnexthop = bgp_ovsdb_lookup_nexthop(nexthop_buf);
-    if (!pnexthop) {
-        pnexthop = ovsrec_nexthop_insert(txn);
-        ovsrec_nexthop_set_ip_address(pnexthop, nexthop_buf);
-        VLOG_DBG("Setting nexthop IP address %s\n", nexthop_buf);
-        ovsrec_nexthop_set_type(pnexthop, safi_str);
-    }
+    pnexthop = ovsrec_nexthop_insert(txn);
+    ovsrec_nexthop_set_ip_address(pnexthop, nexthop_buf);
+    VLOG_DBG("Setting nexthop IP address %s\n", nexthop_buf);
+    ovsrec_nexthop_set_type(pnexthop, safi_str);
     selected = 1;
     ovsrec_nexthop_set_selected(pnexthop, &selected, 1);
     nexthop_list[0] = (struct ovsrec_nexthop*) pnexthop;
@@ -514,14 +511,11 @@ bgp_ovsdb_set_rib_nexthop(struct ovsdb_idl_txn *txn,
                    }
                 inet_ntop(p->family, nexthop6, nexthop_buf, sizeof(nexthop_buf));
             }
-            pnexthop = bgp_ovsdb_lookup_nexthop(nexthop_buf);
-            if (!pnexthop) {
-                pnexthop = ovsrec_nexthop_insert(txn);
-                ovsrec_nexthop_set_ip_address(pnexthop, nexthop_buf);
-                VLOG_DBG("Setting nexthop IP address %s, count %d\n",
-                         nexthop_buf, ii);
-                ovsrec_nexthop_set_type(pnexthop, safi_str);
-            }
+            pnexthop = ovsrec_nexthop_insert(txn);
+            ovsrec_nexthop_set_ip_address(pnexthop, nexthop_buf);
+            VLOG_DBG("Setting nexthop IP address %s, count %d\n",
+                      nexthop_buf, ii);
+            ovsrec_nexthop_set_type(pnexthop, safi_str);
             selected = 1;
             ovsrec_nexthop_set_selected(pnexthop, &selected, 1);
             nexthop_list[ii] = (struct ovsrec_nexthop*) pnexthop;
@@ -588,13 +582,10 @@ bgp_ovsdb_set_local_rib_nexthop(struct ovsdb_idl_txn *txn,
     nexthop_list = xmalloc(sizeof *rib->bgp_nexthops * nexthop_num);
 
     /* Set first nexthop */
-    pnexthop = bgp_ovsdb_lookup_local_nexthop(nexthop_buf);
-    if (!pnexthop) {
-        pnexthop = ovsrec_bgp_nexthop_insert(txn);
-        ovsrec_bgp_nexthop_set_ip_address(pnexthop, nexthop_buf);
-        VLOG_DBG("Setting local nexthop IP address %s\n", nexthop_buf);
-        ovsrec_bgp_nexthop_set_type(pnexthop, safi_str);
-    }
+    pnexthop = ovsrec_bgp_nexthop_insert(txn);
+    ovsrec_bgp_nexthop_set_ip_address(pnexthop, nexthop_buf);
+    VLOG_DBG("Setting local nexthop IP address %s\n", nexthop_buf);
+    ovsrec_bgp_nexthop_set_type(pnexthop, safi_str);
     nexthop_list[0] = (struct ovsrec_bgp_nexthop *) pnexthop;
     nexthop_list[0]->ip_address = xstrdup(nexthop_buf);
     int ii = 1;
@@ -623,14 +614,11 @@ bgp_ovsdb_set_local_rib_nexthop(struct ovsdb_idl_txn *txn,
                 }
                 inet_ntop(p->family, nexthop6, nexthop_buf, sizeof(nexthop_buf));
             }
-            pnexthop = bgp_ovsdb_lookup_local_nexthop(nexthop_buf);
-            if (!pnexthop) {
-                pnexthop = ovsrec_bgp_nexthop_insert(txn);
-                ovsrec_bgp_nexthop_set_ip_address(pnexthop, nexthop_buf);
-                VLOG_DBG("Setting local nexthop IP address %s, count %d\n",
-                         nexthop_buf, ii);
-                ovsrec_bgp_nexthop_set_type(pnexthop, safi_str);
-            }
+            pnexthop = ovsrec_bgp_nexthop_insert(txn);
+            ovsrec_bgp_nexthop_set_ip_address(pnexthop, nexthop_buf);
+            VLOG_DBG("Setting local nexthop IP address %s, count %d\n",
+                      nexthop_buf, ii);
+            ovsrec_bgp_nexthop_set_type(pnexthop, safi_str);
             nexthop_list[ii] = (struct ovsrec_bgp_nexthop *) pnexthop;
             nexthop_list[ii]->ip_address = xstrdup(nexthop_buf);
             ii++;

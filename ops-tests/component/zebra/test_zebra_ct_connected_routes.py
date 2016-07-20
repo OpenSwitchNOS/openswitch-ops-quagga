@@ -20,7 +20,7 @@
 # having four links between them.
 
 
-from helpers_routing import (
+from zebra_routing import (
     verify_show_ip_route,
     verify_show_ipv6_route,
     verify_show_rib

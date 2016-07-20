@@ -18,7 +18,7 @@
 # 02111-1307, USA.
 
 
-from helpers_routing import (
+from zebra_routing import (
     verify_show_ip_route,
     verify_show_rib
 )

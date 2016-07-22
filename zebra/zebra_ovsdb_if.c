@@ -2558,10 +2558,6 @@ zebra_add_or_update_cached_l3_ports_hash (const struct ovsrec_port* ovsrec_port)
         {
           VLOG_DBG("Added L3 port to the hash successfully");
 
-          log_event("ZEBRA_PORT", EV_KV("port_msg", "%s",
-                    "L3 port added"),
-                    EV_KV("port_name", "%s", ovsrec_port->name));
-
           /*
            * Set a flag that some port configuration changed
            */
@@ -2581,10 +2577,6 @@ zebra_add_or_update_cached_l3_ports_hash (const struct ovsrec_port* ovsrec_port)
         {
           VLOG_DBG("Port changed from L3 to L2. Deleting the port %s"
                    " from the hash\n", ovsrec_port->name);
-
-          log_event("ZEBRA_PORT", EV_KV("port_msg", "%s",
-                    "changed L3 to L2"),
-                    EV_KV("port_name", "%s", ovsrec_port->name));
 
           /*
            * If the OVSDB port is L2 now, then update the L3 port with the
@@ -2609,10 +2601,6 @@ zebra_add_or_update_cached_l3_ports_hash (const struct ovsrec_port* ovsrec_port)
           VLOG_DBG("Port IPv4/IPv6 changed. Update the port %s IP address in "
                    " the hash and add a node in the temp hash\n",
                    ovsrec_port->name);
-
-          log_event("ZEBRA_PORT", EV_KV("port_msg", "%s",
-                    "Port IPv4/v6 Updated"),
-                    EV_KV("port_name", "%s", ovsrec_port->name));
 
           /*
            * Update the L3 port action with new IP/IPv6 address.
@@ -3280,12 +3268,6 @@ zebra_update_port_active_state (const struct ovsrec_interface *interface)
                l3_port->port_name,
                l3_port->if_active ? "Active" : "Inactive",
                new_active_state ? "Active" : "Inactive");
-
-      log_event("ZEBRA_PORT_STATE",
-                EV_KV("port_name", "%s", l3_port->port_name),
-                EV_KV("port_old_state", "%s",l3_port->if_active ?
-                "Active" : "Inactive"), EV_KV("port_new_state", "%s",
-                new_active_state ? "Active" : "Inactive"));
 
       /*
        * Update the selected bit on all the connected routes corresponding
@@ -4434,8 +4416,6 @@ zebra_handle_static_route_change (const struct ovsrec_route *route)
             {
               ifname = nexthop->ports[0]->name;
               VLOG_DBG("Rib nexthop ifname=%s", ifname);
-              log_event("ZEBRA_ROUTE_ADD_NEXTHOP_EVENTS", EV_KV("prefix", "%s",
-                        route->prefix), EV_KV("nexthop", "%s", ifname));
               if (ipv6_addr_type)
                 type = STATIC_IPV6_IFNAME;
             }
@@ -4449,9 +4429,6 @@ zebra_handle_static_route_change (const struct ovsrec_route *route)
               if (ret == 1)
                 {
                   VLOG_DBG("Rib nexthop ip=%s", nexthop->ip_address);
-                  log_event("ZEBRA_ROUTE_ADD_NEXTHOP_EVENTS", EV_KV("prefix", "%s",
-                            route->prefix), EV_KV("nexthop", "%s",
-                            nexthop->ip_address));
                   type = STATIC_IPV6_GATEWAY;
                 }
               else
@@ -4708,16 +4685,12 @@ zebra_handle_route_change (const struct ovsrec_route *route)
     {
     case ZEBRA_ROUTE_CONNECT:
       VLOG_DBG("Processing a connected route for prefix %s\n",route->prefix);
-      log_event("ZEBRA_ROUTE_ADD", EV_KV("prefix", "%s", route->prefix),
-                EV_KV("protocol", "%s", route->from));
       /* This is a directly connected route */
       zebra_handle_connected_route_change(route);
       break;
 
     case ZEBRA_ROUTE_STATIC:
       VLOG_DBG("Adding a static route for prefix %s\n",route->prefix);
-      log_event("ZEBRA_ROUTE_ADD", EV_KV("prefix", "%s", route->prefix),
-                EV_KV("protocol", "%s", route->from));
       /* This is a static route */
       zebra_handle_static_route_change(route);
       break;
@@ -4725,8 +4698,6 @@ zebra_handle_route_change (const struct ovsrec_route *route)
     case ZEBRA_ROUTE_BGP:
       VLOG_DBG("Adding a Protocol route for prefix %s protocol %s\n",
                 route->prefix, route->from);
-      log_event("ZEBRA_ROUTE_ADD", EV_KV("prefix", "%s", route->prefix),
-                EV_KV("protocol", "%s",route->from));
       /* This is a protocol route */
       zebra_handle_proto_route_change(route, from_protocol);
       break;
@@ -4734,8 +4705,6 @@ zebra_handle_route_change (const struct ovsrec_route *route)
    case ZEBRA_ROUTE_OSPF:
       VLOG_DBG("Adding a Protocol route for prefix %s protocol %s\n",
                 route->prefix, route->from);
-      log_event("ZEBRA_ROUTE_ADD", EV_KV("prefix", "%s", route->prefix),
-                EV_KV("protocol", "%s",route->from));
       /* This is a protocol route */
       zebra_handle_proto_route_change(route, from_protocol);
 
@@ -5676,7 +5645,6 @@ zebra_route_delete_nexthops (struct ovsrec_route *route, bool *nexthop_decision,
   if (n == 0)
     {
       VLOG_DBG("Need to delete the OVSDB route for prefix %s", route->prefix);
-      log_event("ZEBRA_ROUTE_DEL", EV_KV("prefix", "%s",route->prefix));
       ovsrec_route_delete(route);
       zebra_txn_updates = true;
     }
@@ -5760,8 +5728,6 @@ void zebra_delete_route_nexthop_addr_from_db (struct rib *route,
             {
               VLOG_DBG("Found the nexthop match");
               found_nexthop_addr[next_hop_index] = true;
-              log_event("ZEBRA_NEXTHOP_STATE", EV_KV("nexthop_port", "%s",
-                        nexthop_str), EV_KV("msg", "%s", "to be deleted"));
             }
         }
 
@@ -5863,8 +5829,6 @@ void zebra_delete_route_nexthop_port_from_db (struct rib *route,
 
               if (strcmp(nh_row->ports[0]->name, port_name) == 0) {
                   found_port[next_hop_index] = true;
-                  log_event("ZEBRA_NEXTHOP_STATE", EV_KV("nexthop_port", "%s",
-                            port_name), EV_KV("msg", "%s", "to be deleted"));
               }
             }
         }
@@ -5909,9 +5873,6 @@ zebra_ovs_update_selected_route (const struct ovsrec_route *ovs_route,
           return 0;
         }
 
-      log_event("ZEBRA_ROUTE", EV_KV("routemsg", "%s",
-                *selected ? "Route selected":"Route unselected"),
-                EV_KV("prefix", "%s", ovs_route->prefix));
       /*
        * Update the selected bit, and mark it to commit into DB.
        */
@@ -6183,10 +6144,6 @@ void zebra_update_selected_nh (struct route_node *rn, struct rib *route,
               VLOG_DBG("Changing the next-hop selected flag from %s to %s",
                        !cand_nh_row->selected ? "true" : "false",
                        is_selected ? "true" : "false");
-              log_event("ZEBRA_NEXTHOP_STATE_CHANGE", EV_KV("nexthop_port", "%s",
-                        cand_nh_row->ip_address), EV_KV("old_state", "%s",
-                        !cand_nh_row->selected ? "true" : "false"),
-                        EV_KV("new_state","%s", is_selected ? "true" : "false"));
               ovsrec_nexthop_set_selected(cand_nh_row, &is_selected, 1);
               zebra_txn_updates = true;
             }
@@ -6202,10 +6159,6 @@ void zebra_update_selected_nh (struct route_node *rn, struct rib *route,
                   VLOG_DBG("Changing the next-hop selected flag from %s to %s",
                            cand_nh_row->selected[0] ? "true" : "false",
                            is_selected ? "true" : "false");
-                  log_event("ZEBRA_NEXTHOP_STATE_CHANGE", EV_KV("nexthop_port", "%s",
-                            cand_nh_row->ip_address), EV_KV("old_state", "%s",
-                            cand_nh_row->selected[0] ? "true" : "false"),
-                            EV_KV("new_state","%s", is_selected ? "true" : "false"));
                   ovsrec_nexthop_set_selected(cand_nh_row, &is_selected, 1);
                   zebra_txn_updates = true;
                 }
@@ -6587,10 +6540,6 @@ zebra_add_route (bool is_ipv6, struct prefix *p, int type, safi_t safi,
           VLOG_DBG("Processing %d-next-hop %s", count,
                    idl_nexthop->ports[0]->name);
 
-          log_event("ZEBRA_ROUTE_ADD_NEXTHOP_EVENTS", EV_KV("prefix", "%s",
-                   route->prefix),EV_KV("nexthop", "%s",
-                   idl_nexthop->ports[0]->name));
-
           nexthop_ifname_add(rib, idl_nexthop->ports[0]->name);
         }
       else
@@ -6614,19 +6563,12 @@ zebra_add_route (bool is_ipv6, struct prefix *p, int type, safi_t safi,
                 {
                   VLOG_DBG("Processing %d-next-hop ipv6 %s",
                            count, idl_nexthop->ip_address);
-                  log_event("ZEBRA_ROUTE_ADD_NEXTHOP_EVENTS", EV_KV("prefix", "%s",
-                            route->prefix),EV_KV("nexthop", "%s",
-                            idl_nexthop->ip_address));
-                  nexthop_ipv6_add(rib, &ipv6_dest_addr);
                 }
             }
           else
             {
               VLOG_DBG("Processing ipv4 %d-next-hop ipv4 %s",
                        count, idl_nexthop->ip_address);
-              log_event("ZEBRA_ROUTE_ADD_NEXTHOP_EVENTS", EV_KV("prefix", "%s",
-                        route->prefix),EV_KV("nexthop", "%s",
-                        idl_nexthop->ip_address));
               nexthop_ipv4_add(rib, &ipv4_dest_addr, NULL);
             }
         }

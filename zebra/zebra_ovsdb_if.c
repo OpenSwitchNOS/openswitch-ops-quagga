@@ -48,6 +48,7 @@
 #include "hash.h"
 #include "jhash.h"
 #include "eventlog.h"
+#include "ovs/hash.h"
 
 #include "openswitch-idl.h"
 
@@ -92,8 +93,12 @@ bool zebra_first_run_after_restart = true;
  */
 bool zebra_cleanup_kernel_after_restart = false;
 
+/* TODO: Move the hash's to some per vrf data-structure */
 /* Hash for ovsdb route.*/
 static struct hash *zebra_route_hash;
+
+/* Hash for Neighbors to updated when route/nexthop is added/deleted. */
+static struct hmap zebra_neighbor_hash;
 
 /* List of delete route */
 struct list *zebra_route_del_list;
@@ -102,6 +107,10 @@ static int zebra_ovspoll_enqueue (zebra_ovsdb_t *zovs_g);
 static int zovs_read_cb (struct thread *thread);
 int zebra_add_route (bool is_ipv6, struct prefix *p, int type, safi_t safi,
                      const struct ovsrec_route *route);
+static void zebra_syncup_neighbors(void);
+static int zebra_update_neighbor(const char *route_prefix,
+                                 const char *nh_ip_address,
+                                 void *data, bool is_selected);
 #ifdef HAVE_IPV6
 extern int
 rib_add_ipv6_multipath (struct prefix_ipv6 *p, struct rib *rib, safi_t safi);
@@ -3690,10 +3699,24 @@ ovsdb_init (const char *db_path)
   ovsdb_idl_add_column(idl, &ovsrec_vrf_col_active_router_id);
   ovsdb_idl_omit_alert(idl, &ovsrec_vrf_col_active_router_id);
 
+  /* Register for Neighbor table to trigger arp resolution for new nexthops */
+  ovsdb_idl_add_table(idl, &ovsrec_table_neighbor);
+  ovsdb_idl_add_column(idl, &ovsrec_neighbor_col_vrf);
+  ovsdb_idl_add_column(idl, &ovsrec_neighbor_col_ip_address);
+  ovsdb_idl_add_column(idl, &ovsrec_neighbor_col_address_family);
+  ovsdb_idl_add_column(idl, &ovsrec_neighbor_col_port);
+  ovsdb_idl_add_column(idl, &ovsrec_neighbor_col_mac);
+  ovsdb_idl_add_column(idl, &ovsrec_neighbor_col_state);
+  ovsdb_idl_add_column(idl, &ovsrec_neighbor_col_in_use_by_routes);
+  ovsdb_idl_omit_alert(idl, &ovsrec_neighbor_col_in_use_by_routes);
+
   /*
    * Intialize the local L3 port hash.
    */
   zebra_init_cached_l3_ports_hash();
+
+  /* Init Neighbor hash */
+  hmap_init(&zebra_neighbor_hash);
 
 }
 
@@ -4086,12 +4109,17 @@ zebra_route_del_process (void)
   struct zebra_route_del_data *rdata;
   rib_table_info_t *info;
   struct prefix *pprefix;
+  char prefix_str[ZEBRA_MAX_STRING_LEN];
+  char nexthop_str[ZEBRA_MAX_STRING_LEN];
 
   /* Loop through the local cache of deleted routes */
   for (ALL_LIST_ELEMENTS (zebra_route_del_list, node, nnode, rdata))
     {
       if (rdata->rnode && rdata->rib && rdata->nexthop)
         {
+          /* Create the txn if not created, for neighbor updates */
+          zebra_create_txn();
+
           info = rib_table_info (rdata->rnode->table);
 	  /* Ignore broadcast and multicast routes */
           if (info->safi != SAFI_UNICAST)
@@ -4119,6 +4147,18 @@ zebra_route_del_process (void)
                                 0,                             /*vrf_id*/
                                 info->safi                     /*safi*/
                                 );
+
+              /* Remove the route ref to the neighbor */
+              if (rdata->nexthop->type == NEXTHOP_TYPE_IPV4)
+                {
+                  memset(prefix_str, 0, sizeof(prefix_str));
+                  memset(nexthop_str, 0, sizeof(nexthop_str));
+                  prefix2str(pprefix, prefix_str, sizeof(prefix_str));
+                  inet_ntop(AF_INET, &rdata->nexthop->gate.ipv4,
+                            nexthop_str, sizeof(nexthop_str));
+                  zebra_update_neighbor(prefix_str, nexthop_str,
+                                        (void *)rdata->rib, false);
+                }
 #ifdef HAVE_IPV6
 	    }
 	  else if (pprefix->family == AF_INET6)
@@ -4143,10 +4183,28 @@ zebra_route_del_process (void)
                                 0,                            /*vrf_id*/
                                 info->safi                    /*safi*/
                                 );
+
+              /* Remove the route ref to the neighbor */
+              if (rdata->nexthop->type == NEXTHOP_TYPE_IPV6)
+                {
+                  memset(prefix_str, 0, sizeof(prefix_str));
+                  memset(nexthop_str, 0, sizeof(nexthop_str));
+                  prefix2str(pprefix, prefix_str, sizeof(prefix_str));
+                  inet_ntop(AF_INET6, &rdata->nexthop->gate.ipv6,
+                            nexthop_str, sizeof(nexthop_str));
+                  zebra_update_neighbor(prefix_str, nexthop_str,
+                                        (void *)rdata->rib, false);
+                }
 #endif
 	    }
+
+          /* Submit neighbor updates if batched size reached */
+          zebra_finish_txn(false);
 	}
     }
+
+    /* Submit remaining neighbor updates apart from the above batched ones */
+    zebra_finish_txn(true);
 }
 
 /* Free hash and link list memory */
@@ -5426,6 +5484,7 @@ zebra_reconfigure (struct ovsdb_idl *idl)
         }
 
       zebra_pre_restart_setup();
+      zebra_syncup_neighbors();
       zebra_handle_port_add_delete_changes();
       zebra_handle_interface_admin_state_changes();
       zebra_apply_route_changes();
@@ -5435,6 +5494,7 @@ zebra_reconfigure (struct ovsdb_idl *idl)
     {
       VLOG_DBG("Second run for the zebra config changes");
 
+      zebra_syncup_neighbors();
       zebra_apply_route_changes();
       zebra_handle_port_add_delete_changes();
       zebra_handle_interface_admin_state_changes();
@@ -6172,6 +6232,15 @@ void zebra_update_selected_nh (struct route_node *rn, struct rib *route,
             }
         }
 
+      /*
+       * Check whether this nexthop is there in Neighbor table,
+       * If this nexthop is selected then if entry not there in Neighbor table,
+       * add entry and mark it for resolution. And if exists mark it for
+       * resolution/reprobing.
+       * If this nexthop is unselected, then if entry exists in Neighbor table,
+       * mark the Neighbor entry for no resolution/probe.
+       */
+
       if (cand_nh_row)
         {
           if (!(cand_nh_row->selected))
@@ -6189,6 +6258,15 @@ void zebra_update_selected_nh (struct route_node *rn, struct rib *route,
                         EV_KV("new_state","%s", is_selected ? "true" : "false"));
               ovsrec_nexthop_set_selected(cand_nh_row, &is_selected, 1);
               zebra_txn_updates = true;
+
+               /* Mark for arp resolution only if NH is ip */
+               if ( (cand_nh_row->ip_address) )
+                 {
+                   zebra_update_neighbor(route_row->prefix,
+                                         cand_nh_row->ip_address,
+                                         (void *)route_row,
+                                         is_selected);
+                 }
             }
           else
             {
@@ -6208,6 +6286,15 @@ void zebra_update_selected_nh (struct route_node *rn, struct rib *route,
                             EV_KV("new_state","%s", is_selected ? "true" : "false"));
                   ovsrec_nexthop_set_selected(cand_nh_row, &is_selected, 1);
                   zebra_txn_updates = true;
+
+                  /* Mark for arp resolution only if NH is ip */
+                  if ( (cand_nh_row->ip_address) )
+                    {
+                      zebra_update_neighbor(route_row->prefix,
+                                            cand_nh_row->ip_address,
+                                            (void *)route_row,
+                                            is_selected);
+                    }
                 }
             }
 
@@ -6662,9 +6749,9 @@ zebra_add_route (bool is_ipv6, struct prefix *p, int type, safi_t safi,
 }
 
 /*
-** Function to create transaction for submitting rib updates to DB.
-** Create only if not created already by main thread.
-*/
+ * Function to create transaction for submitting rib updates to DB.
+ * Create only if not created already by main thread.
+ */
 int
 zebra_create_txn (void)
 {
@@ -6673,7 +6760,7 @@ zebra_create_txn (void)
       zebra_txn = ovsdb_idl_txn_create(idl);
       if (!zebra_txn)
         {
-          VLOG_ERR("%s: Transaction creation failed" , __func__);
+          VLOG_ERR("Transaction creation failed");
           return 1;
         }
       else
@@ -6687,9 +6774,9 @@ zebra_create_txn (void)
 }
 
 /*
-** Function to commit the idl transaction if there are any updates to be
-** submitted to DB.
-*/
+ * Function to commit the idl transaction if there are any updates to be
+ * submitted to DB.
+ */
 int
 zebra_finish_txn (bool if_last_batch)
 {
@@ -6754,4 +6841,390 @@ zebra_finish_txn (bool if_last_batch)
   zebra_txn = NULL;
 
   return(0);
+}
+
+/* Neighbor table functions */
+/*
+ * Function to find neighbor in local hash
+ */
+struct neighbor*
+neighbor_hash_lookup(const char *ip_address)
+{
+  struct neighbor *neighbor;
+
+  if (!ip_address)
+    {
+      VLOG_DBG("NULL neighbor ip");
+      return NULL;
+    }
+
+  HMAP_FOR_EACH_WITH_HASH (neighbor, node, hash_string(ip_address, 0),
+                             &zebra_neighbor_hash)
+    {
+      if (!strcmp(neighbor->ip_address, ip_address))
+        {
+          return neighbor;
+        }
+    }
+  return NULL;
+}
+
+/*
+ * Function to create new neighbor hash entry
+ */
+static struct neighbor*
+neighbor_create(const struct ovsrec_neighbor *idl_neighbor)
+{
+  struct neighbor *neighbor;
+
+  if (!idl_neighbor)
+    {
+      VLOG_DBG("NULL neighbor idl row");
+      return NULL;
+    }
+
+  VLOG_DBG("In neighbor_create for neighbor %s",
+           idl_neighbor->ip_address);
+  ovs_assert(!neighbor_hash_lookup(idl_neighbor->ip_address));
+
+  neighbor = xzalloc(sizeof *neighbor);
+  neighbor->ip_address = xstrdup(idl_neighbor->ip_address);
+
+  if ((idl_neighbor->address_family) &&
+        (strcmp(idl_neighbor->address_family,
+                             OVSREC_NEIGHBOR_ADDRESS_FAMILY_IPV6)) == 0)
+    {
+      neighbor->is_ipv6_addr = true;
+    }
+
+  /* Init the routes hash referring this neighbor */
+  shash_init(&neighbor->routes_shash);
+
+  neighbor->in_use_by_routes = true;
+
+  /* Store uuid for refering later instead of direct pointer to idl row */
+  memcpy(&neighbor->idl_row_uuid,
+           &OVSREC_IDL_GET_TABLE_ROW_UUID(idl_neighbor), sizeof(struct uuid));
+
+  /* Add to hash of neighbors */
+  hmap_insert(&zebra_neighbor_hash, &neighbor->node,
+                hash_string(neighbor->ip_address, 0));
+
+  return neighbor;
+}
+
+/*
+ * Function to cleanup neighbor from hash.
+ */
+static void
+neighbor_delete(struct neighbor *neighbor)
+{
+  if (neighbor)
+    {
+      VLOG_DBG("In neighbor_hash_delete for neighbor %s", neighbor->ip_address);
+      hmap_remove(&zebra_neighbor_hash, &neighbor->node);
+
+      free(neighbor->ip_address);
+
+      /* Free the routes shash */
+      shash_clear(&neighbor->routes_shash);
+
+      free(neighbor);
+    }
+}
+
+/*
+ * Function to handle modifications to neighbor entry
+ * For now just update uuid, if it got changed when new row was added.
+ */
+static void
+neighbor_modify(struct neighbor *neighbor,
+                const struct ovsrec_neighbor *idl_neighbor)
+{
+  VLOG_DBG("In neighbor_modify for neighbor %s",
+              idl_neighbor->ip_address);
+
+  /* Update uuid, in case it got changed after adding new row */
+  memcpy(&neighbor->idl_row_uuid,
+           &OVSREC_IDL_GET_TABLE_ROW_UUID(idl_neighbor), sizeof(struct uuid));
+
+}
+
+/*
+ * Function to syncup addition/deletion/modifications to neighbor table.
+ */
+static void
+zebra_syncup_neighbors(void)
+{
+  struct neighbor *neighbor, *next;
+  struct shash current_idl_neigbors;
+  const struct ovsrec_neighbor *idl_neighbor;
+
+  idl_neighbor = ovsrec_neighbor_first(idl);
+  if (idl_neighbor == NULL)
+    {
+      VLOG_DBG("No rows in Neighbor table, delete if any in our hash");
+
+      /* May be all neighbors got delete, cleanup if any in hash */
+      HMAP_FOR_EACH_SAFE (neighbor, next, node, &zebra_neighbor_hash)
+        {
+          if (neighbor)
+            {
+              neighbor_delete(neighbor);
+            }
+        }
+        return;
+    }
+
+  if ( (!OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED(idl_neighbor, idl_seqno)) &&
+       (!OVSREC_IDL_ANY_TABLE_ROWS_DELETED(idl_neighbor, idl_seqno))  &&
+       (!OVSREC_IDL_ANY_TABLE_ROWS_INSERTED(idl_neighbor, idl_seqno)) )
+    {
+      VLOG_DBG("No modification in Neighbor table");
+      return;
+    }
+
+  /* Collect all neighbors */
+  shash_init(&current_idl_neigbors);
+  OVSREC_NEIGHBOR_FOR_EACH(idl_neighbor, idl)
+    {
+      /* add neighbors to temp shash */
+      if (!shash_add_once(&current_idl_neigbors, idl_neighbor->ip_address,
+                                idl_neighbor))
+        {
+          VLOG_DBG("neighbor %s specified twice", idl_neighbor->ip_address);
+        }
+    }
+
+  /* Delete the neighbors' that are deleted from the db */
+  VLOG_DBG("Deleting the neighbors which are no more in idl");
+  HMAP_FOR_EACH_SAFE(neighbor, next, node, &zebra_neighbor_hash)
+    {
+      idl_neighbor = shash_find_data(&current_idl_neigbors,
+                                     neighbor->ip_address);
+      if (!idl_neighbor)
+        {
+          neighbor_delete(neighbor);
+        }
+    }
+
+  /* Add new neighbors. */
+  VLOG_DBG("Adding newly added idl neighbors");
+  OVSREC_NEIGHBOR_FOR_EACH(idl_neighbor, idl)
+    {
+      neighbor = neighbor_hash_lookup(idl_neighbor->ip_address);
+      if (!neighbor)
+        {
+          neighbor_create(idl_neighbor);
+        }
+    }
+
+  /* Look for any modification of neighbors, for now just uuid */
+  VLOG_DBG("Looking for any modifications in neighbors");
+  idl_neighbor = ovsrec_neighbor_first(idl);
+  if (OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED(idl_neighbor, idl_seqno))
+    {
+      VLOG_DBG("Some modificaions in Neighbor table");
+      OVSREC_NEIGHBOR_FOR_EACH(idl_neighbor, idl)
+        {
+          if ((OVSREC_IDL_IS_ROW_MODIFIED(idl_neighbor, idl_seqno)))
+            {
+              VLOG_DBG("Some modifications in Neigbor %s",
+                        idl_neighbor->ip_address);
+
+              neighbor = neighbor_hash_lookup(idl_neighbor->ip_address);
+              if (neighbor)
+                {
+                  neighbor_modify(neighbor, idl_neighbor);
+                }
+            }
+        }
+    }
+
+  shash_destroy(&current_idl_neigbors);
+
+}
+
+/*
+ * Update the number of routes referring given neighbor
+ */
+static int zebra_update_neighbor_route_ref(struct neighbor *neighbor,
+                        const struct ovsrec_neighbor *neighbor_idl_row,
+                        const char *route_prefix, void *route_data,
+                        bool add_ref)
+{
+  bool in_use = false;
+
+  VLOG_DBG("Updating route ref for neighbor %s and route %s and ref_flag %s",
+           neighbor->ip_address, route_prefix, add_ref ? "ADD" : "REMOVE");
+
+  if (add_ref)
+    {
+      if (!shash_add_once(&neighbor->routes_shash, route_prefix,
+                          route_data))
+        {
+          VLOG_DBG("Route %s already added to neighbo->routes shash",
+                   route_prefix);
+        }
+      else
+        {
+          VLOG_DBG("Added route %s to neighbor->routes shash",
+                   route_prefix);
+        }
+    }
+  else
+    {
+      VLOG_DBG("Removing route %s from neighbor->routes shash",
+                route_prefix);
+      if (shash_find_and_delete(&neighbor->routes_shash, route_prefix))
+        {
+          if (shash_count(&neighbor->routes_shash) == 0)
+            {
+              /* Update neighbor only if not deleted already */
+              if (neighbor_idl_row)
+                {
+                  ovsrec_neighbor_set_in_use_by_routes(neighbor_idl_row,
+                                                      &in_use, 1);
+
+                  VLOG_DBG("Disabling in_use_by_routes for neighbor %s",
+                           neighbor_idl_row->ip_address);
+                  zebra_txn_updates = true;
+                }
+            }
+        }
+
+    }
+
+    VLOG_DBG("neighbor %s routes shash count=%d", neighbor->ip_address,
+             shash_count(&neighbor->routes_shash));
+}
+
+/*
+ * Check whether this nexthop is there in Neighbor table,
+ * If this nexthop is selected then if entry not there in Neighbor table,
+ * add entry and mark it for resolution. And if exists mark it for
+ * resolution/reprobing.
+ * If this nexthop is unselected, then if entry exists in Neighbor table,
+ * mark the Neighbor entry for no resolution/probe.
+ */
+static int zebra_update_neighbor(const char *route_prefix,
+                                 const char *nexthop_ip,
+                                 void *route_data,
+                                 bool is_selected)
+{
+  struct neighbor *neighbor;
+  const struct ovsrec_neighbor *neighbor_idl_row;
+  const struct ovsrec_neighbor *new_neighbor;
+  const struct ovsrec_route *route_row;
+
+
+  /* Check if this nexthop is in local neighbor hash */
+  neighbor = neighbor_hash_lookup(nexthop_ip);
+  if (neighbor)
+    {
+      /* If neighbor exists, and NH is selected mark for arp resolution */
+      VLOG_DBG("In zebra_update_neighbor for neighbor %s",nexthop_ip);
+
+      neighbor_idl_row = ovsrec_neighbor_get_for_uuid(idl,
+                          (const struct uuid*)&neighbor->idl_row_uuid);
+      if (!neighbor_idl_row)
+       {
+         VLOG_DBG("Could not get neighbor row from uuid");
+
+         /* This may be case where shut was done, and neighbor entry got
+         ** deleted, so if this is was un-selecting that NH, reduce the
+         ** route reference and if it becomes zero dont update neighbor
+         ** as the row will not be there in DB */
+         zebra_update_neighbor_route_ref(neighbor, NULL, route_prefix,
+                                         route_data, false);
+
+         return 1;
+       }
+
+       if (is_selected)
+        {
+          if ( (neighbor_idl_row->in_use_by_routes) &&
+               (*(neighbor_idl_row->in_use_by_routes) == true) )
+            {
+              VLOG_DBG("Neighbor %s already marked for arp_resolution",
+                        neighbor->ip_address);
+            }
+          else
+            {
+              VLOG_DBG("Marking Neighbor %s for arp_resolution",
+                        neighbor->ip_address);
+              ovsrec_neighbor_set_in_use_by_routes(neighbor_idl_row,
+                                              &is_selected, 1);
+
+              zebra_txn_updates = true;
+            }
+
+            /* Add this route ref to this neighbor */
+          zebra_update_neighbor_route_ref(neighbor, neighbor_idl_row,
+                                          route_prefix,
+                                          route_data, true);
+        }
+       else
+        {
+          /* Remove route reference to this Neighbor entry.
+          ** And if last route, then mark in_use_by_route=false */
+          VLOG_DBG("NH un-selected update Neighbor %s route ref",
+                    neighbor->ip_address);
+
+          /* Remove this route ref to this neighbor */
+          zebra_update_neighbor_route_ref(neighbor, neighbor_idl_row,
+                                          route_prefix,
+                                          route_data, false);
+        }
+    }
+  else
+    {
+      /* If neighbor not in local hash, and NH is selected mark for arp
+      ** resolution */
+      route_row = (const struct ovsrec_route *)route_data;
+      if (is_selected)
+        {
+          /* Create Neighbor entry and mark for resolution */
+          char ipv6_dest_addr[sizeof(struct in6_addr)];
+          VLOG_DBG("Creating and Marking Neighbor %s for arp_resolution",
+                   nexthop_ip);
+
+          new_neighbor = ovsrec_neighbor_insert(zebra_txn);
+          if (new_neighbor)
+            {
+              ovsrec_neighbor_set_ip_address(new_neighbor, nexthop_ip);
+              ovsrec_neighbor_set_vrf(new_neighbor, route_row->vrf);
+              if (inet_pton(AF_INET6, nexthop_ip, ipv6_dest_addr) == 1)
+                {
+                  ovsrec_neighbor_set_address_family(new_neighbor,
+                                      OVSREC_NEIGHBOR_ADDRESS_FAMILY_IPV6);
+                }
+              else
+                {
+                  ovsrec_neighbor_set_address_family(new_neighbor,
+                                      OVSREC_NEIGHBOR_ADDRESS_FAMILY_IPV4);
+                }
+              ovsrec_neighbor_set_in_use_by_routes(new_neighbor,
+                                                   &is_selected, 1);
+              ovsrec_neighbor_set_state(new_neighbor,
+                                        OVSREC_NEIGHBOR_STATE_INCOMPLETE);
+              zebra_txn_updates = true;
+
+              /* Add to local hash and update the route ref to the neighbor */
+              neighbor = neighbor_create(new_neighbor);
+              zebra_update_neighbor_route_ref(neighbor, neighbor_idl_row,
+                                              route_prefix,
+                                              (void *)route_row, true);
+            }
+          else
+            {
+               VLOG_ERR("ovsrec_route_insert failed");
+            }
+        }
+      else
+        {
+          VLOG_DBG("No-op as NH %s un-selected and not in Neighbor hash",
+                   nexthop_ip);
+        }
+    }
 }

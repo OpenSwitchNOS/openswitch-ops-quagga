@@ -24,6 +24,8 @@
 
 #include "uuid.h"
 #include "shash.h"
+#include "hmap.h"
+#include "vswitch-idl.h"
 
 /*
  * Zebra route install and un-install codes
@@ -145,6 +147,20 @@ struct zebra_l3_port
   bool if_active;                        /* If the port is still active in
                                             event of shut/un-shut triggers
                                             on the resolving interfaces.*/
+};
+
+/* Local Neighbor struct to store in hash-map and handle add/modify/deletes */
+struct neighbor {
+    struct hmap_node node;               /* 'all_neighbors'. */
+    char *ip_address;                    /* IP */
+    char *mac;                           /* MAC */
+    const struct ovsrec_neighbor *cfg;   /* IDL */
+    struct uuid idl_row_uuid;            /* IDL */
+    bool is_ipv6_addr;                   /* Quick flag for type */
+    /* struct vrf *vrf;                      Things needed for delete case */
+    char *port_name;
+    int route_ref;                       /* Routes ref this NH/Neighbor*/
+    struct shash routes_shash;
 };
 
 /* Setup zebra to connect with ovsdb and daemonize. This daemonize is used

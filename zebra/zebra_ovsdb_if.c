@@ -48,6 +48,7 @@
 #include "hash.h"
 #include "jhash.h"
 #include "eventlog.h"
+#include "ovs/hash.h"
 
 #include "openswitch-idl.h"
 
@@ -92,8 +93,12 @@ bool zebra_first_run_after_restart = true;
  */
 bool zebra_cleanup_kernel_after_restart = false;
 
+/* TODO: Move the hash's to some per vrf datas-structure */
 /* Hash for ovsdb route.*/
 static struct hash *zebra_route_hash;
+
+/* Hash for Neighbors to updated when route/nexthop is added/deleted. */
+static struct hmap zebra_neighbor_hash;
 
 /* List of delete route */
 struct list *zebra_route_del_list;
@@ -102,6 +107,10 @@ static int zebra_ovspoll_enqueue (zebra_ovsdb_t *zovs_g);
 static int zovs_read_cb (struct thread *thread);
 int zebra_add_route (bool is_ipv6, struct prefix *p, int type, safi_t safi,
                      const struct ovsrec_route *route);
+static void zebra_syncup_neighbors(void);
+static int zebra_update_neighbor(const struct ovsrec_route *ovs_route,
+                                 struct ovsrec_nexthop *nh_row,
+                                 bool is_selected);
 #ifdef HAVE_IPV6
 extern int
 rib_add_ipv6_multipath (struct prefix_ipv6 *p, struct rib *rib, safi_t safi);
@@ -3690,10 +3699,24 @@ ovsdb_init (const char *db_path)
   ovsdb_idl_add_column(idl, &ovsrec_vrf_col_active_router_id);
   ovsdb_idl_omit_alert(idl, &ovsrec_vrf_col_active_router_id);
 
+  /* Register for Neighbor table to trigger arp resolution for new nexthops */
+  ovsdb_idl_add_table(idl, &ovsrec_table_neighbor);
+  ovsdb_idl_add_column(idl, &ovsrec_neighbor_col_vrf);
+  ovsdb_idl_add_column(idl, &ovsrec_neighbor_col_ip_address);
+  ovsdb_idl_add_column(idl, &ovsrec_neighbor_col_address_family);
+  ovsdb_idl_add_column(idl, &ovsrec_neighbor_col_port);
+  ovsdb_idl_add_column(idl, &ovsrec_neighbor_col_mac);
+  ovsdb_idl_add_column(idl, &ovsrec_neighbor_col_state);
+  ovsdb_idl_add_column(idl, &ovsrec_neighbor_col_in_use_by_routes);
+  ovsdb_idl_omit_alert(idl, &ovsrec_neighbor_col_in_use_by_routes);
+
   /*
    * Intialize the local L3 port hash.
    */
   zebra_init_cached_l3_ports_hash();
+
+  /* Init Neighbor hash */
+   hmap_init(&zebra_neighbor_hash);
 
 }
 
@@ -5426,6 +5449,7 @@ zebra_reconfigure (struct ovsdb_idl *idl)
         }
 
       zebra_pre_restart_setup();
+      zebra_syncup_neighbors();
       zebra_handle_port_add_delete_changes();
       zebra_handle_interface_admin_state_changes();
       zebra_apply_route_changes();
@@ -5435,6 +5459,7 @@ zebra_reconfigure (struct ovsdb_idl *idl)
     {
       VLOG_DBG("Second run for the zebra config changes");
 
+      zebra_syncup_neighbors();
       zebra_apply_route_changes();
       zebra_handle_port_add_delete_changes();
       zebra_handle_interface_admin_state_changes();
@@ -6242,7 +6267,23 @@ void zebra_update_selected_nh (struct route_node *rn, struct rib *route,
                                                     ZEBRA_RT_UNINSTALL);
                 }
             }
+
+      /*
+      ** Check whether this nexthop is there in Neighbor table,
+      ** If this nexthop is selected then if entry not there in Neighbor table,
+      ** add entry and mark it for resolution. And if exists mark it for
+      ** resolution/reprobing.
+      ** If this nexthop is unselected, then if entry exists in Neighbor table,
+      ** mark the Neighbor entry for no resolution/probe.
+      */
+      /* TODO: Mark for arp resolution only if NH has ip */
+            if ( (cand_nh_row->ip_address) )
+            {
+              zebra_update_neighbor(route_row, cand_nh_row, is_selected);
+            }
+
         }
+
     }
   else
     {
@@ -6754,4 +6795,442 @@ zebra_finish_txn (bool if_last_batch)
   zebra_txn = NULL;
 
   return(0);
+}
+
+/* Neighbor table functions */
+/* Function to find neighbor in local hash */
+struct neighbor*
+neighbor_hash_lookup(const char *ip_address)
+{
+    struct neighbor *neighbor;
+
+    HMAP_FOR_EACH_WITH_HASH (neighbor, node, hash_string(ip_address, 0),
+                             &zebra_neighbor_hash) {
+        if (!strcmp(neighbor->ip_address, ip_address)) {
+            return neighbor;
+        }
+    }
+    return NULL;
+}
+
+/* Function to create new neighbor hash entry */
+static struct neighbor*
+neighbor_create(const struct ovsrec_neighbor *idl_neighbor)
+{
+    struct neighbor *neighbor;
+
+    VLOG_DBG("In neighbor_create for neighbor %s",
+              idl_neighbor->ip_address);
+    ovs_assert(!neighbor_hash_lookup(idl_neighbor->ip_address));
+
+    neighbor = xzalloc(sizeof *neighbor);
+    neighbor->ip_address = xstrdup(idl_neighbor->ip_address);
+    if (idl_neighbor->mac) {
+        neighbor->mac = xstrdup(idl_neighbor->mac);
+    }
+
+    if ((idl_neighbor->address_family) &&
+        (strcmp(idl_neighbor->address_family,
+                             OVSREC_NEIGHBOR_ADDRESS_FAMILY_IPV6)) == 0) {
+        neighbor->is_ipv6_addr = true;
+    }
+
+    if (idl_neighbor->port) {
+        neighbor->port_name = xstrdup(idl_neighbor->port->name);
+    }
+
+    shash_init(&neighbor->routes_shash);
+
+    //neighbor->cfg = idl_neighbor;
+    /* Store uuid for refering later instead of direct pointer to idl row */
+    memcpy(&neighbor->idl_row_uuid,
+           &OVSREC_IDL_GET_TABLE_ROW_UUID(idl_neighbor), sizeof(struct uuid));
+
+    //neighbor->vrf = vrf;
+
+    hmap_insert(&zebra_neighbor_hash, &neighbor->node,
+                hash_string(neighbor->ip_address, 0));
+
+    return neighbor;
+}
+
+/* Function to cleanup neighbor from hash, in case of any failures */
+static void
+neighbor_hash_delete(struct neighbor *neighbor)
+{
+    VLOG_DBG("In neighbor_hash_delete for neighbor %s", neighbor->ip_address);
+    if (neighbor) {
+        hmap_remove(&zebra_neighbor_hash, &neighbor->node);
+
+        free(neighbor->ip_address);
+
+        if (neighbor->port_name) {
+            free(neighbor->port_name);
+        }
+
+        if (neighbor->mac) {
+            free(neighbor->mac);
+        }
+
+        free(neighbor);
+    }
+}
+
+/* Function to delete neighbor in hash */
+static void
+neighbor_delete(struct neighbor *neighbor)
+{
+    VLOG_DBG("In neighbor_delete for neighbor %s", neighbor->ip_address);
+    if (neighbor) {
+        /* Delete from hash */
+        neighbor_hash_delete(neighbor);
+    }
+}
+
+/* Function to handle modifications to neighbor entry */
+static void
+neighbor_modify(struct neighbor *neighbor,
+                const struct ovsrec_neighbor *idl_neighbor)
+{
+    VLOG_DBG("In neighbor_modify for neighbor %s",
+              idl_neighbor->ip_address);
+
+    /* Update uuid, in case it got changed */
+    memcpy(&neighbor->idl_row_uuid,
+           &OVSREC_IDL_GET_TABLE_ROW_UUID(idl_neighbor), sizeof(struct uuid));
+
+    /* Update and add new one */
+    if (idl_neighbor->port) {
+        if ( !(neighbor->port_name) ) {
+            neighbor->port_name = xstrdup(idl_neighbor->port->name);
+        }
+
+        if ( (neighbor->port_name) &&
+           (strcmp(neighbor->port_name, idl_neighbor->port->name) != 0) ) {
+            free(neighbor->port_name);
+            neighbor->port_name = xstrdup(idl_neighbor->port->name);
+        }
+    }
+
+    if (idl_neighbor->mac) {
+        if ( !(neighbor->mac) ) {
+            neighbor->mac = xstrdup(idl_neighbor->mac);
+        }
+
+        if ( (neighbor->mac) &&
+           (strcmp(neighbor->mac, idl_neighbor->mac) != 0) ) {
+            free(neighbor->mac);
+            neighbor->mac = xstrdup(idl_neighbor->mac);
+        }
+    }
+
+} /* neighbor_modify */
+
+/* Function to delete all neighbors of an vrf, when that vrf is deleted */
+static void
+delete_all_neighbors(void)
+{
+    struct neighbor *neighbor, *next;
+
+    /* Delete all neighbors */
+    HMAP_FOR_EACH_SAFE (neighbor, next, node, &zebra_neighbor_hash) {
+        if (neighbor) {
+            neighbor_delete(neighbor);
+        }
+    }
+
+} /* delete_all_neighbors */
+
+/* Function to to delete the neighbors which are referencing the deleted port */
+static void
+delete_port_neighbors(const struct ovsrec_port *port)
+{
+    struct neighbor *neighbor, *next;
+
+    /* Delete the neighbors which are referencing the deleted vrf port */
+    HMAP_FOR_EACH_SAFE (neighbor, next, node, &zebra_neighbor_hash) {
+       if ( (neighbor) &&
+             (strcmp(neighbor->port_name, port->name) == 0) ) {
+            neighbor_delete(neighbor);
+        }
+    }
+
+} /* delete_port_neighbors */
+
+/*
+** Function to check for new neighbors and add them to local hash.
+*/
+static void
+zebra_add_neighbors(void)
+{
+    struct neighbor *neighbor;
+    const struct ovsrec_neighbor *idl_neighbor;
+
+    idl_neighbor = ovsrec_neighbor_first(idl);
+    if (idl_neighbor == NULL)
+    {
+        VLOG_DBG("No rows in Neighbor table");
+        return;
+    }
+
+    /* Add neighbors of this vrf */
+    OVSREC_NEIGHBOR_FOR_EACH(idl_neighbor, idl) {
+      /* if (strcmp(vrf->cfg->name, idl_neighbor->vrf->name) == 0 ) { */
+          neighbor = neighbor_hash_lookup(idl_neighbor->ip_address);
+          if (!neighbor) {
+               neighbor_create(idl_neighbor);
+           }
+      /* } */
+    }
+
+} /* add_neighbors */
+
+/*
+** Function to syncup addition/deletion/modifications to neighbor table.
+*/
+static void
+zebra_syncup_neighbors(void)
+{
+    struct neighbor *neighbor, *next;
+    struct shash current_idl_neigbors;
+    const struct ovsrec_neighbor *idl_neighbor;
+
+    idl_neighbor = ovsrec_neighbor_first(idl);
+    if (idl_neighbor == NULL)
+    {
+        VLOG_DBG("No rows in Neighbor table, delete if any in our hash");
+
+        /* May be all neighbors got delete, cleanup if any in hash */
+        HMAP_FOR_EACH_SAFE (neighbor, next, node, &zebra_neighbor_hash) {
+            if (neighbor) {
+                neighbor_delete(neighbor);
+            }
+       }
+
+        return;
+    }
+
+    if ( (!OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED(idl_neighbor, idl_seqno)) &&
+       (!OVSREC_IDL_ANY_TABLE_ROWS_DELETED(idl_neighbor, idl_seqno))  &&
+       (!OVSREC_IDL_ANY_TABLE_ROWS_INSERTED(idl_neighbor, idl_seqno)) )
+    {
+        VLOG_DBG("No modification in Neighbor table");
+        return;
+    }
+
+    /* Collect all neighbors of this vrf */
+    shash_init(&current_idl_neigbors);
+    OVSREC_NEIGHBOR_FOR_EACH(idl_neighbor, idl) {
+        static struct vlog_rate_limit rl = VLOG_RATE_LIMIT_INIT(1, 5);
+
+        /* add only neighbors of this vrf */
+        /* if (strcmp(vrf->cfg->name, idl_neighbor->vrf->name) == 0 ) { */
+            if (!shash_add_once(&current_idl_neigbors, idl_neighbor->ip_address,
+                                idl_neighbor)) {
+                VLOG_DBG("neighbor %s specified twice",
+                          idl_neighbor->ip_address);
+                VLOG_WARN_RL(&rl, "neighbor %s specified twice",
+                             idl_neighbor->ip_address);
+            }
+       /*  } */
+    }
+
+    /* Delete the neighbors' that are deleted from the db */
+    VLOG_DBG("Deleting which are no more in idl");
+    HMAP_FOR_EACH_SAFE(neighbor, next, node, &zebra_neighbor_hash) {
+        neighbor->cfg = shash_find_data(&current_idl_neigbors,
+                                        neighbor->ip_address);
+        if (!neighbor->cfg) {
+            neighbor_delete(neighbor);
+        }
+    }
+
+    /* Add new neighbors. */
+    VLOG_DBG("Adding newly added idl neighbors");
+    OVSREC_NEIGHBOR_FOR_EACH(idl_neighbor, idl) {
+        neighbor = neighbor_hash_lookup(idl_neighbor->ip_address);
+        if (!neighbor) {
+            neighbor_create(idl_neighbor);
+        }
+    }
+
+    /* Look for any modification of mac/port of this vrf neighbors */
+    VLOG_DBG("Looking for any modified neighbors, mac, etc");
+    idl_neighbor = ovsrec_neighbor_first(idl);
+    if (OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED(idl_neighbor, idl_seqno)) {
+        VLOG_DBG("Some modificaions in Neighbor table");
+        OVSREC_NEIGHBOR_FOR_EACH(idl_neighbor, idl) {
+           if ( (OVSREC_IDL_IS_ROW_MODIFIED(idl_neighbor, idl_seqno)) &&
+               !(OVSREC_IDL_IS_ROW_INSERTED(idl_neighbor, idl_seqno)) ) {
+
+                VLOG_DBG("Some modifications in Neigbor %s",
+                                      idl_neighbor->ip_address);
+
+                neighbor = neighbor_hash_lookup(idl_neighbor->ip_address);
+                if (neighbor) {
+                    neighbor_modify(neighbor, idl_neighbor);
+                }
+            }
+        }
+    }
+
+    shash_destroy(&current_idl_neigbors);
+
+} /* add_reconfigure_neighbors */
+
+
+static int zebra_update_neighbor_route_ref(struct neighbor *neighbor,
+                        const struct ovsrec_neighbor *neighbor_idl_row,
+                        const struct ovsrec_route *route_row,
+                        bool add_ref)
+{
+  bool in_use = false;
+
+  VLOG_DBG("In %s for neighbor %s",__func__, neighbor->ip_address);
+  if (add_ref)
+    {
+      if (!shash_add_once(&neighbor->routes_shash, route_row->prefix,
+                          route_row))
+        {
+          VLOG_DBG("Route %s already added to neighbo->routes shash",
+                   route_row->prefix);
+        }
+      else
+        {
+          VLOG_DBG("Added route %s to neighbor->routes shash",
+                   route_row->prefix);
+        }
+    }
+  else
+    {
+      VLOG_DBG("Removing route %s from neighbor->routes shash",
+                route_row->prefix);
+      if (shash_find_and_delete(&neighbor->routes_shash, route_row->prefix))
+        {
+          if (shash_count(&neighbor->routes_shash) == 0)
+            {
+              ovsrec_neighbor_set_in_use_by_routes(neighbor_idl_row,
+                                                  &in_use, 1);
+
+              VLOG_DBG("Disabling in_use_by_routes for neighbor %s",
+                       neighbor_idl_row->ip_address);
+              zebra_txn_updates = true;
+            }
+        }
+
+    }
+    VLOG_DBG("neighbor %s routes shash count=%d", neighbor->ip_address,
+             shash_count(&neighbor->routes_shash));
+}
+
+/*
+** Check whether this nexthop is there in Neighbor table,
+** If this nexthop is selected then if entry not there in Neighbor table,
+** add entry and mark it for resolution. And if exists mark it for
+** resolution/reprobing.
+** If this nexthop is unselected, then if entry exists in Neighbor table,
+** mark the Neighbor entry for no resolution/probe.
+*/
+static int zebra_update_neighbor(const struct ovsrec_route *route_row,
+                                 struct ovsrec_nexthop *nh_row,
+                                 bool is_selected)
+{
+  struct neighbor *neighbor;
+  const struct ovsrec_neighbor *neighbor_idl_row;
+  const struct ovsrec_neighbor *new_neighbor;
+
+
+  /* Check if this nexthop is in local neighbor hash */
+  neighbor = neighbor_hash_lookup(nh_row->ip_address);
+  if (neighbor)
+    {
+      /* If neighbor exists, and NH is selected mark for arp resolution */
+      VLOG_DBG("In zebra_update_neighbor for neighbor %s",nh_row->ip_address);
+      neighbor_idl_row = ovsrec_neighbor_get_for_uuid(idl,
+                          (const struct uuid*)&neighbor->idl_row_uuid);
+      if (!neighbor_idl_row)
+       {
+         VLOG_DBG("Could not get neighbor row from uuid");
+         return 1;
+       }
+
+       if (is_selected)
+        {
+          if (neighbor_idl_row->in_use_by_routes)
+            {
+              VLOG_DBG("Neighbor %s already marked for arp_resolution",
+                        neighbor->ip_address);
+            }
+          else
+            {
+              VLOG_DBG("Marking Neighbor %s for arp_resolution",
+                        neighbor->ip_address);
+              ovsrec_neighbor_set_in_use_by_routes(neighbor_idl_row,
+                                              &is_selected, 1);
+
+              zebra_txn_updates = true;
+            }
+
+            /* TODO: Add this route ref to this neighbor */
+          zebra_update_neighbor_route_ref(neighbor, neighbor_idl_row,
+                                          route_row, true);
+        }
+       else
+        {
+          /* TODO: Remove route reference to this Neighbor entry.
+          ** And if last route, then mark in_use_by_route=false */
+          VLOG_DBG("NH un-selected update Neighbor %s route ref",
+                    neighbor->ip_address);
+
+          /* TODO: Remove this route ref to this neighbor */
+          zebra_update_neighbor_route_ref(neighbor, neighbor_idl_row,
+                                          route_row, false);
+        }
+    }
+  else
+    {
+      /* If neighbor not in local hash, and NH is selected mark for arp
+      ** resolution */
+      if (is_selected)
+        {
+          /* Create Neighbor entry and mark for resolution */
+          char ipv6_dest_addr[sizeof(struct in6_addr)];
+          VLOG_DBG("Creating and Marking Neighbor %s for arp_resolution",
+                   nh_row->ip_address);
+
+          new_neighbor = ovsrec_neighbor_insert(zebra_txn);
+          if (new_neighbor)
+            {
+              ovsrec_neighbor_set_ip_address(new_neighbor, nh_row->ip_address);
+              ovsrec_neighbor_set_vrf(new_neighbor, route_row->vrf);
+              if (inet_pton(AF_INET6, nh_row->ip_address, ipv6_dest_addr) == 1)
+                {
+                  ovsrec_neighbor_set_address_family(new_neighbor,
+                                      OVSREC_NEIGHBOR_ADDRESS_FAMILY_IPV6);
+                }
+              else
+                {
+                  ovsrec_neighbor_set_address_family(new_neighbor,
+                                      OVSREC_NEIGHBOR_ADDRESS_FAMILY_IPV4);
+                }
+              ovsrec_neighbor_set_in_use_by_routes(new_neighbor,
+                                                   &is_selected, 1);
+              zebra_txn_updates = true;
+
+              /* TODO: Add this route ref to this neighbor */
+              neighbor = neighbor_create(new_neighbor);
+              zebra_update_neighbor_route_ref(neighbor, neighbor_idl_row,
+                                              route_row, true);
+            }
+          else
+            {
+               VLOG_ERR("ovsrec_route_insert failed");
+            }
+        }
+      else
+        {
+          VLOG_DBG("No-op as NH %s un-selected and not in Neighbor hash",
+                   nh_row->ip_address);
+        }
+    }
 }

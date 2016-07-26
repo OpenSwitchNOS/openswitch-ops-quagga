@@ -2787,6 +2787,79 @@ zebra_search_port_name_in_l3_ports_hash (struct shash* port_hash,
 }
 
 /*
+ * This function finds the L3 port node to which the connected route
+ * 'prefix' belogs to. This function is used in case when the next-hop
+ * port name is not available in the OVSDB connected route.
+ * A pointer to the L3 port node is returned from this function.
+ */
+struct zebra_l3_port*
+zebra_search_connected_route_in_l3_ports_hash (struct shash* port_hash,
+                                               char* prefix, afi_t afi)
+{
+  struct zebra_l3_port* l3_port = NULL;
+  struct shash_node *node, *next;
+  struct shash* route_uuid_hash;
+  struct uuid* ovsrec_route_uuid = NULL;
+
+  if (!port_hash)
+    {
+      VLOG_DBG("The port hash is NULL");
+      return(NULL);
+    }
+
+  if (!prefix)
+    {
+      VLOG_DBG("The route prefix is NULL");
+      return(NULL);
+    }
+
+  /*
+   * Walk all the L3 port nodes in the internal cache
+   */
+  SHASH_FOR_EACH_SAFE (node, next, port_hash)
+    {
+      if (!node)
+        {
+          VLOG_ERR("No node found in the L3 port "
+                   "hash\n");
+          continue;
+        }
+
+      if (!(node->data))
+        {
+          VLOG_ERR("No data found in the node\n");
+          continue;
+        }
+
+      l3_port = (struct zebra_l3_port*)node->data;
+
+      /*
+       * Find the IPv4 or IPv6 route UUID hash table.
+       */
+      if (afi == AFI_IP)
+        route_uuid_hash = &(l3_port->ip4_connected_routes_uuid);
+      else
+        route_uuid_hash = &(l3_port->ip6_connected_routes_uuid);
+
+      /*
+       * Look-up the connected route in the connected route UUID
+       * hash
+       */
+      ovsrec_route_uuid = (struct uuid*)shash_find_data(route_uuid_hash,
+                                                        prefix);
+
+      if (ovsrec_route_uuid)
+        {
+          VLOG_DBG("Found the L3 port node %s for connected route %s",
+                   l3_port->port_name, prefix);
+          return(l3_port);
+        }
+    }
+
+  return(NULL);
+}
+
+/*
  * This function finds if an IP/IPv6 addresses ocurrs in some subnet
  * of the IP/IPv6 addresses in the port nodes in the port hash.
  * A pointer to the L3 port node is returned from this function. The
@@ -4527,7 +4600,10 @@ zebra_handle_proto_route_change (const struct ovsrec_route *route,
  *    corresponding L3 port node in the port cache.
  * 2. If the connected add notification during zebra restart, then
  *    we add the connected route's UUID in a hash table for post
- *    restart clean-up and updation of connected routes.
+ *    restart clean-up and updation of connected routes. We also
+ *    update on the selected bit on the connected route if there
+ *    is a mis-match between the L3 port state and the connected
+ *    route corresponding to the L3 address in the L3 port node.
  */
 static void
 zebra_handle_connected_route_change (const struct ovsrec_route* route)
@@ -4537,7 +4613,8 @@ zebra_handle_connected_route_change (const struct ovsrec_route* route)
   struct uuid* route_old_uuid;
   struct shash* route_uuid_hash;
   struct uuid* ovsrec_route_uuid = NULL;
-  bool is_v4;
+  bool selected;
+  afi_t afi;
 
   /*
    * If the connected route pointer is NULL, then return from this
@@ -4558,65 +4635,58 @@ zebra_handle_connected_route_change (const struct ovsrec_route* route)
     }
 
   /*
-   * If the route does not have a valid next-hop or if the number
-   * of next-hops are greater than 1, then this is not a valid
-   * connected route.
+   * If connected routes has more than 1 next-hop, then assert.
+   * This is no a connected route.
    */
-  if (!(route->n_nexthops) || (route->n_nexthops > 1))
+  if (route->n_nexthops > 1)
     {
-      VLOG_DBG("No valid next-hops for the connected route");
-      return;
+      VLOG_DBG("Got a connected route with more than one next-hop");
+      assert(0);
     }
 
   /*
-   * If the next-hop port is not avlid, then return from this function.
-   */
-  if (!(route->nexthops[0]->n_ports))
-    {
-      VLOG_DBG("No valid port next-hop for the connected route");
-      return;
-    }
-
-  VLOG_DBG("Looking up the L3 cache for connected route's %s next-hop %s",
-           route->prefix, route->nexthops[0]->ports[0]->name);
-
-  /*
-   * Look up the L3 port node using the next-hop's port name
-   */
-  l3_port = zebra_search_port_name_in_l3_ports_hash(
-                                &zebra_cached_l3_ports,
-                                route->nexthops[0]->ports[0]->name);
-
-  /*
-   * If we do not find a valid L3 port node, then return from this
-   * function.
-   */
-  if (!l3_port)
-    {
-      VLOG_DBG("Port %s not found in the hash",
-               route->nexthops[0]->ports[0]->name);
-      return;
-    }
-
-  /*
-   * Find the IPv4 or IPv6 route UUID hash table.
+   * Find the address family of the connected route
    */
   if (!strcmp(route->address_family, OVSREC_ROUTE_ADDRESS_FAMILY_IPV4))
     {
-      route_uuid_hash = &(l3_port->ip4_connected_routes_uuid);
-      is_v4 = true;
+      afi = AFI_IP;
     }
   else
     {
-      route_uuid_hash = &(l3_port->ip6_connected_routes_uuid);
-      is_v4 = false;
+      afi = AFI_IP6;
     }
 
   /*
-   * Find the connected route's uuid from the hash table.
+   * If the connected route has the following conditions, then the
+   * connected route is not valid and needs to be cleaned-up:-
+   * 1. If the route does not have a valid next-hop
+   * 2. If the next-hop port is not valid,
    */
-  route_old_uuid = (struct uuid*)shash_find_data(route_uuid_hash,
-                                                 route->prefix);
+  if (!(route->n_nexthops) || !(route->nexthops[0]->n_ports))
+    {
+      VLOG_DBG("No valid next-hops for the connected route %s",
+               route->prefix);
+
+      /*
+       * Look up the L3 port node using the connected route's
+       * prefix
+       */
+      l3_port = zebra_search_connected_route_in_l3_ports_hash(
+                                           &zebra_cached_l3_ports,
+                                           route->prefix, afi);
+    }
+  else
+    {
+      VLOG_DBG("Looking up the L3 cache for connected route's %s next-hop %s",
+               route->prefix, route->nexthops[0]->ports[0]->name);
+
+      /*
+       * Look up the L3 port node using the next-hop's port name
+       */
+      l3_port = zebra_search_port_name_in_l3_ports_hash(
+                                    &zebra_cached_l3_ports,
+                                    route->nexthops[0]->ports[0]->name);
+    }
 
   /*
    * In case of non-restart case, update connected route's UUID with the new
@@ -4624,39 +4694,87 @@ zebra_handle_connected_route_change (const struct ovsrec_route* route)
    */
   if (!zebra_first_run_after_restart)
     {
-      /*
-       * This is an error condition when the route's temporrary UUID is not
-       * found in the L3 port node.
-       */
-      if (!route_old_uuid)
+      if (l3_port)
         {
-          VLOG_DBG("The connected route UUID does not exist in the L3 cache");
-          return;
+          /*
+           * Find the IPv4 or IPv6 route UUID hash table.
+           */
+          if (afi == AFI_IP)
+            route_uuid_hash = &(l3_port->ip4_connected_routes_uuid);
+          else
+            route_uuid_hash = &(l3_port->ip6_connected_routes_uuid);
+
+          /*
+           * Find the connected route's uuid from the hash table.
+           */
+          route_old_uuid = (struct uuid*)shash_find_data(route_uuid_hash,
+                                                         route->prefix);
+
+          /*
+           * This is an error condition when the route's temporrary UUID is not
+           * found in the L3 port node.
+           */
+          if (!route_old_uuid)
+            {
+              VLOG_DBG("The connected route UUID does not exist in the L3 cache");
+              return;
+            }
+
+          VLOG_DBG("         Old connected route UUID %s",
+                  zebra_dump_ovsdb_uuid(route_old_uuid));
+
+          VLOG_DBG("         New connected route UUID %s",
+                   zebra_dump_ovsdb_uuid(
+                    (struct uuid*)&(OVSREC_IDL_GET_TABLE_ROW_UUID(route))));
+
+          /*
+           * If the cached connected route's UUID is same as the connected route's
+           * UUID in OVSDB, then there is no need to update the UUID.
+           */
+          if (!memcmp(route_old_uuid, &OVSREC_IDL_GET_TABLE_ROW_UUID(route),
+                      sizeof(struct uuid)))
+            {
+              VLOG_DBG("The route's old UUID is same as the route's new UUID");
+              return;
+            }
+
+          /*
+           * Copy the uuid of the connected route in OVSDB for future references.
+           */
+          memcpy(route_old_uuid, &OVSREC_IDL_GET_TABLE_ROW_UUID(route),
+                 sizeof(struct uuid));
+
+          /*
+           * Check if we need to update the selected bit on the connected route
+           */
+          if (route->n_nexthops && route->nexthops[0]->n_ports)
+            {
+              if (route->selected[0] != l3_port->if_active)
+                {
+                  VLOG_DBG("Updating the selected bit on the connected "
+                           "route %s from %s to %s", route->prefix,
+                           route->selected ? "true":"false",
+                           selected ? "true":"false");
+
+                  selected = l3_port->if_active;
+                  ovsrec_nexthop_set_selected(route->nexthops[0], &selected, 1);
+                  zebra_ovs_update_selected_route(route, &selected);
+                }
+            }
         }
-
-      VLOG_DBG("         Old connected route UUID %s",
-              zebra_dump_ovsdb_uuid(route_old_uuid));
-
-      VLOG_DBG("         New connected route UUID %s",
-               zebra_dump_ovsdb_uuid(
-                (struct uuid*)&(OVSREC_IDL_GET_TABLE_ROW_UUID(route))));
-
-      /*
-       * If the cached connected route's UUID is same as the connected route's
-       * UUID in OVSDB, then there is no need to update the UUID.
-       */
-      if (!memcmp(route_old_uuid, &OVSREC_IDL_GET_TABLE_ROW_UUID(route),
-                  sizeof(struct uuid)))
+      else
         {
-          VLOG_DBG("The route's old UUID is same as the route's new UUID");
-          return;
+          /*
+           * Clean-up the connected route from OVSDB as this doesn't have a valid
+           * next-hop L3 interface
+           */
+          if (route->n_nexthops)
+            {
+              ovsrec_nexthop_delete(route->nexthops[0]);
+            }
+          ovsrec_route_delete(route);
+          zebra_txn_updates = true;
         }
-
-      /*
-       * Copy the uuid of the connected route in OVSDB for future references.
-       */
-      memcpy(route_old_uuid, &OVSREC_IDL_GET_TABLE_ROW_UUID(route),
-             sizeof(struct uuid));
     }
   else
     {
@@ -4788,6 +4906,12 @@ zebra_apply_route_changes (void)
 
       OVSREC_ROUTE_FOR_EACH (route_row, idl)
         {
+          /*
+           * Create a transaction to publish the out of sync-up connected
+           * route updates into OVSDB
+           */
+          zebra_create_txn();
+
           if(!(route_row->nexthops))
             {
               VLOG_DBG("Null next hop array");
@@ -4809,7 +4933,19 @@ zebra_apply_route_changes (void)
                        "for route %s\n", route_row->prefix);
               zebra_handle_route_change(route_row);
             }
+
+          /*
+           * Publish the batch if needed for the out of sync connected route
+           * updates to OVSDB
+           */
+          zebra_finish_txn(false);
         }
+
+      /*
+       * Publish any remaining updates if needed for the out of sync
+       * connected route updates to OVSDB
+       */
+      zebra_finish_txn(true);
 
       /*
        * If this is the first OVSDB reconfigure run after restart, then

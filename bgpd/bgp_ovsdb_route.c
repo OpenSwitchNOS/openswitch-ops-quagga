@@ -174,7 +174,7 @@ txn_command_result(enum ovsdb_idl_txn_status status, char *msg, char *pr)
         txn_rec->afi = family2afi(p->family);                           \
         txn_rec->safi = safi;                                           \
         txn_rec->update_time = time (NULL);                             \
-        snprintf(txn_rec->next_hop, PREFIX_MAXLEN, "%s", next_hop);     \
+        memcpy(txn_rec->next_hop, next_hop, sizeof(next_hop));          \
         bgp_txn_insert(&txn_rec->hmap_node);                            \
         prefix2str(p, p_str, sizeof(p_str));                            \
     } while (0)
@@ -2974,10 +2974,10 @@ bgp_ovsdb_republish_route(const struct ovsrec_bgp_router *bgp_first, int asn)
 static uint32_t get_lookup_key(char *prefix, char *table_name, char *next_hop_host) {
     char key[MAX_KEY_LEN];
     int hashkey;
-    memset(key, 0 ,sizeof(key));
-    strcpy(key, prefix);
-    strcat(key, table_name);
-    strcat(key, next_hop_host);
+    memset(key, 0, sizeof(key));
+    strncpy(key, prefix, strlen(prefix));
+    strncat(key, table_name, strlen(table_name));
+    strncat(key, next_hop_host, strlen(next_hop_host));
     hashkey = hash_string(key, 0);
     return hashkey;
 }

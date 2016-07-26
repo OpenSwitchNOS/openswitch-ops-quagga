@@ -40,6 +40,7 @@ TOPOLOGY = """
 # |  sw1  |    |  sw2  |
 # |       <---->       |
 # |       <---->       |
+# |       <---->       |
 # +-------+    +-------+
 
 # Nodes
@@ -51,6 +52,7 @@ sw1:if01 -- sw2:if01
 sw1:if02 -- sw2:if02
 sw1:if03 -- sw2:if03
 sw1:if04 -- sw2:if04
+sw1:if05 -- sw2:if05
 """
 
 
@@ -1795,6 +1797,74 @@ def reconfigure_addresses_on_layer3_interfaces(sw1, sw2, step):
     # IPv6 route for LAG secndary address and its next-hops.
     fib_ipv6_lag_connected_route_secondary = rib_ipv6_lag_connected_route_secondary
 
+    # Configure another physical layer-3 interface
+    sw1_interface = sw1.ports["if0{}".format(5)]
+
+    sw1("configure terminal")
+    sw1("interface {}".format(sw1_interface))
+    sw1("ip address 9.9.9.9/24")
+    sw1("ip address 99.99.99.99/24 secondary")
+    sw1("ipv6 address 9:9::9/64")
+    sw1("ipv6 address 99:99::99/64 secondary")
+    sw1("no shutdown")
+    sw1("exit")
+
+    # Populate the expected RIB ("show rib") route dictionary for the connected
+    # IPv4 route for physical primary address and its next-hops.
+    rib_ipv4_physical_connected_route_primary = dict()
+    rib_ipv4_physical_connected_route_primary['Route'] = '9.9.9.0/24'
+    rib_ipv4_physical_connected_route_primary['NumberNexthops'] = '1'
+    rib_ipv4_physical_connected_route_primary['5'] = dict()
+    rib_ipv4_physical_connected_route_primary['5']['Distance'] = '0'
+    rib_ipv4_physical_connected_route_primary['5']['Metric'] = '0'
+    rib_ipv4_physical_connected_route_primary['5']['RouteType'] = 'connected'
+
+    # Populate the expected RIB ("show ip route") route dictionary for the connected
+    # IPv4 route for physical primary address and its next-hops.
+    fib_ipv4_physical_connected_route_primary = rib_ipv4_physical_connected_route_primary
+
+    # Populate the expected RIB ("show rib") route dictionary for the connected
+    # IPv4 route for physical secondary address and its next-hops.
+    rib_ipv4_physical_connected_route_secondary = dict()
+    rib_ipv4_physical_connected_route_secondary['Route'] = '99.99.99.0/24'
+    rib_ipv4_physical_connected_route_secondary['NumberNexthops'] = '1'
+    rib_ipv4_physical_connected_route_secondary['5'] = dict()
+    rib_ipv4_physical_connected_route_secondary['5']['Distance'] = '0'
+    rib_ipv4_physical_connected_route_secondary['5']['Metric'] = '0'
+    rib_ipv4_physical_connected_route_secondary['5']['RouteType'] = 'connected'
+
+    # Populate the expected RIB ("show ip route") route dictionary for the connected
+    # IPv4 route for physical secondary address and its next-hops.
+    fib_ipv4_physical_connected_route_secondary = rib_ipv4_physical_connected_route_secondary
+
+    # Populate the expected RIB ("show rib") route dictionary for the connected
+    # IPv6 route for physical primary address and its next-hops.
+    rib_ipv6_physical_connected_route_primary = dict()
+    rib_ipv6_physical_connected_route_primary['Route'] = '9:9::/64'
+    rib_ipv6_physical_connected_route_primary['NumberNexthops'] = '1'
+    rib_ipv6_physical_connected_route_primary['5'] = dict()
+    rib_ipv6_physical_connected_route_primary['5']['Distance'] = '0'
+    rib_ipv6_physical_connected_route_primary['5']['Metric'] = '0'
+    rib_ipv6_physical_connected_route_primary['5']['RouteType'] = 'connected'
+
+    # Populate the expected RIB ("show ipv6 route") route dictionary for the connected
+    # IPv6 route for physical primary address and its next-hops.
+    fib_ipv6_physical_connected_route_primary = rib_ipv6_physical_connected_route_primary
+
+    # Populate the expected RIB ("show rib") route dictionary for the connected
+    # IPv6 route for physical secondary address and its next-hops.
+    rib_ipv6_physical_connected_route_secondary = dict()
+    rib_ipv6_physical_connected_route_secondary['Route'] = '99:99::/64'
+    rib_ipv6_physical_connected_route_secondary['NumberNexthops'] = '1'
+    rib_ipv6_physical_connected_route_secondary['5'] = dict()
+    rib_ipv6_physical_connected_route_secondary['5']['Distance'] = '0'
+    rib_ipv6_physical_connected_route_secondary['5']['Metric'] = '0'
+    rib_ipv6_physical_connected_route_secondary['5']['RouteType'] = 'connected'
+
+    # Populate the expected RIB ("show ipv6 route") route dictionary for the connected
+    # IPv6 route for physical secondary  address and its next-hops.
+    fib_ipv6_physical_connected_route_secondary = rib_ipv6_physical_connected_route_secondary
+
     sleep(TIME_IN_SEC_TO_SLEEP)
 
     step("Verifying the IPv4/IPv6 connected routes on switch 1")
@@ -1920,6 +1990,36 @@ def reconfigure_addresses_on_layer3_interfaces(sw1, sw2, step):
     aux_route = rib_ipv6_lag_connected_route_secondary["Route"]
     verify_show_rib(sw1, aux_route, 'connected',
                     rib_ipv6_lag_connected_route_secondary)
+
+    # Verify IPv4 route for physical primary address and next-hops in RIB and FIB
+    aux_route = fib_ipv4_physical_connected_route_primary["Route"]
+    verify_show_ip_route(sw1, aux_route, 'connected',
+                         fib_ipv4_physical_connected_route_primary)
+    aux_route = rib_ipv4_physical_connected_route_primary["Route"]
+    verify_show_rib(sw1, aux_route, 'connected', rib_ipv4_physical_connected_route_primary)
+
+    # Verify IPv4 route for physical secondary address and next-hops in RIB and FIB
+    aux_route = fib_ipv4_physical_connected_route_secondary["Route"]
+    verify_show_ip_route(sw1, aux_route, 'connected',
+                         fib_ipv4_physical_connected_route_secondary)
+    aux_route = rib_ipv4_physical_connected_route_secondary["Route"]
+    verify_show_rib(sw1, aux_route, 'connected',
+                    rib_ipv4_physical_connected_route_secondary)
+
+    # Verify IPv6 route for physical primary address and next-hops in RIB and FIB
+    aux_route = fib_ipv6_physical_connected_route_primary["Route"]
+    verify_show_ipv6_route(sw1, aux_route, 'connected',
+                           fib_ipv6_physical_connected_route_primary)
+    aux_route = rib_ipv6_physical_connected_route_primary["Route"]
+    verify_show_rib(sw1, aux_route, 'connected', rib_ipv6_physical_connected_route_primary)
+
+    # Verify IPv6 route for physical secondary address and next-hops in RIB and FIB
+    aux_route = fib_ipv6_physical_connected_route_secondary["Route"]
+    verify_show_ipv6_route(sw1, aux_route, 'connected',
+                           fib_ipv6_physical_connected_route_secondary)
+    aux_route = rib_ipv6_physical_connected_route_secondary["Route"]
+    verify_show_rib(sw1, aux_route, 'connected',
+                    rib_ipv6_physical_connected_route_secondary)
 
 
 # This test case shuts down zebra process and then changes some L3 interface
@@ -2220,6 +2320,50 @@ def restart_zebra_with_config_change_for_layer3_interfaces(sw1, sw2, step):
     # IPv6 route for second LAG secndary address and its next-hops.
     fib_ipv6_second_lag_connected_route_secondary = rib_ipv6_second_lag_connected_route_secondary
 
+    # Configure "no routing" in the physical layer-3 interface
+    sw1_interface = sw1.ports["if0{}".format(5)]
+
+    sw1("configure terminal")
+    sw1("interface {}".format(sw1_interface))
+    sw1("no routing")
+    sw1("exit")
+
+    # Populate the expected RIB ("show rib") route dictionary for the connected
+    # IPv4 route for physical primary address and its next-hops.
+    rib_ipv4_physical_connected_route_primary = dict()
+    rib_ipv4_physical_connected_route_primary['Route'] = '9.9.9.0/24'
+
+    # Populate the expected RIB ("show ip route") route dictionary for the connected
+    # IPv4 route for physical primary address and its next-hops.
+    fib_ipv4_physical_connected_route_primary = rib_ipv4_physical_connected_route_primary
+
+    # Populate the expected RIB ("show rib") route dictionary for the connected
+    # IPv4 route for physical secondary address and its next-hops.
+    rib_ipv4_physical_connected_route_secondary = dict()
+    rib_ipv4_physical_connected_route_secondary['Route'] = '99.99.99.0/24'
+
+    # Populate the expected RIB ("show ip route") route dictionary for the connected
+    # IPv4 route for physical secondary address and its next-hops.
+    fib_ipv4_physical_connected_route_secondary = rib_ipv4_physical_connected_route_secondary
+
+    # Populate the expected RIB ("show rib") route dictionary for the connected
+    # IPv6 route for physical primary address and its next-hops.
+    rib_ipv6_physical_connected_route_primary = dict()
+    rib_ipv6_physical_connected_route_primary['Route'] = '9:9::/64'
+
+    # Populate the expected RIB ("show ipv6 route") route dictionary for the connected
+    # IPv6 route for physical primary address and its next-hops.
+    fib_ipv6_physical_connected_route_primary = rib_ipv6_physical_connected_route_primary
+
+    # Populate the expected RIB ("show rib") route dictionary for the connected
+    # IPv6 route for physical secondary address and its next-hops.
+    rib_ipv6_physical_connected_route_secondary = dict()
+    rib_ipv6_physical_connected_route_secondary['Route'] = '99:99::/64'
+
+    # Populate the expected RIB ("show ipv6 route") route dictionary for the connected
+    # IPv6 route for physical secondary  address and its next-hops.
+    fib_ipv6_physical_connected_route_secondary = rib_ipv6_physical_connected_route_secondary
+
     step("Starting the ops-zebra process on switch 1")
 
     # Start ops-zebra process on sw1
@@ -2382,6 +2526,36 @@ def restart_zebra_with_config_change_for_layer3_interfaces(sw1, sw2, step):
     aux_route = rib_ipv6_second_lag_connected_route_secondary["Route"]
     verify_show_rib(sw1, aux_route, 'connected',
                     rib_ipv6_second_lag_connected_route_secondary)
+
+    # Verify IPv4 route for physical primary address and next-hops in RIB and FIB
+    aux_route = fib_ipv4_physical_connected_route_primary["Route"]
+    verify_show_ip_route(sw1, aux_route, 'connected',
+                         fib_ipv4_physical_connected_route_primary)
+    aux_route = rib_ipv4_physical_connected_route_primary["Route"]
+    verify_show_rib(sw1, aux_route, 'connected', rib_ipv4_physical_connected_route_primary)
+
+    # Verify IPv4 route for physical secondary address and next-hops in RIB and FIB
+    aux_route = fib_ipv4_physical_connected_route_secondary["Route"]
+    verify_show_ip_route(sw1, aux_route, 'connected',
+                         fib_ipv4_physical_connected_route_secondary)
+    aux_route = rib_ipv4_physical_connected_route_secondary["Route"]
+    verify_show_rib(sw1, aux_route, 'connected',
+                    rib_ipv4_physical_connected_route_secondary)
+
+    # Verify IPv6 route for physical primary address and next-hops in RIB and FIB
+    aux_route = fib_ipv6_physical_connected_route_primary["Route"]
+    verify_show_ipv6_route(sw1, aux_route, 'connected',
+                           fib_ipv6_physical_connected_route_primary)
+    aux_route = rib_ipv6_physical_connected_route_primary["Route"]
+    verify_show_rib(sw1, aux_route, 'connected', rib_ipv6_physical_connected_route_primary)
+
+    # Verify IPv6 route for physical secondary address and next-hops in RIB and FIB
+    aux_route = fib_ipv6_physical_connected_route_secondary["Route"]
+    verify_show_ipv6_route(sw1, aux_route, 'connected',
+                           fib_ipv6_physical_connected_route_secondary)
+    aux_route = rib_ipv6_physical_connected_route_secondary["Route"]
+    verify_show_rib(sw1, aux_route, 'connected',
+                    rib_ipv6_physical_connected_route_secondary)
 
 
 # This test changes some L3 interface configuration after zebra has come up after

@@ -5909,9 +5909,14 @@ zebra_ovs_update_selected_route (const struct ovsrec_route *ovs_route,
           return 0;
         }
 
-      log_event("ZEBRA_ROUTE", EV_KV("routemsg", "%s",
-                *selected ? "Route selected":"Route unselected"),
-                EV_KV("prefix", "%s", ovs_route->prefix));
+      if ((ovsdb_proto_to_zebra_proto(route_row->from) == ZEBRA_ROUTE_CONNECT)
+                  || (ovsdb_proto_to_zebra_proto(route_row->from) == ZEBRA_ROUTE_STATIC))
+        {
+          log_event("ZEBRA_ROUTE", EV_KV("routemsg", "%s",
+                   *selected ? "Route selected":"Route unselected"),
+                   EV_KV("prefix", "%s", ovs_route->prefix));
+        }
+
       /*
        * Update the selected bit, and mark it to commit into DB.
        */
@@ -6183,10 +6188,14 @@ void zebra_update_selected_nh (struct route_node *rn, struct rib *route,
               VLOG_DBG("Changing the next-hop selected flag from %s to %s",
                        !cand_nh_row->selected ? "true" : "false",
                        is_selected ? "true" : "false");
-              log_event("ZEBRA_NEXTHOP_STATE_CHANGE", EV_KV("nexthop_port", "%s",
-                        cand_nh_row->ip_address), EV_KV("old_state", "%s",
-                        !cand_nh_row->selected ? "true" : "false"),
-                        EV_KV("new_state","%s", is_selected ? "true" : "false"));
+              if ((ovsdb_proto_to_zebra_proto(route_row->from) == ZEBRA_ROUTE_CONNECT)
+                   || (ovsdb_proto_to_zebra_proto(route_row->from) == ZEBRA_ROUTE_STATIC))
+                {
+                  log_event("ZEBRA_NEXTHOP_STATE_CHANGE", EV_KV("nexthop_port", "%s",
+                             cand_nh_row->ip_address), EV_KV("old_state", "%s",
+                             !cand_nh_row->selected ? "true" : "false"),
+                             EV_KV("new_state","%s", is_selected ? "true" : "false"));
+                }
               ovsrec_nexthop_set_selected(cand_nh_row, &is_selected, 1);
               zebra_txn_updates = true;
             }
@@ -6202,10 +6211,14 @@ void zebra_update_selected_nh (struct route_node *rn, struct rib *route,
                   VLOG_DBG("Changing the next-hop selected flag from %s to %s",
                            cand_nh_row->selected[0] ? "true" : "false",
                            is_selected ? "true" : "false");
-                  log_event("ZEBRA_NEXTHOP_STATE_CHANGE", EV_KV("nexthop_port", "%s",
-                            cand_nh_row->ip_address), EV_KV("old_state", "%s",
-                            cand_nh_row->selected[0] ? "true" : "false"),
-                            EV_KV("new_state","%s", is_selected ? "true" : "false"));
+                  if ((ovsdb_proto_to_zebra_proto(route_row->from) == ZEBRA_ROUTE_CONNECT)
+                       || (ovsdb_proto_to_zebra_proto(route_row->from) == ZEBRA_ROUTE_STATIC))
+                    {
+                      log_event("ZEBRA_NEXTHOP_STATE_CHANGE", EV_KV("nexthop_port", "%s",
+                                 cand_nh_row->ip_address), EV_KV("old_state", "%s",
+                                 cand_nh_row->selected[0] ? "true" : "false"),
+                                 EV_KV("new_state","%s", is_selected ? "true" : "false"));
+                    }
                   ovsrec_nexthop_set_selected(cand_nh_row, &is_selected, 1);
                   zebra_txn_updates = true;
                 }

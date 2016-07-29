@@ -4327,7 +4327,7 @@ zebra_route_delete (void)
 
 /* Convert OVSDB protocol string to Zebra constants
  */
-static unsigned int
+static inline unsigned int
 ovsdb_proto_to_zebra_proto (char *from_protocol)
 {
   if (!strcmp(from_protocol, OVSREC_ROUTE_FROM_CONNECTED))
@@ -4784,8 +4784,6 @@ zebra_handle_route_change (const struct ovsrec_route *route)
     case ZEBRA_ROUTE_BGP:
       VLOG_DBG("Adding a Protocol route for prefix %s protocol %s\n",
                 route->prefix, route->from);
-      log_event("ZEBRA_ROUTE_ADD", EV_KV("prefix", "%s", route->prefix),
-                EV_KV("protocol", "%s",route->from));
       /* This is a protocol route */
       zebra_handle_proto_route_change(route, from_protocol);
       break;
@@ -4793,8 +4791,6 @@ zebra_handle_route_change (const struct ovsrec_route *route)
    case ZEBRA_ROUTE_OSPF:
       VLOG_DBG("Adding a Protocol route for prefix %s protocol %s\n",
                 route->prefix, route->from);
-      log_event("ZEBRA_ROUTE_ADD", EV_KV("prefix", "%s", route->prefix),
-                EV_KV("protocol", "%s",route->from));
       /* This is a protocol route */
       zebra_handle_proto_route_change(route, from_protocol);
 
@@ -5969,10 +5965,13 @@ zebra_ovs_update_selected_route (const struct ovsrec_route *ovs_route,
                     *selected ? "true" : "false");
           return 0;
         }
-
-      log_event("ZEBRA_ROUTE", EV_KV("routemsg", "%s",
-                *selected ? "Route selected":"Route unselected"),
-                EV_KV("prefix", "%s", ovs_route->prefix));
+      if ((ovsdb_proto_to_zebra_proto(ovs_route->from) == ZEBRA_ROUTE_CONNECT)
+          || (ovsdb_proto_to_zebra_proto(ovs_route->from) == ZEBRA_ROUTE_STATIC))
+        {
+          log_event("ZEBRA_ROUTE", EV_KV("routemsg", "%s",
+                   *selected ? "Route selected":"Route unselected"),
+                   EV_KV("prefix", "%s", ovs_route->prefix));
+        }
       /*
        * Update the selected bit, and mark it to commit into DB.
        */
@@ -6252,10 +6251,14 @@ void zebra_update_selected_nh (struct route_node *rn, struct rib *route,
               VLOG_DBG("Changing the next-hop selected flag from %s to %s",
                        !cand_nh_row->selected ? "true" : "false",
                        is_selected ? "true" : "false");
-              log_event("ZEBRA_NEXTHOP_STATE_CHANGE", EV_KV("nexthop_port", "%s",
-                        cand_nh_row->ip_address), EV_KV("old_state", "%s",
-                        !cand_nh_row->selected ? "true" : "false"),
-                        EV_KV("new_state","%s", is_selected ? "true" : "false"));
+              if ((ovsdb_proto_to_zebra_proto(route_row->from) == ZEBRA_ROUTE_CONNECT)
+                  || (ovsdb_proto_to_zebra_proto(route_row->from) == ZEBRA_ROUTE_STATIC))
+                {
+                  log_event("ZEBRA_NEXTHOP_STATE_CHANGE", EV_KV("nexthop_port", "%s",
+                           cand_nh_row->ip_address), EV_KV("old_state", "%s",
+                           !cand_nh_row->selected ? "true" : "false"),
+                           EV_KV("new_state","%s", is_selected ? "true" : "false"));
+                }
               ovsrec_nexthop_set_selected(cand_nh_row, &is_selected, 1);
               zebra_txn_updates = true;
 
@@ -6280,10 +6283,14 @@ void zebra_update_selected_nh (struct route_node *rn, struct rib *route,
                   VLOG_DBG("Changing the next-hop selected flag from %s to %s",
                            cand_nh_row->selected[0] ? "true" : "false",
                            is_selected ? "true" : "false");
-                  log_event("ZEBRA_NEXTHOP_STATE_CHANGE", EV_KV("nexthop_port", "%s",
-                            cand_nh_row->ip_address), EV_KV("old_state", "%s",
-                            cand_nh_row->selected[0] ? "true" : "false"),
-                            EV_KV("new_state","%s", is_selected ? "true" : "false"));
+                  if ((ovsdb_proto_to_zebra_proto(route_row->from) == ZEBRA_ROUTE_CONNECT)
+                      || (ovsdb_proto_to_zebra_proto(route_row->from) == ZEBRA_ROUTE_STATIC))
+                    {
+                      log_event("ZEBRA_NEXTHOP_STATE_CHANGE", EV_KV("nexthop_port", "%s",
+                               cand_nh_row->ip_address), EV_KV("old_state", "%s",
+                               cand_nh_row->selected[0] ? "true" : "false"),
+                               EV_KV("new_state","%s", is_selected ? "true" : "false"));
+                    }
                   ovsrec_nexthop_set_selected(cand_nh_row, &is_selected, 1);
                   zebra_txn_updates = true;
 
@@ -6673,11 +6680,6 @@ zebra_add_route (bool is_ipv6, struct prefix *p, int type, safi_t safi,
         {
           VLOG_DBG("Processing %d-next-hop %s", count,
                    idl_nexthop->ports[0]->name);
-
-          log_event("ZEBRA_ROUTE_ADD_NEXTHOP_EVENTS", EV_KV("prefix", "%s",
-                   route->prefix),EV_KV("nexthop", "%s",
-                   idl_nexthop->ports[0]->name));
-
           nexthop_ifname_add(rib, idl_nexthop->ports[0]->name);
         }
       else
@@ -6701,9 +6703,6 @@ zebra_add_route (bool is_ipv6, struct prefix *p, int type, safi_t safi,
                 {
                   VLOG_DBG("Processing %d-next-hop ipv6 %s",
                            count, idl_nexthop->ip_address);
-                  log_event("ZEBRA_ROUTE_ADD_NEXTHOP_EVENTS", EV_KV("prefix", "%s",
-                            route->prefix),EV_KV("nexthop", "%s",
-                            idl_nexthop->ip_address));
                   nexthop_ipv6_add(rib, &ipv6_dest_addr);
                 }
             }
@@ -6711,9 +6710,6 @@ zebra_add_route (bool is_ipv6, struct prefix *p, int type, safi_t safi,
             {
               VLOG_DBG("Processing ipv4 %d-next-hop ipv4 %s",
                        count, idl_nexthop->ip_address);
-              log_event("ZEBRA_ROUTE_ADD_NEXTHOP_EVENTS", EV_KV("prefix", "%s",
-                        route->prefix),EV_KV("nexthop", "%s",
-                        idl_nexthop->ip_address));
               nexthop_ipv4_add(rib, &ipv4_dest_addr, NULL);
             }
         }

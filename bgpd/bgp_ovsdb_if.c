@@ -176,7 +176,7 @@ bgp_update_active_router_id (const struct ovsrec_bgp_router *bgp_router_row,
     for (ALL_LIST_ELEMENTS (bgpmaster->bgp, node, nnode, bgp)){
         if (bgp->router_id_static.s_addr == 0){
             bgp_router_id_set (bgp, &active_router_id_prefix.u.prefix4);
-            VLOG_INFO("Setting active_router_id for BGP ASN: %d", bgp->as);
+            VLOG_DBG("Setting active_router_id for BGP ASN: %d", bgp->as);
             break;
         }
     }
@@ -1002,7 +1002,7 @@ static inline void bgp_chk_for_system_configured(void)
 
     if (sys && (sys->cur_cfg > (int64_t) 0)) {
         system_configured = true;
-        VLOG_INFO("System is now configured (cur_cfg=%d).",
+        VLOG_DBG("System is now configured (cur_cfg=%d).",
             (int)sys->cur_cfg);
     }
 }
@@ -1246,7 +1246,7 @@ bgp_apply_global_changes (void)
         ecmp_status = smap_get_bool(&sys->ecmp_config, SYSTEM_ECMP_CONFIG_STATUS,
                 SYSTEM_ECMP_CONFIG_ENABLE_DEFAULT);
         if(sys_ecmp_status != ecmp_status) {
-            VLOG_INFO("ECMP changed compared to local cache!");
+            VLOG_DBG("ECMP changed compared to local cache!");
             sys_ecmp_status = ecmp_status;
             OVSREC_VRF_FOR_EACH(ovs_vrf, idl) {
                 for (i = 0; i < ovs_vrf->n_bgp_routers; i++) {
@@ -2434,12 +2434,12 @@ get_bgp_neighbor_context (struct ovsdb_idl *idl,
     const struct ovsrec_bgp_router *ovs_bgp = NULL;
 
     if (!name) {
-        VLOG_INFO("Peer name is null for neighbor context\n");
+        VLOG_DBG("Peer name is null for neighbor context\n");
         return NULL;
     }
 
     if (!idl) {
-        VLOG_INFO("IDL instance for getting neighbor context is NULL\n");
+        VLOG_DBG("IDL instance for getting neighbor context is NULL\n");
         return NULL;
     }
 
@@ -2472,28 +2472,28 @@ bgp_check_neighbor_clear_soft_in (struct ovsdb_idl *idl,
     int req_cnt, perf_cnt;
 
     if (!idl) {
-        VLOG_INFO("IDL instance for updating clear counters for"
+        VLOG_DBG("IDL instance for updating clear counters for"
              "clear bgp neighbor soft in commands is NULL\n");
         return false;
     }
 
     if (!neighbor_row) {
-        VLOG_INFO("Neighbor instance for updating clear counters for"
+        VLOG_DBG("Neighbor instance for updating clear counters for"
              "clear bgp neighbor soft in commands is NULL\n");
         return false;
     }
 
     if (!name) {
-        VLOG_INFO("Peer name updating clear counters for"
+        VLOG_DBG("Peer name updating clear counters for"
              "clear bgp neighbor soft in commands is NULL\n");
         return false;
     }
 
     if (object_is_peer_group(neighbor_row)) {
-        VLOG_INFO("Updating clear counters for peer soft in"
+        VLOG_DBG("Updating clear counters for peer soft in"
                   "clear request for PEER-GROUP %s\n", name?name:"NA");
     } else {
-        VLOG_INFO("Updating clear counters for peer soft in"
+        VLOG_DBG("Updating clear counters for peer soft in"
                   "clear request for PEER %s\n", name?name:"NA");
     }
 
@@ -2502,7 +2502,7 @@ bgp_check_neighbor_clear_soft_in (struct ovsdb_idl *idl,
     clear_bgp_neighbor_table_performed = smap_get_int(&neighbor_row->status,
         OVSDB_BGP_NEIGHBOR_CLEAR_COUNTERS_SOFT_IN_PERFORMED, 0);
 
-    VLOG_INFO("request count %d, performed count %d\n",
+    VLOG_DBG("request count %d, performed count %d\n",
                clear_bgp_neighbor_table_requested,
                clear_bgp_neighbor_table_performed);
 
@@ -2525,7 +2525,7 @@ bgp_check_neighbor_clear_soft_in (struct ovsdb_idl *idl,
 
         ovs_neighbor = get_bgp_neighbor_context(idl, name);
         if (ovs_neighbor) {
-            VLOG_INFO("Adding smap\n");
+            VLOG_DBG("Adding smap\n");
             smap_init(&smap_status);
             smap_add(&smap_status,
                      OVSDB_BGP_NEIGHBOR_CLEAR_COUNTERS_SOFT_IN_PERFORMED,
@@ -2545,17 +2545,17 @@ bgp_check_neighbor_clear_soft_in (struct ovsdb_idl *idl,
                 OVSDB_BGP_NEIGHBOR_CLEAR_COUNTERS_SOFT_IN_PERFORMED,
                 0);
 
-            VLOG_INFO("Requested count %d, performed count %d\n",
+            VLOG_DBG("Requested count %d, performed count %d\n",
                       req_cnt, perf_cnt);
 
-            VLOG_INFO("Done with clear op for bgp peer soft in"
+            VLOG_DBG("Done with clear op for bgp peer soft in"
                       "requested count %d, performed count %d\n",
                       clear_bgp_neighbor_table_requested,
                       clear_bgp_neighbor_table_performed);
 
             smap_destroy(&smap_status);
         } else {
-            VLOG_INFO("BGP neighbor row is NULL for smap set operation\n");
+            VLOG_DBG("BGP neighbor row is NULL for smap set operation\n");
         }
     }
     return true;
@@ -2581,28 +2581,28 @@ bgp_check_neighbor_clear_soft_out (struct ovsdb_idl *idl,
     int req_cnt, perf_cnt;
 
     if (!idl) {
-        VLOG_INFO("IDL instance for updating clear counters for"
+        VLOG_DBG("IDL instance for updating clear counters for"
              "clear bgp neighbor soft out commands is NULL\n");
         return false;
     }
 
     if (!neighbor_row) {
-        VLOG_INFO("Neighbor instance for updating clear counters for"
+        VLOG_DBG("Neighbor instance for updating clear counters for"
              "clear bgp neighbor soft out commands is NULL\n");
         return false;
     }
 
     if (!name) {
-        VLOG_INFO("Peer name updating clear counters for"
+        VLOG_DBG("Peer name updating clear counters for"
              "clear bgp neighbor soft out commands is NULL\n");
         return false;
     }
 
     if (object_is_peer_group(neighbor_row)) {
-        VLOG_INFO("Updating clear counters for peer soft out"
+        VLOG_DBG("Updating clear counters for peer soft out"
                   "clear request for PEER-GROUP %s\n", name?name:"NA");
     } else {
-        VLOG_INFO("Updating clear counters for peer soft out"
+        VLOG_DBG("Updating clear counters for peer soft out"
                   "clear request for PEER %s\n", name?name:"NA");
     }
 
@@ -2611,7 +2611,7 @@ bgp_check_neighbor_clear_soft_out (struct ovsdb_idl *idl,
     clear_bgp_neighbor_table_performed = smap_get_int(&neighbor_row->status,
         OVSDB_BGP_NEIGHBOR_CLEAR_COUNTERS_SOFT_OUT_PERFORMED, 0);
 
-    VLOG_INFO("request count %d, performed count %d\n",
+    VLOG_DBG("request count %d, performed count %d\n",
                clear_bgp_neighbor_table_requested,
                clear_bgp_neighbor_table_performed);
 
@@ -2636,7 +2636,7 @@ bgp_check_neighbor_clear_soft_out (struct ovsdb_idl *idl,
          */
         ovs_neighbor = get_bgp_neighbor_context(idl, name);
         if (ovs_neighbor) {
-            VLOG_INFO("Adding smap\n");
+            VLOG_DBG("Adding smap\n");
             smap_init(&smap_status);
             smap_add(&smap_status,
                      OVSDB_BGP_NEIGHBOR_CLEAR_COUNTERS_SOFT_OUT_PERFORMED,
@@ -2656,17 +2656,17 @@ bgp_check_neighbor_clear_soft_out (struct ovsdb_idl *idl,
                 OVSDB_BGP_NEIGHBOR_CLEAR_COUNTERS_SOFT_OUT_PERFORMED,
                 0);
 
-            VLOG_INFO("Requested count %d, performed count %d\n",
+            VLOG_DBG("Requested count %d, performed count %d\n",
                       req_cnt, perf_cnt);
 
-            VLOG_INFO("Done with clear op for bgp peer soft out"
+            VLOG_DBG("Done with clear op for bgp peer soft out"
                       "requested count %d, performed count %d\n",
                       clear_bgp_neighbor_table_requested,
                       clear_bgp_neighbor_table_performed);
 
             smap_destroy(&smap_status);
         } else {
-            VLOG_INFO("BGP neighbor row is NULL for smap set operation\n");
+            VLOG_DBG("BGP neighbor row is NULL for smap set operation\n");
         }
     }
     return true;
@@ -2778,7 +2778,7 @@ bgp_nbr_read_ovsdb_apply_changes (struct ovsdb_idl *idl)
                     OVSDB_BGP_NEIGHBOR_CLEAR_COUNTERS_SOFT_OUT_PERFORMED,
                     0);
 
-                VLOG_INFO("After neighbor clear operation txn commit:"
+                VLOG_DBG("After neighbor clear operation txn commit:"
                           " soft in requested count %d, performed count %d;"
                           " soft out requested count %d, performed count %d\n",
                           req_cnt_in, perf_cnt_in, req_cnt_out, perf_cnt_out);

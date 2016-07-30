@@ -282,7 +282,7 @@ bgp_ovsdb_set_rib_path_attributes(struct smap *smap,
     time_t tbuf;
 
      if (info == NULL) {
-        VLOG_DBG("In %s info is NULL", __FUNCTION__);
+        VLOG_ERR ("In %s info is NULL", __FUNCTION__);
         return -1;
     }
 
@@ -477,7 +477,7 @@ bgp_ovsdb_set_rib_nexthop(struct ovsdb_idl_txn *txn,
     if (p->family == AF_INET) {
         nexthop = &info->attr->nexthop;
         if (nexthop->s_addr == 0) {
-            VLOG_INFO("%s: Nexthop address is 0 for route %s\n",
+            VLOG_DBG("%s: Nexthop address is 0 for route %s\n",
                       __FUNCTION__, pr);
             return -1;
         }
@@ -488,7 +488,7 @@ bgp_ovsdb_set_rib_nexthop(struct ovsdb_idl_txn *txn,
             ((uint32_t)(nexthop6->s6_addr[4] == 0)) &&
             ((uint32_t)(nexthop6->s6_addr[8] == 0)) &&
             ((uint32_t)(nexthop6->s6_addr[12] == 0))) {
-            VLOG_INFO("%s: Nexthop6 address is 0 for route %s\n",
+            VLOG_DBG("%s: Nexthop6 address is 0 for route %s\n",
                       __FUNCTION__, pr);
             return -1;
         }
@@ -516,7 +516,7 @@ bgp_ovsdb_set_rib_nexthop(struct ovsdb_idl_txn *txn,
             if (p->family == AF_INET) {
                 nexthop = &mpinfo->attr->nexthop;
                 if (nexthop->s_addr == 0) {
-                    VLOG_INFO("%s: Nexthop address is 0 for route %s\n",
+                    VLOG_DBG("%s: Nexthop address is 0 for route %s\n",
                               __FUNCTION__, pr);
                     return -1;
                 }
@@ -527,7 +527,7 @@ bgp_ovsdb_set_rib_nexthop(struct ovsdb_idl_txn *txn,
                    ((uint32_t)(nexthop6->s6_addr[4] == 0)) &&
                    ((uint32_t)(nexthop6->s6_addr[8] == 0)) &&
                    ((uint32_t)(nexthop6->s6_addr[12] == 0))) {
-                    VLOG_INFO("%s: Nexthop6 address is 0 for route %s\n",
+                    VLOG_DBG("%s: Nexthop6 address is 0 for route %s\n",
                               __FUNCTION__, pr);
                     return -1;
                    }
@@ -583,7 +583,7 @@ bgp_ovsdb_set_local_rib_nexthop(struct ovsdb_idl_txn *txn,
     if (p->family == AF_INET) {
         nexthop = &info->attr->nexthop;
         if (nexthop->s_addr == 0) {
-            VLOG_INFO("%s: Nexthop address is 0 for route %s\n",
+            VLOG_DBG("%s: Nexthop address is 0 for route %s\n",
                       __FUNCTION__, pr);
             return -1;
         }
@@ -594,7 +594,7 @@ bgp_ovsdb_set_local_rib_nexthop(struct ovsdb_idl_txn *txn,
             ((uint32_t)(nexthop6->s6_addr[4] == 0)) &&
             ((uint32_t)(nexthop6->s6_addr[8] == 0)) &&
             ((uint32_t)(nexthop6->s6_addr[12] == 0))) {
-            VLOG_INFO("%s: Nexthop6 address is 0 for route %s\n",
+            VLOG_DBG("%s: Nexthop6 address is 0 for route %s\n",
                       __FUNCTION__, pr);
             return -1;
         }
@@ -619,7 +619,7 @@ bgp_ovsdb_set_local_rib_nexthop(struct ovsdb_idl_txn *txn,
             if (p->family == AF_INET) {
                 nexthop = &mpinfo->attr->nexthop;
                 if (nexthop->s_addr == 0) {
-                    VLOG_INFO("%s: Nexthop address is 0 for route %s\n",
+                    VLOG_DBG("%s: Nexthop address is 0 for route %s\n",
                       __FUNCTION__, pr);
                     return -1;
                 }
@@ -630,7 +630,7 @@ bgp_ovsdb_set_local_rib_nexthop(struct ovsdb_idl_txn *txn,
                    ((uint32_t)(nexthop6->s6_addr[4] == 0)) &&
                    ((uint32_t)(nexthop6->s6_addr[8] == 0)) &&
                    ((uint32_t)(nexthop6->s6_addr[12] == 0))) {
-                   VLOG_INFO("%s: Nexthop6 address is 0 for route %s\n",
+                   VLOG_DBG("%s: Nexthop6 address is 0 for route %s\n",
                              __FUNCTION__, pr);
                    return -1;
                 }
@@ -948,7 +948,7 @@ bgp_ovsdb_announce_rib_entry(struct prefix *p,
         VLOG_DBG("Inserting route %s\n", pr);
         rib = ovsrec_route_insert(txn);
         ovsrec_route_set_prefix(rib, pr);
-        VLOG_INFO("%s: setting prefix %s\n", __FUNCTION__, pr);
+        VLOG_DBG("%s: setting prefix %s\n", __FUNCTION__, pr);
         ovsrec_route_set_address_family(rib, afi);
         ovsrec_route_set_sub_address_family(rib, safi_str);
         ovsrec_route_set_from(rib, "bgp");
@@ -1075,7 +1075,7 @@ bgp_ovsdb_add_local_rib_entry(struct prefix *p,
     rib = ovsrec_bgp_route_insert(txn);
 
     ovsrec_bgp_route_set_prefix(rib, pr);
-    VLOG_INFO("%s: setting prefix %s\n", __FUNCTION__, pr);
+    VLOG_DBG("%s: setting prefix %s\n", __FUNCTION__, pr);
     ovsrec_bgp_route_set_address_family(rib, afi);
     ovsrec_bgp_route_set_sub_address_family(rib, safi_str);
 
@@ -1648,7 +1648,6 @@ policy_rt_map_read_ovsdb_apply_deletion (struct ovsdb_idl *idl)
     ovs_first = ovsrec_route_map_first(idl);
     if (ovs_first && !OVSREC_IDL_ANY_TABLE_ROWS_DELETED(ovs_first, idl_seqno)) {
         VLOG_DBG("No route map rows were deleted");
-        VLOG_INFO("%s: no route-map rows were deleted", __FUNCTION__);
         return;
     }
 
@@ -1664,7 +1663,6 @@ policy_rt_map_read_ovsdb_apply_deletion (struct ovsdb_idl *idl)
         if (!matched) {
             route_map_delete (map);
             VLOG_DBG("Route map row deleted");
-            VLOG_INFO("%s: route-map row is deleted", __FUNCTION__);
         }
     }
 }
@@ -1683,7 +1681,6 @@ policy_rt_map_entry_read_ovsdb_apply_deletion (struct ovsdb_idl *idl)
     ovs_first = ovsrec_route_map_entry_first(idl);
     if (ovs_first && !OVSREC_IDL_ANY_TABLE_ROWS_DELETED(ovs_first, idl_seqno)) {
         VLOG_DBG("No route map entry deletions detected.");
-        VLOG_INFO("%s: No route map entry deletions detected", __FUNCTION__);
         return;
     }
 

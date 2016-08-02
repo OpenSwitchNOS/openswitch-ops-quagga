@@ -70,7 +70,7 @@ def verify_active_router_id(sw1, step):
 def verify_loopback_interface(sw1, step):
     interface_addr1 = "9.0.0.1"
     masklen1 = "8"
-    masklen2 = "24"
+    masklen2 = "32"
     loopback_ip = "10.0.1.3"
     active_router_id3 = "10.0.1.3"
 
@@ -95,7 +95,7 @@ def verify_loopback_interface(sw1, step):
 #  interface IPv4 address.
 def verify_unconfigure_loopback_interface(sw1, step):
     masklen1 = "8"
-    masklen2 = "24"
+    masklen2 = "32"
     interface_addr1 = "9.0.0.1"
     loopback_ip = "10.0.1.3"
     active_router_id1 = "9.0.0.1"
@@ -151,7 +151,7 @@ def verify_no_change_for_new_added_interfaces(sw1, step):
     interface_lo_addr3 = "10.0.0.5"
     active_router_id2 = "11.0.0.2"
     masklen = "8"
-    masklen2 = "24"
+    masklen2 = "32"
 
     step("6-Verify no change in active_router_id although we are adding new interfaces")
     sw1("configure terminal")

@@ -277,14 +277,14 @@ def configure_layer3_interfaces(sw1, sw2, step):
     # L3 loopback interfaces.
     sw1("configure terminal")
     sw1("interface loopback 1")
-    sw1("ip address 4.4.4.4/24")
-    sw1("ipv6 address 4:4::4/64")
+    sw1("ip address 4.4.4.4/32")
+    sw1("ipv6 address 4:4::4/128")
     sw1("exit")
 
     # Populate the expected RIB ("show rib") route dictionary for the connected
     # IPv4 route for loopback primary address and its next-hops.
     rib_ipv4_loopback_connected_route_primary = dict()
-    rib_ipv4_loopback_connected_route_primary['Route'] = '4.4.4.0/24'
+    rib_ipv4_loopback_connected_route_primary['Route'] = '4.4.4.0/32'
     rib_ipv4_loopback_connected_route_primary['NumberNexthops'] = '1'
     rib_ipv4_loopback_connected_route_primary['lo1'] = dict()
     rib_ipv4_loopback_connected_route_primary['lo1']['Distance'] = '0'
@@ -298,7 +298,7 @@ def configure_layer3_interfaces(sw1, sw2, step):
     # Populate the expected RIB ("show rib") route dictionary for the connected
     # IPv6 route for loopback primary address and its next-hops.
     rib_ipv6_loopback_connected_route_primary = dict()
-    rib_ipv6_loopback_connected_route_primary['Route'] = '4:4::/64'
+    rib_ipv6_loopback_connected_route_primary['Route'] = '4:4::/128'
     rib_ipv6_loopback_connected_route_primary['NumberNexthops'] = '1'
     rib_ipv6_loopback_connected_route_primary['lo1'] = dict()
     rib_ipv6_loopback_connected_route_primary['lo1']['Distance'] = '0'
@@ -1331,14 +1331,14 @@ def remove_addresses_from_layer3_interfaces(sw1, sw2, step):
     # Un-configure loopback interface addresses
     sw1("configure terminal")
     sw1("interface loopback 1")
-    sw1("no ip address 4.4.4.4/24")
-    sw1("no ipv6 address 4:4::4/64")
+    sw1("no ip address 4.4.4.4/32")
+    sw1("no ipv6 address 4:4::4/128")
     sw1("exit")
 
     # Populate the expected RIB ("show rib") route dictionary for the connected
     # IPv4 route for loopback primary address and its next-hops.
     rib_ipv4_loopback_connected_route_primary = dict()
-    rib_ipv4_loopback_connected_route_primary['Route'] = '4.4.4.0/24'
+    rib_ipv4_loopback_connected_route_primary['Route'] = '4.4.4.0/32'
 
     # Populate the expected RIB ("show ip route") route dictionary for the connected
     # IPv4 route for loopback primary address and its next-hops.
@@ -1347,7 +1347,7 @@ def remove_addresses_from_layer3_interfaces(sw1, sw2, step):
     # Populate the expected RIB ("show rib") route dictionary for the connected
     # IPv6 route for loopback primary address and its next-hops.
     rib_ipv6_loopback_connected_route_primary = dict()
-    rib_ipv6_loopback_connected_route_primary['Route'] = '4:4::/64'
+    rib_ipv6_loopback_connected_route_primary['Route'] = '4:4::/128'
 
     # Populate the expected RIB ("show ipv6 route") route dictionary for the connected
     # IPv6 route for sub-interface primary address and its next-hops.
@@ -1698,14 +1698,14 @@ def reconfigure_addresses_on_layer3_interfaces(sw1, sw2, step):
     # Re-configure loopback interface addresses
     sw1("configure terminal")
     sw1("interface loopback 1")
-    sw1("ip address 4.4.4.4/24")
-    sw1("ipv6 address 4:4::4/64")
+    sw1("ip address 4.4.4.4/32")
+    sw1("ipv6 address 4:4::4/128")
     sw1("exit")
 
     # Populate the expected RIB ("show rib") route dictionary for the connected
     # IPv4 route for loopback primary address and its next-hops.
     rib_ipv4_loopback_connected_route_primary = dict()
-    rib_ipv4_loopback_connected_route_primary['Route'] = '4.4.4.0/24'
+    rib_ipv4_loopback_connected_route_primary['Route'] = '4.4.4.0/32'
     rib_ipv4_loopback_connected_route_primary['NumberNexthops'] = '1'
     rib_ipv4_loopback_connected_route_primary['lo1'] = dict()
     rib_ipv4_loopback_connected_route_primary['lo1']['Distance'] = '0'
@@ -1719,7 +1719,7 @@ def reconfigure_addresses_on_layer3_interfaces(sw1, sw2, step):
     # Populate the expected RIB ("show rib") route dictionary for the connected
     # IPv6 route for loopback primary address and its next-hops.
     rib_ipv6_loopback_connected_route_primary = dict()
-    rib_ipv6_loopback_connected_route_primary['Route'] = '4:4::/64'
+    rib_ipv6_loopback_connected_route_primary['Route'] = '4:4::/128'
     rib_ipv6_loopback_connected_route_primary['NumberNexthops'] = '1'
     rib_ipv6_loopback_connected_route_primary['lo1'] = dict()
     rib_ipv6_loopback_connected_route_primary['lo1']['Distance'] = '0'
@@ -2080,14 +2080,14 @@ def restart_zebra_with_config_change_for_layer3_interfaces(sw1, sw2, step):
     # Change the IPv4 and IPv6 addresses on the loopback interface
     sw1("configure terminal")
     sw1("interface loopback 1")
-    sw1("ip address 6.6.6.6/24")
-    sw1("ipv6 address 6:6::6/64")
+    sw1("ip address 6.6.6.6/32")
+    sw1("ipv6 address 6:6::6/128")
     sw1("exit")
 
     # Populate the expected RIB ("show rib") route dictionary for the connected
     # IPv4 route for loopback primary address and its next-hops.
     rib_ipv4_loopback_connected_route_primary = dict()
-    rib_ipv4_loopback_connected_route_primary['Route'] = '6.6.6.0/24'
+    rib_ipv4_loopback_connected_route_primary['Route'] = '6.6.6.0/32'
     rib_ipv4_loopback_connected_route_primary['NumberNexthops'] = '1'
     rib_ipv4_loopback_connected_route_primary['lo1'] = dict()
     rib_ipv4_loopback_connected_route_primary['lo1']['Distance'] = '0'
@@ -2101,7 +2101,7 @@ def restart_zebra_with_config_change_for_layer3_interfaces(sw1, sw2, step):
     # Populate the expected RIB ("show rib") route dictionary for the connected
     # IPv6 route for loopback primary address and its next-hops.
     rib_ipv6_loopback_connected_route_primary = dict()
-    rib_ipv6_loopback_connected_route_primary['Route'] = '6:6::/64'
+    rib_ipv6_loopback_connected_route_primary['Route'] = '6:6::/128'
     rib_ipv6_loopback_connected_route_primary['NumberNexthops'] = '1'
     rib_ipv6_loopback_connected_route_primary['lo1'] = dict()
     rib_ipv6_loopback_connected_route_primary['lo1']['Distance'] = '0'
@@ -2115,7 +2115,7 @@ def restart_zebra_with_config_change_for_layer3_interfaces(sw1, sw2, step):
     # Populate the expected RIB ("show rib") route dictionary for the connected
     # IPv4 route for old loopback primary address and its next-hops.
     rib_ipv4_old_loopback_connected_route_primary = dict()
-    rib_ipv4_old_loopback_connected_route_primary['Route'] = '4.4.4.0/24'
+    rib_ipv4_old_loopback_connected_route_primary['Route'] = '4.4.4.0/32'
 
     # Populate the expected RIB ("show ip route") route dictionary for the connected
     # IPv4 route for old loopback primary address and its next-hops.
@@ -2124,7 +2124,7 @@ def restart_zebra_with_config_change_for_layer3_interfaces(sw1, sw2, step):
     # Populate the expected RIB ("show rib") route dictionary for the connected
     # IPv6 route for old loopback primary address and its next-hops.
     rib_ipv6_old_loopback_connected_route_primary = dict()
-    rib_ipv6_old_loopback_connected_route_primary['Route'] = '4:4::/64'
+    rib_ipv6_old_loopback_connected_route_primary['Route'] = '4:4::/128'
 
     # Populate the expected RIB ("show ipv6 route") route dictionary for the connected
     # IPv6 route for old loopback primary address and its next-hops.
@@ -2550,14 +2550,14 @@ def change_layer3_interface_config_after_zebra_restart(sw1, sw2, step):
     # Change back the IPv4 and IPv6 addresses on the loopback interface
     sw1("configure terminal")
     sw1("interface loopback 1")
-    sw1("ip address 4.4.4.6/24")
-    sw1("ipv6 address 4:4::4/64")
+    sw1("ip address 4.4.4.6/32")
+    sw1("ipv6 address 4:4::4/128")
     sw1("exit")
 
     # Populate the expected RIB ("show rib") route dictionary for the connected
     # IPv4 route for loopback primary address and its next-hops.
     rib_ipv4_loopback_connected_route_primary = dict()
-    rib_ipv4_loopback_connected_route_primary['Route'] = '4.4.4.0/24'
+    rib_ipv4_loopback_connected_route_primary['Route'] = '4.4.4.0/32'
     rib_ipv4_loopback_connected_route_primary['NumberNexthops'] = '1'
     rib_ipv4_loopback_connected_route_primary['lo1'] = dict()
     rib_ipv4_loopback_connected_route_primary['lo1']['Distance'] = '0'
@@ -2571,7 +2571,7 @@ def change_layer3_interface_config_after_zebra_restart(sw1, sw2, step):
     # Populate the expected RIB ("show rib") route dictionary for the connected
     # IPv6 route for loopback primary address and its next-hops.
     rib_ipv6_loopback_connected_route_primary = dict()
-    rib_ipv6_loopback_connected_route_primary['Route'] = '4:4::/64'
+    rib_ipv6_loopback_connected_route_primary['Route'] = '4:4::/128'
     rib_ipv6_loopback_connected_route_primary['NumberNexthops'] = '1'
     rib_ipv6_loopback_connected_route_primary['lo1'] = dict()
     rib_ipv6_loopback_connected_route_primary['lo1']['Distance'] = '0'
@@ -2585,7 +2585,7 @@ def change_layer3_interface_config_after_zebra_restart(sw1, sw2, step):
     # Populate the expected RIB ("show rib") route dictionary for the connected
     # IPv4 route for old loopback primary address and its next-hops.
     rib_ipv4_old_loopback_connected_route_primary = dict()
-    rib_ipv4_old_loopback_connected_route_primary['Route'] = '6.6.6.0/24'
+    rib_ipv4_old_loopback_connected_route_primary['Route'] = '6.6.6.0/32'
 
     # Populate the expected RIB ("show ip route") route dictionary for the connected
     # IPv4 route for old loopback primary address and its next-hops.
@@ -2594,7 +2594,7 @@ def change_layer3_interface_config_after_zebra_restart(sw1, sw2, step):
     # Populate the expected RIB ("show rib") route dictionary for the connected
     # IPv6 route for old loopback primary address and its next-hops.
     rib_ipv6_old_loopback_connected_route_primary = dict()
-    rib_ipv6_old_loopback_connected_route_primary['Route'] = '6:6::/64'
+    rib_ipv6_old_loopback_connected_route_primary['Route'] = '6:6::/128'
 
     # Populate the expected RIB ("show ipv6 route") route dictionary for the connected
     # IPv6 route for old loopback primary address and its next-hops.
@@ -2960,7 +2960,7 @@ def no_routing_or_delete_layer3_interfaces(sw1, sw2, step):
     # Populate the expected RIB ("show rib") route dictionary for the connected
     # IPv4 route for loopback primary address and its next-hops.
     rib_ipv4_loopback_connected_route_primary = dict()
-    rib_ipv4_loopback_connected_route_primary['Route'] = '4.4.4.0/24'
+    rib_ipv4_loopback_connected_route_primary['Route'] = '4.4.4.0/32'
 
     # Populate the expected RIB ("show ip route") route dictionary for the connected
     # IPv4 route for loopback primary address and its next-hops.
@@ -2969,7 +2969,7 @@ def no_routing_or_delete_layer3_interfaces(sw1, sw2, step):
     # Populate the expected RIB ("show rib") route dictionary for the connected
     # IPv6 route for loopback primary address and its next-hops.
     rib_ipv6_loopback_connected_route_primary = dict()
-    rib_ipv6_loopback_connected_route_primary['Route'] = '4:4::/64'
+    rib_ipv6_loopback_connected_route_primary['Route'] = '4:4::/128'
 
     # Populate the expected RIB ("show ipv6 route") route dictionary for the connected
     # IPv6 route for sub-interface primary address and its next-hops.

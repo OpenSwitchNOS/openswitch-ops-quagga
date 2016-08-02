@@ -477,7 +477,7 @@ bgp_ovsdb_set_rib_nexthop(struct ovsdb_idl_txn *txn,
     if (p->family == AF_INET) {
         nexthop = &info->attr->nexthop;
         if (nexthop->s_addr == 0) {
-            VLOG_INFO("%s: Nexthop address is 0 for route %s\n",
+            VLOG_DBG("%s: Nexthop address is 0 for route %s\n",
                       __FUNCTION__, pr);
             return -1;
         }
@@ -488,7 +488,7 @@ bgp_ovsdb_set_rib_nexthop(struct ovsdb_idl_txn *txn,
             ((uint32_t)(nexthop6->s6_addr[4] == 0)) &&
             ((uint32_t)(nexthop6->s6_addr[8] == 0)) &&
             ((uint32_t)(nexthop6->s6_addr[12] == 0))) {
-            VLOG_INFO("%s: Nexthop6 address is 0 for route %s\n",
+            VLOG_DBG("%s: Nexthop6 address is 0 for route %s\n",
                       __FUNCTION__, pr);
             return -1;
         }
@@ -516,7 +516,7 @@ bgp_ovsdb_set_rib_nexthop(struct ovsdb_idl_txn *txn,
             if (p->family == AF_INET) {
                 nexthop = &mpinfo->attr->nexthop;
                 if (nexthop->s_addr == 0) {
-                    VLOG_INFO("%s: Nexthop address is 0 for route %s\n",
+                    VLOG_DBG("%s: Nexthop address is 0 for route %s\n",
                               __FUNCTION__, pr);
                     return -1;
                 }
@@ -527,7 +527,7 @@ bgp_ovsdb_set_rib_nexthop(struct ovsdb_idl_txn *txn,
                    ((uint32_t)(nexthop6->s6_addr[4] == 0)) &&
                    ((uint32_t)(nexthop6->s6_addr[8] == 0)) &&
                    ((uint32_t)(nexthop6->s6_addr[12] == 0))) {
-                    VLOG_INFO("%s: Nexthop6 address is 0 for route %s\n",
+                    VLOG_DBG("%s: Nexthop6 address is 0 for route %s\n",
                               __FUNCTION__, pr);
                     return -1;
                    }
@@ -583,7 +583,7 @@ bgp_ovsdb_set_local_rib_nexthop(struct ovsdb_idl_txn *txn,
     if (p->family == AF_INET) {
         nexthop = &info->attr->nexthop;
         if (nexthop->s_addr == 0) {
-            VLOG_INFO("%s: Nexthop address is 0 for route %s\n",
+            VLOG_DBG("%s: Nexthop address is 0 for route %s\n",
                       __FUNCTION__, pr);
             return -1;
         }
@@ -594,7 +594,7 @@ bgp_ovsdb_set_local_rib_nexthop(struct ovsdb_idl_txn *txn,
             ((uint32_t)(nexthop6->s6_addr[4] == 0)) &&
             ((uint32_t)(nexthop6->s6_addr[8] == 0)) &&
             ((uint32_t)(nexthop6->s6_addr[12] == 0))) {
-            VLOG_INFO("%s: Nexthop6 address is 0 for route %s\n",
+            VLOG_DBG("%s: Nexthop6 address is 0 for route %s\n",
                       __FUNCTION__, pr);
             return -1;
         }
@@ -619,7 +619,7 @@ bgp_ovsdb_set_local_rib_nexthop(struct ovsdb_idl_txn *txn,
             if (p->family == AF_INET) {
                 nexthop = &mpinfo->attr->nexthop;
                 if (nexthop->s_addr == 0) {
-                    VLOG_INFO("%s: Nexthop address is 0 for route %s\n",
+                    VLOG_DBG("%s: Nexthop address is 0 for route %s\n",
                       __FUNCTION__, pr);
                     return -1;
                 }
@@ -630,7 +630,7 @@ bgp_ovsdb_set_local_rib_nexthop(struct ovsdb_idl_txn *txn,
                    ((uint32_t)(nexthop6->s6_addr[4] == 0)) &&
                    ((uint32_t)(nexthop6->s6_addr[8] == 0)) &&
                    ((uint32_t)(nexthop6->s6_addr[12] == 0))) {
-                   VLOG_INFO("%s: Nexthop6 address is 0 for route %s\n",
+                   VLOG_DBG("%s: Nexthop6 address is 0 for route %s\n",
                              __FUNCTION__, pr);
                    return -1;
                 }
@@ -948,7 +948,7 @@ bgp_ovsdb_announce_rib_entry(struct prefix *p,
         VLOG_DBG("Inserting route %s\n", pr);
         rib = ovsrec_route_insert(txn);
         ovsrec_route_set_prefix(rib, pr);
-        VLOG_INFO("%s: setting prefix %s\n", __FUNCTION__, pr);
+        VLOG_DBG("%s: setting prefix %s\n", __FUNCTION__, pr);
         ovsrec_route_set_address_family(rib, afi);
         ovsrec_route_set_sub_address_family(rib, safi_str);
         ovsrec_route_set_from(rib, "bgp");
@@ -1008,6 +1008,34 @@ bgp_ovsdb_announce_rib_entry(struct prefix *p,
     END_DB_TXN(txn, "announced route", pr);
 }
 
+bool
+bgp_lookup_global_hmap_entry(struct prefix *p,
+                              struct bgp_info *info,
+                              struct bgp *bgp,
+                              safi_t safi)
+{
+    struct lookup_hmap_element *global_hmap_node = NULL;
+    struct lookup_hmap_element *hmap_entry = NULL;
+    uint32_t lookup_hash;
+    char pr[PREFIX_MAXLEN];
+    if (!info)
+        return false;
+
+    prefix2str(p, pr, sizeof(pr));
+    lookup_hash = get_lookup_key(pr, BGP_ROUTE_TABLE, info->peer->host);
+
+    HMAP_FOR_EACH_IN_BUCKET(hmap_entry, node, lookup_hash, &global_hmap) {
+        if(!strcmp(hmap_entry->prefix, pr) &&
+                  (hmap_entry->table_type == BGP_ROUTE) &&
+                        !strcmp(hmap_entry->next_hop, info->peer->host)){
+                if (hmap_entry->state != DB_SYNC) {
+                    return false;
+                }
+                return true;
+        }
+    }
+    return false;
+}
 
 /*
  * This function adds BGP route to BGP Route table
@@ -1075,7 +1103,7 @@ bgp_ovsdb_add_local_rib_entry(struct prefix *p,
     rib = ovsrec_bgp_route_insert(txn);
 
     ovsrec_bgp_route_set_prefix(rib, pr);
-    VLOG_INFO("%s: setting prefix %s\n", __FUNCTION__, pr);
+    VLOG_DBG("%s: setting prefix %s\n", __FUNCTION__, pr);
     ovsrec_bgp_route_set_address_family(rib, afi);
     ovsrec_bgp_route_set_sub_address_family(rib, safi_str);
 
@@ -1648,7 +1676,6 @@ policy_rt_map_read_ovsdb_apply_deletion (struct ovsdb_idl *idl)
     ovs_first = ovsrec_route_map_first(idl);
     if (ovs_first && !OVSREC_IDL_ANY_TABLE_ROWS_DELETED(ovs_first, idl_seqno)) {
         VLOG_DBG("No route map rows were deleted");
-        VLOG_INFO("%s: no route-map rows were deleted", __FUNCTION__);
         return;
     }
 
@@ -1664,7 +1691,6 @@ policy_rt_map_read_ovsdb_apply_deletion (struct ovsdb_idl *idl)
         if (!matched) {
             route_map_delete (map);
             VLOG_DBG("Route map row deleted");
-            VLOG_INFO("%s: route-map row is deleted", __FUNCTION__);
         }
     }
 }
@@ -1683,7 +1709,6 @@ policy_rt_map_entry_read_ovsdb_apply_deletion (struct ovsdb_idl *idl)
     ovs_first = ovsrec_route_map_entry_first(idl);
     if (ovs_first && !OVSREC_IDL_ANY_TABLE_ROWS_DELETED(ovs_first, idl_seqno)) {
         VLOG_DBG("No route map entry deletions detected.");
-        VLOG_INFO("%s: No route map entry deletions detected", __FUNCTION__);
         return;
     }
 
@@ -1695,7 +1720,7 @@ policy_rt_map_entry_read_ovsdb_apply_deletion (struct ovsdb_idl *idl)
             VLOG_DBG("Comparing against route-map with name: %s",
                      ovs_map->name);
 
-            VLOG_INFO("%s: map->name %s ovs_map->name %s", __FUNCTION__,
+            VLOG_DBG("%s: map->name %s ovs_map->name %s", __FUNCTION__,
                       map->name, ovs_map->name);
             if (strcmp (map->name, ovs_map->name) == 0) {
                 for (index = map->head; index; index = index->next) {
@@ -1705,7 +1730,7 @@ policy_rt_map_entry_read_ovsdb_apply_deletion (struct ovsdb_idl *idl)
                     for (i = 0; i < ovs_map->n_route_map_entries; i ++) {
                         VLOG_DBG("Checking against pref %lld", index->pref);
 
-                        VLOG_INFO("%s: index->pref %d ovs_map->key_route_map_entries %d",
+                        VLOG_DBG("%s: index->pref %d ovs_map->key_route_map_entries %d",
                                   __FUNCTION__, index->pref,
                                   ovs_map->key_route_map_entries[i]);
                         if (index->pref == ovs_map->key_route_map_entries[i]) {
@@ -1717,7 +1742,6 @@ policy_rt_map_entry_read_ovsdb_apply_deletion (struct ovsdb_idl *idl)
                     if (!matched) {
                         route_map_index_delete (index, 1);
                         VLOG_DBG("Route map entry deleted");
-                        VLOG_INFO("%s: route-map entry is deleted", __FUNCTION__);
                     }
                 }
             }
@@ -1733,15 +1757,12 @@ policy_rt_map_description_ovsdb_apply_changes(
     if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_route_map_entry_col_description,
                                       idl_seqno)) {
         VLOG_DBG("Route-map description was modified");
-        VLOG_INFO("%s: route-map col description modified", __FUNCTION__);
         *argc = RT_MAP_DESCRIPTION;
         if (ovs_entry->description) {
             VLOG_DBG("Setting description %s", ovs_entry->description);
-            VLOG_INFO("%s: Setting description %s", __FUNCTION__, ovs_entry->description);
             strcpy(argv1[RT_MAP_DESCRIPTION], ovs_entry->description);
         } else {
             VLOG_DBG("Unsetting description");
-            VLOG_INFO("%s: Unsetting description %s", __FUNCTION__, ovs_entry->description);
             argv1[RT_MAP_DESCRIPTION] = NULL;
         }
     }
@@ -1759,23 +1780,20 @@ policy_rt_map_match_ovsdb_apply_changes(
     char *match_name;
     const char *tmp;
 
-    VLOG_INFO("%s: route-map name %s pref %ld action %d", __FUNCTION__,
+    VLOG_DBG("%s: route-map name %s pref %ld action %d", __FUNCTION__,
               map->name, pref, action);
 
     if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_route_map_entry_col_match,
                                       idl_seqno)) {
-        VLOG_INFO("%s: route_map entry column match is modified", __FUNCTION__);
         VLOG_DBG("Route map match was changed. Detecting additions/deletions.");
 
         int i;
         for (i = 0, *argc = 0; match_table[i].table_key; i++) {
             VLOG_DBG("Checking value for: %s", match_table[i].table_key);
-            VLOG_INFO("%s: match_table[%d].table_key %s", __FUNCTION__, i,
-                      match_table[i].table_key);
 
             tmp  = smap_get(&ovs_entry->match, match_table[i].table_key);
             match_name = match_table[i].cli_cmd;
-            VLOG_INFO("%s: tmp %s match_name %s", __FUNCTION__, tmp, match_name);
+            VLOG_DBG("%s: tmp %s match_name %s", __FUNCTION__, tmp, match_name);
 
             if (tmp) {
                 VLOG_DBG("Value was set with: %s", tmp);
@@ -1784,12 +1802,10 @@ policy_rt_map_match_ovsdb_apply_changes(
 
                 int j;
                 for (j = 0; j < *argc; j++) {
-                    VLOG_INFO("%s: argv[%d] %s", __FUNCTION__, j, argv[j]);
+                    VLOG_DBG("%s: argv[%d] %s", __FUNCTION__, j, argv[j]);
                 }
             } else {
                 VLOG_DBG("Value was not set. Detecting deletion.");
-                VLOG_INFO("%s: value was not set. Detecting deletion.",
-                          __FUNCTION__);
 
                 /* Value was not found in the ovsdb record, check if
                  * it exists in BGP. If exists, then indicates it was deleted.
@@ -1799,7 +1815,6 @@ policy_rt_map_match_ovsdb_apply_changes(
                     /* Attempt to delete the match rule. */
                     if (route_map_delete_match(index, match_name, NULL) == 0) {
                         VLOG_DBG("Route map match deleted");
-                        VLOG_INFO("%s: Route map match deleted", __FUNCTION__);
                     }
                 }
             }
@@ -1819,22 +1834,19 @@ policy_rt_map_set_ovsdb_apply_changes(
     char *set_name;
     const char *tmp;
 
-    VLOG_INFO("%s: route-map name %s pref %ld action %d", __FUNCTION__,
+    VLOG_DBG("%s: route-map name %s pref %ld action %d", __FUNCTION__,
               map->name, pref, action);
 
     if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_route_map_entry_col_set,
                                       idl_seqno)) {
-        VLOG_INFO("%s: route_map entry column set is modified", __FUNCTION__);
         VLOG_DBG("Route map set was changed. Detecting additions/deletions.");
         int i;
         for (i = 0, *argc = 0; set_table[i].table_key; i++) {
             VLOG_DBG("Checking value for: %s", set_table[i].table_key);
-            VLOG_INFO("%s: set_table[%d].table_key %s", __FUNCTION__, i,
-                      set_table[i].table_key);
 
             tmp  = smap_get(&ovs_entry->set, set_table[i].table_key);
             set_name = set_table[i].cli_cmd;
-            VLOG_INFO("%s: tmp %s set_name %s", __FUNCTION__, tmp, set_name);
+            VLOG_DBG("%s: tmp %s set_name %s", __FUNCTION__, tmp, set_name);
 
             if (tmp) {
                 VLOG_DBG("Value was set with: %s", tmp);
@@ -1843,12 +1855,10 @@ policy_rt_map_set_ovsdb_apply_changes(
 
                 int j;
                 for (j = 0; j < *argc; j++) {
-                    VLOG_INFO("%s: argv[%d] %s", __FUNCTION__, j, argv[j]);
+                    VLOG_DBG("%s: argv[%d] %s", __FUNCTION__, j, argv[j]);
                 }
             } else {
                 VLOG_DBG("Value was not set. Detecting deletion.");
-                VLOG_INFO("%s: Value was not set. Detecting deletion.",
-                          __FUNCTION__);
 
                 /* Value was not found in the ovsdb record, check if
                  * it exists in BGP. If exists, then indicates it was deleted.
@@ -1858,7 +1868,6 @@ policy_rt_map_set_ovsdb_apply_changes(
                     /* Attempt to delete the set rule. */
                     if (route_map_delete_set(index, set_name, NULL) == 0) {
                         VLOG_DBG("Route map set deleted");
-                        VLOG_INFO("%s: Route map set deleted", __FUNCTION__);
                     }
                 }
             }
@@ -1893,19 +1902,17 @@ policy_rt_map_do_change(struct ovsdb_idl *idl,
 
         /* Get route map associated with the provided name. */
         VLOG_DBG("Configuring for route-map with name: %s", argv1[RT_MAP_NAME]);
-        VLOG_INFO("%s: Configuring route-map with name: %s", __FUNCTION__,
-                  argv1[RT_MAP_NAME]);
 
         map = route_map_get(argv1[RT_MAP_NAME]);
 
         if(!map)
-            VLOG_INFO("%s: route_map_get returned NULL", __FUNCTION__);
+            VLOG_DBG("%s: route_map_get returned NULL", __FUNCTION__);
 
         for (i = 0; i < ovs_map->n_route_map_entries; i ++) {
             ovs_entry = ovs_map->value_route_map_entries[i];
 
             if(!ovs_entry)
-                VLOG_INFO("%s: route_map entry is NULL", __FUNCTION__);
+                VLOG_DBG("%s: route_map entry is NULL", __FUNCTION__);
 
             if (!(OVSREC_IDL_IS_ROW_INSERTED(ovs_entry, idl_seqno)) &&
                 !(OVSREC_IDL_IS_ROW_MODIFIED(ovs_entry, idl_seqno))) {
@@ -2004,10 +2011,10 @@ policy_ovsdb_rt_map_vlog(int ret)
         switch (ret)
         {
         case RMAP_RULE_MISSING:
-        VLOG_INFO("%% Can't find rule.\n");
+        VLOG_ERR("%% Can't find rule.\n");
             return CMD_WARNING;
         case RMAP_COMPILE_ERROR:
-            VLOG_INFO("%% Argument is malformed.\n");
+            VLOG_ERR("%% Argument is malformed.\n");
             return CMD_WARNING;
         }
     }
@@ -2053,7 +2060,7 @@ policy_rt_map_apply_changes (struct route_map *map,
         return CMD_SUCCESS;
     }
 
-    VLOG_INFO("%s: route-map name %s action %d pref %ld", __FUNCTION__,
+    VLOG_DBG("%s: route-map name %s action %d pref %ld", __FUNCTION__,
               map->name, action, pref);
     index = route_map_index_get(map, action, pref);
 
@@ -2069,7 +2076,7 @@ policy_rt_map_apply_changes (struct route_map *map,
         index->description = argv1[RT_MAP_DESCRIPTION] ?
                                 argv_concat (&argv1[RT_MAP_DESCRIPTION], 1, 0) :
                                 NULL;
-        VLOG_INFO("%s: route-map index description %s",
+        VLOG_DBG("%s: route-map index description %s",
                   __FUNCTION__, index->description);
     }
 
@@ -2077,7 +2084,7 @@ policy_rt_map_apply_changes (struct route_map *map,
     * Add route map match command
     */
     for (i = 0; i < argcmatch; i += 2) {
-        VLOG_INFO("%s: route-map argvmatch1 %s argvmatch2 %s", __FUNCTION__,
+        VLOG_DBG("%s: route-map argvmatch1 %s argvmatch2 %s", __FUNCTION__,
                   argvmatch[i], argvmatch[i+1]);
         ret = route_map_add_match (index, argvmatch[i], argvmatch[i+1]);
         /* log if error */
@@ -2088,13 +2095,13 @@ policy_rt_map_apply_changes (struct route_map *map,
     * Add route map set command
     */
     for (i = 0; i < argcset; i += 2) {
-        VLOG_INFO("%s: route-map argvset1 %s argvset2 %s", __FUNCTION__,
+        VLOG_DBG("%s: route-map argvset1 %s argvset2 %s", __FUNCTION__,
                   argvset[i], argvset[i+1]);
         ret = route_map_add_set (index, argvset[i], argvset[i+1]);
         ret = policy_ovsdb_rt_map_vlog(ret);
     }
 
-    VLOG_INFO("%s: Returning SUCCESS", __FUNCTION__);
+    VLOG_DBG("%s: Returning SUCCESS", __FUNCTION__);
     return CMD_SUCCESS;
 }
 
@@ -2939,7 +2946,7 @@ bgp_ovsdb_republish_route(const struct ovsrec_bgp_router *bgp_first, int asn)
        VLOG_ERR("%s Invalid bgp ",__FUNCTION__ );
        return -1;
     }
-    VLOG_INFO("%s for AS %d",__FUNCTION__, asn );
+    VLOG_DBG("%s for AS %d",__FUNCTION__, asn );
     for (rn = bgp_table_top (bgp->rib[AFI_IP][SAFI_UNICAST]); rn;
          rn = bgp_route_next (rn))
     {

@@ -188,4 +188,9 @@ bgp_ovsdb_republish_route(const struct ovsrec_bgp_router *bgp_first, int asn);
 
 extern void
 bgp_txn_complete_processing(void);
+
+extern bool
+bgp_lookup_global_hmap_entry(struct prefix *p, struct bgp_info *info,
+                                 struct bgp *bgp, safi_t safi);
+
 #endif /* BGP_OVSDB_RIB_H */

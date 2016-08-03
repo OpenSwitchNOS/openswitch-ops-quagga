@@ -1008,6 +1008,37 @@ bgp_ovsdb_announce_rib_entry(struct prefix *p,
     END_DB_TXN(txn, "announced route", pr);
 }
 
+/*
+ * This functions checks if a prefix with a nexthop for BGP_Route table exists in the hash
+ */
+bool
+bgp_lookup_global_hmap_entry(struct prefix *p,
+                              struct bgp_info *info,
+                              struct bgp *bgp,
+                              safi_t safi)
+{
+    struct lookup_hmap_element *global_hmap_node = NULL;
+    struct lookup_hmap_element *hmap_entry = NULL;
+    uint32_t lookup_hash;
+    char pr[PREFIX_MAXLEN];
+    if (!info)
+        return false;
+
+    prefix2str(p, pr, sizeof(pr));
+    lookup_hash = get_lookup_key(pr, BGP_ROUTE_TABLE, info->peer->host);
+
+    HMAP_FOR_EACH_IN_BUCKET(hmap_entry, node, lookup_hash, &global_hmap) {
+        if(!strcmp(hmap_entry->prefix, pr) &&
+                  (hmap_entry->table_type == BGP_ROUTE) &&
+                        !strcmp(hmap_entry->next_hop, info->peer->host)){
+                if (hmap_entry->state != DB_SYNC) {
+                    return false;
+                }
+                return true;
+        }
+    }
+    return false;
+}
 
 /*
  * This function adds BGP route to BGP Route table

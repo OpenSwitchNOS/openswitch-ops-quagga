@@ -204,7 +204,17 @@ bgp_info_add (struct bgp_node *rn, struct bgp_info *ri, safi_t safi)
   bgp_lock_node (rn);
   peer_lock (ri->peer); /* bgp_info peer reference */
 #ifdef ENABLE_OVSDB
-  bgp_ovsdb_add_local_rib_entry(&rn->p, ri, ri->peer->bgp, safi);
+  if (ri) {
+     if (ri->flags && !CHECK_FLAG (ri->flags, BGP_INFO_REMOVED)) {
+        if (ri->peer) {
+            if (ri->peer->host) {
+               if (!strcmp(ri->peer->host, "Static announcement")) {
+                  bgp_ovsdb_add_local_rib_entry(&rn->p, ri, ri->peer->bgp, safi);
+               }
+            }
+         }
+      }
+   }
 #endif
 }
 
@@ -1575,6 +1585,28 @@ bgp_process_rsclient (struct work_queue *wq, void *data)
   return WQ_SUCCESS;
 }
 
+#ifdef ENABLE_OVSDB
+static void
+bgp_process_non_selected_route_nodes (struct bgp_node *rn,
+                                      struct bgp *bgp, safi_t safi)
+{
+    struct bgp_info *nextri = NULL;
+    struct bgp_info *ri;
+    struct prefix *p = &rn->p;
+    if (!rn || !bgp)
+        return;
+
+    for (ri = rn->info; (ri != NULL) && (nextri = ri->next, 1); ri = nextri) {
+        if (!CHECK_FLAG(ri->flags, BGP_INFO_REMOVED) &&
+            !CHECK_FLAG(ri->flags, BGP_INFO_SELECTED)) {
+            if (false == bgp_lookup_global_hmap_entry(p, ri, bgp, safi)) {
+                bgp_ovsdb_add_local_rib_entry(p, ri, bgp, safi);
+            }
+        }
+    }
+}
+#endif
+
 static wq_item_status
 bgp_process_main (struct work_queue *wq, void *data)
 {
@@ -1589,6 +1621,7 @@ bgp_process_main (struct work_queue *wq, void *data)
   struct bgp_info_pair old_and_new;
   struct listnode *node, *nnode;
   struct peer *peer;
+  bool local_route_sent = false;
 
   /* Best path selection. */
   bgp_best_selection (bgp, rn, &bgp->maxpaths[afi][safi], &old_and_new, safi);
@@ -1606,12 +1639,7 @@ bgp_process_main (struct work_queue *wq, void *data)
           }
           UNSET_FLAG (old_select->flags, BGP_INFO_MULTIPATH_CHG);
           UNSET_FLAG (rn->flags, BGP_NODE_PROCESS_SCHEDULED);
-#ifdef ENABLE_OVSDB
-    if (! CHECK_FLAG (old_select->flags, BGP_INFO_REMOVED)) {
-          bgp_ovsdb_update_local_rib_entry_attributes (p, old_select, bgp, safi);
-          bgp_txn_finish();
-    }
-#endif
+          bgp_process_non_selected_route_nodes(rn, bgp, safi);
           return WQ_SUCCESS;
         }
     }
@@ -1651,26 +1679,47 @@ bgp_process_main (struct work_queue *wq, void *data)
 	}
     }
 #ifdef ENABLE_OVSDB
-  if (old_select) {
-      if (! CHECK_FLAG (old_select->flags, BGP_INFO_REMOVED)) {
-          bgp_ovsdb_update_local_rib_entry_attributes (p, old_select, bgp, safi);
-          bgp_txn_finish();
+     if (old_select) {
+          if (! CHECK_FLAG (old_select->flags, BGP_INFO_REMOVED)) {
+              bgp_ovsdb_update_local_rib_entry_attributes (p, old_select, bgp, safi);
+              bgp_txn_finish();
+          }
       }
-  }
-  if (new_select) {
-      if (! CHECK_FLAG (new_select->flags, BGP_INFO_REMOVED)) {
-          bgp_ovsdb_update_local_rib_entry_attributes (p, new_select, bgp, safi);
-          bgp_txn_finish();
+
+
+      if (new_select) {
+          if (! CHECK_FLAG (new_select->flags, BGP_INFO_REMOVED)) {
+              if (new_select->peer) {
+                  if (new_select->peer->host) {
+                      if (!strcmp(new_select->peer->host, "Static announcement")) {
+                          local_route_sent = true;
+                          bgp_ovsdb_update_local_rib_entry_attributes (p, new_select, bgp, safi);
+                          bgp_txn_finish();
+                      }
+                  }
+              }
+              if (local_route_sent == false) {
+                  if (false ==
+                      bgp_lookup_global_hmap_entry(p, new_select, bgp, safi)) {
+                          bgp_ovsdb_add_local_rib_entry(p, new_select, bgp, safi);
+                  } else {
+                      bgp_ovsdb_update_local_rib_entry_attributes (p, new_select, bgp, safi);
+                      bgp_txn_finish();
+                  }
+              }
+          }
       }
-  }
+
+      bgp_process_non_selected_route_nodes(rn, bgp, safi);
+
 #endif
 
   /* Reap old select bgp_info, it it has been removed */
   if (old_select && CHECK_FLAG (old_select->flags, BGP_INFO_REMOVED)) {
       bgp_info_reap (rn, old_select, safi);
+      bgp_txn_finish();
   }
 
-  bgp_txn_finish();
 
   UNSET_FLAG (rn->flags, BGP_NODE_PROCESS_SCHEDULED);
   return WQ_SUCCESS;

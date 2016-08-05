@@ -2270,7 +2270,6 @@ void bgp_daemon_ovsdb_neighbor_update (struct peer *peer,
     struct ovsdb_idl_txn *db_txn;
     enum ovsdb_idl_txn_status status;
     struct smap smap;
-    int64_t peer_weight;
 
     ovs_bgp_neighbor_ptr = get_bgp_neighbor_db_row(peer);
     if (NULL == ovs_bgp_neighbor_ptr) {
@@ -2312,9 +2311,8 @@ void bgp_daemon_ovsdb_neighbor_update (struct peer *peer,
      */
 
     VLOG_DBG("updating weight to %d\n", peer->weight);
-    peer_weight = peer->weight;
     ovsrec_bgp_neighbor_set_weight(ovs_bgp_neighbor_ptr,
-        &peer_weight, 1);
+        (int64_t*) &peer->weight, 1);
 
     smap_init(&smap);
     smap_add(&smap, BGP_PEER_STATE, bgp_peer_status_to_string(peer->status));

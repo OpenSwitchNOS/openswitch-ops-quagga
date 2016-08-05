@@ -60,6 +60,10 @@ zebra_start_command_string = "systemctl start ops-zebra"
 
 def configure_ipv6_static_routes(sw1, sw2, ipv6_route_list, step):
 
+    sw1_interface = sw1.ports["if0{}".format(1)]
+    ipv6_route_list = get_static_route_dict(MAX_IPV6_ROUTE, False,
+                                            sw1_interface)
+
     # IPv4 addresses to cnfigure on switch
     sw1_if_ip = "8421:8421::1"
     sw1_mask = 64
@@ -315,7 +319,10 @@ def interface_no_routing(sw1, sw2, ipv6_route_list, step):
 def test_zebra_ct_ipv6_scale_tests(topology, step):
     sw1 = topology.get("sw1")
     sw2 = topology.get("sw2")
-    ipv6_route_list = get_static_route_dict(MAX_IPV6_ROUTE, False, '1')
+
+    sw1_interface = sw1.ports["if0{}".format(1)]
+    ipv6_route_list = get_static_route_dict(MAX_IPV6_ROUTE, False,
+                                            sw1_interface)
 
     assert sw1 is not None
     assert sw2 is not None

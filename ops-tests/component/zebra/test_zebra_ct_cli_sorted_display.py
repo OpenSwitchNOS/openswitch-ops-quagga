@@ -143,6 +143,18 @@ def test_static_route_config(topology, step):
     # 'selected' bit to true so as to list the routes in the 'show ip route'
     # output.
     step("### Get the UUID of the configured prefixes on the switch1 ###")
+    prefix_uuid = get_prefix_uuid(sw1, "11.0.0.0/24", step)
+    ovsdb_command = 'set Route {} selected=true'.format(prefix_uuid)
+    sw1(ovsdb_command, shell='vsctl')
+
+    prefix_uuid = get_prefix_uuid(sw1, "22.0.0.0/24", step)
+    ovsdb_command = 'set Route {} selected=true'.format(prefix_uuid)
+    sw1(ovsdb_command, shell='vsctl')
+
+    prefix_uuid = get_prefix_uuid(sw1, "33.0.0.0/24", step)
+    ovsdb_command = 'set Route {} selected=true'.format(prefix_uuid)
+    sw1(ovsdb_command, shell='vsctl')
+
     prefix_uuid = get_prefix_uuid(sw1, "20.20.20.0/24", step)
     ovsdb_command = 'set Route {} selected=true'.format(prefix_uuid)
     sw1(ovsdb_command, shell='vsctl')
@@ -156,6 +168,18 @@ def test_static_route_config(topology, step):
     sw1(ovsdb_command, shell='vsctl')
 
     prefix_uuid = get_prefix_uuid(sw1, "30.30.0.0/16", step)
+    ovsdb_command = 'set Route {} selected=true'.format(prefix_uuid)
+    sw1(ovsdb_command, shell='vsctl')
+
+    prefix_uuid = get_prefix_uuid(sw1, "1001\:\:/120", step)
+    ovsdb_command = 'set Route {} selected=true'.format(prefix_uuid)
+    sw1(ovsdb_command, shell='vsctl')
+
+    prefix_uuid = get_prefix_uuid(sw1, "2001\:\:/120", step)
+    ovsdb_command = 'set Route {} selected=true'.format(prefix_uuid)
+    sw1(ovsdb_command, shell='vsctl')
+
+    prefix_uuid = get_prefix_uuid(sw1, "3001\:\:/120", step)
     ovsdb_command = 'set Route {} selected=true'.format(prefix_uuid)
     sw1(ovsdb_command, shell='vsctl')
 

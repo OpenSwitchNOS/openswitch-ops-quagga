@@ -57,10 +57,11 @@ zebra_stop_command_string = "systemctl stop ops-zebra"
 zebra_start_command_string = "systemctl start ops-zebra"
 
 
-def configure_ipv4_static_routes(sw1, sw2, ipv4_route_list, step):
+def configure_ipv4_static_routes(sw1, sw2, ipv4_route_list,
+                                 intf_ip_addr, step):
 
     # IPv4 addresses to cnfigure on switch
-    sw1_if_ip = "10.1.1.1"
+    sw1_if_ip = intf_ip_addr
     sw1_mask = 24
     sw1_interface = sw1.ports["if0{}".format(1)]
 
@@ -319,7 +320,7 @@ def test_zebra_ct_ipv4_scale_tests(topology, step):
     assert sw1 is not None
     assert sw2 is not None
 
-    configure_ipv4_static_routes(sw1, sw2, ipv4_route_list, step)
+    configure_ipv4_static_routes(sw1, sw2, ipv4_route_list, '10.1.1.1', step)
     interface_down(sw1, sw2, ipv4_route_list, step)
     interface_up(sw1, sw2, ipv4_route_list, step)
     interface_addr_change(sw1, sw2, ipv4_route_list, step)

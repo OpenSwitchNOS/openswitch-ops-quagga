@@ -46,8 +46,8 @@ def test_zebra_ct_fib_selection(topology, step):
 
     sw1_intf1 = format(sw1.ports["if01"])
     sw1_intf2 = format(sw1.ports["if02"])
-    sw2_intf1 = format(sw1.ports["if01"])
-    sw2_intf2 = format(sw1.ports["if02"])
+    sw2_intf1 = format(sw2.ports["if01"])
+    sw2_intf2 = format(sw2.ports["if02"])
 
     step('1-Configuring the topology')
 

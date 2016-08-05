@@ -1892,7 +1892,7 @@ def interface_up_before_zebra_restart(sw1, sw2, step):
 
     # Shut down interface 2 on switch1
     sw1('configure terminal')
-    sw1("interface 2")
+    sw1("interface %s" % sw1_intf2)
     sw1('no shutdown')
 
     step("\n\n\n######### Restarting zebra. Starting ops-zebra service on"

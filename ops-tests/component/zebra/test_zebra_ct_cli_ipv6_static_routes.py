@@ -60,8 +60,8 @@ def test_ipv6_static_route_config(topology, step):
 
     sw1_intf1 = format(sw1.ports["if01"])
     sw1_intf2 = format(sw1.ports["if02"])
-    sw2_intf1 = format(sw1.ports["if01"])
-    sw2_intf2 = format(sw1.ports["if02"])
+    sw2_intf1 = format(sw2.ports["if01"])
+    sw2_intf2 = format(sw2.ports["if02"])
 
     step('### Test to verify IPv6 static routes ###')
     # Configure switch 1

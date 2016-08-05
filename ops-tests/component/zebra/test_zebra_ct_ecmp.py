@@ -59,9 +59,9 @@ def _configure_switches(topology, step):
     sw1_intf2 = format(sw1.ports["if02"])
     sw1_intf3 = format(sw1.ports["if03"])
     sw1_intf4 = format(sw1.ports["if04"])
-    sw2_intf1 = format(sw1.ports["if01"])
-    sw2_intf2 = format(sw1.ports["if02"])
-    sw2_intf3 = format(sw1.ports["if03"])
+    sw2_intf1 = format(sw2.ports["if01"])
+    sw2_intf2 = format(sw2.ports["if02"])
+    sw2_intf3 = format(sw2.ports["if03"])
 
     step('1-Configuring Switches')
     # Configure switch sw1

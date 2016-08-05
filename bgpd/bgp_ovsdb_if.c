@@ -66,7 +66,6 @@
 #include  <diag_dump.h>
 #include "bgpd/bgp_fsm.h"
 #include "bgp_vty.h"
-#include "if.h"
 /*
  * Local structure to hold the master thread
  * and counters for read/write callbacks
@@ -339,20 +338,6 @@ bgp_ovsdb_tables_init (struct ovsdb_idl *idl)
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_ttl_security_hops);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_neighbor_col_update_source);
 
-    /* Interface table */
-    ovsdb_idl_add_table(idl, &ovsrec_table_interface);
-    ovsdb_idl_add_column(idl, &ovsrec_interface_col_name);
-    ovsdb_idl_add_column(idl, &ovsrec_interface_col_link_state);
-
-    /* Port table */
-    ovsdb_idl_add_table(idl, &ovsrec_table_port);
-    ovsdb_idl_add_column(idl, &ovsrec_port_col_name);
-    ovsdb_idl_add_column(idl, &ovsrec_port_col_ip6_address);
-    ovsdb_idl_add_column(idl, &ovsrec_port_col_ip4_address);
-    ovsdb_idl_add_column(idl, &ovsrec_port_col_ip4_address_secondary);
-    ovsdb_idl_add_column(idl, &ovsrec_port_col_ip6_address_secondary);
-    ovsdb_idl_add_column(idl, &ovsrec_port_col_interfaces);
-
     /* BGP policy */
     bgp_policy_ovsdb_init(idl);
 
@@ -393,7 +378,6 @@ bgp_ovsdb_tables_init (struct ovsdb_idl *idl)
     ovsdb_idl_add_table(idl, &ovsrec_table_bgp_nexthop);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_nexthop_col_ip_address);
     ovsdb_idl_add_column(idl, &ovsrec_bgp_nexthop_col_type);
-
 }
 
 /*
@@ -640,21 +624,6 @@ bgp_dump_summary (struct ds *ds, struct bgp *bgp, int afi, int safi)
         ds_put_format(ds,  "No %s neighbor is configured"
                         "\n\n", afi == AFI_IP ? "IPv4" : "IPv6");
     }
-}
-
-/*
- * Returns port_row for the matching interface_name.
- */
-static const struct ovsrec_port*
-bgp_ovsdb_find_port(const char *if_name)
-{
-    const struct ovsrec_port *port_row = NULL;
-    OVSREC_PORT_FOR_EACH(port_row, idl) {
-        if (strcmp(port_row->name, if_name) == 0) {
-            return port_row;
-       }
-    }
-    return NULL;
 }
 
 static void
@@ -1500,7 +1469,7 @@ void
 modify_bgp_fast_external_failover_config (struct bgp *bgp_cfg,
                                           const struct ovsrec_bgp_router *bgp_mod_row)
 {
-    if (bgp_mod_row->n_fast_external_failover && *(bgp_mod_row->fast_external_failover)) {
+    if (bgp_mod_row->n_fast_external_failover && bgp_mod_row->fast_external_failover[0]) {
         VLOG_DBG("Setting BGP fast external failover flag");
         bgp_flag_unset (bgp_cfg, BGP_FLAG_NO_FAST_EXT_FAILOVER);
     } else {
@@ -1814,11 +1783,7 @@ bgp_router_read_ovsdb_apply_changes (struct ovsdb_idl *idl)
     const struct ovsrec_vrf *ovs_vrf = NULL;
     const struct ovsrec_bgp_router *ovs_bgp;
     const struct ovsrec_bgp_neighbor *ovs_bgpnbr;
-    const struct ovsrec_interface *interface_row = NULL;
     struct smap_node *node;
-    struct listnode *nod, *nnode, *mnode;
-    struct interface *ifp;
-    struct connected *c;
     int64_t asn;
     char peer[80];
 
@@ -1836,19 +1801,8 @@ bgp_router_read_ovsdb_apply_changes (struct ovsdb_idl *idl)
         for (i = 0; i < ovs_vrf->n_bgp_routers; i++) {
             asn = ovs_vrf->key_bgp_routers[i];
             ovs_bgp = ovs_vrf->value_bgp_routers[i];
-
             if (OVSREC_IDL_IS_ROW_INSERTED(ovs_bgp, idl_seqno)) {
                 insert_bgp_router_config(idl, ovs_bgp, asn);
-
-                OVSREC_INTERFACE_FOR_EACH(interface_row, idl) {
-                    if (interface_row->link_state &&
-                    !strcmp(interface_row->link_state, OVSREC_INTERFACE_LINK_STATE_UP)) {
-                        ifp = if_lookup_by_name (interface_row->name);
-                        if (ifp)
-                            for (ALL_LIST_ELEMENTS (ifp->connected, nod, nnode, c))
-                                bgp_connected_add(c);
-                    }
-                }
             }
             if (OVSREC_IDL_IS_ROW_MODIFIED(ovs_bgp, idl_seqno) ||
                 (OVSREC_IDL_IS_ROW_INSERTED(ovs_bgp, idl_seqno))) {
@@ -1905,137 +1859,6 @@ bgp_apply_bgp_router_changes (struct ovsdb_idl *idl)
     /* insert and modify cases */
     bgp_router_read_ovsdb_apply_changes(idl);
 }
-
-/**
- * Returns true if one of the primary or secondary ip addresses of the port
- * prefix matches with peer host's ip address.
- */
-static bool
-bgp_ovsdb_match_peer_to_port_addr(const struct ovsrec_port *port_row,
-                                                const char *peer_host)
-{
-    struct prefix port_prefix, host_prefix;
-    int i = 0;
-
-    str2prefix(peer_host, &host_prefix);
-
-    if (port_row->ip4_address) {
-        str2prefix(port_row->ip4_address, &port_prefix);
-        if (prefix_match(&port_prefix, &host_prefix))
-            return true;
-    }
-    if ((port_row->n_ip4_address_secondary) > 0) {
-        for (i = 0; i < port_row->n_ip4_address_secondary; i++) {
-            if (port_row->ip4_address_secondary[i]) {
-                str2prefix(port_row->ip4_address_secondary[i], &port_prefix);
-                if (prefix_match(&port_prefix, &host_prefix))
-                    return true;
-            }
-        }
-    }
-    if (port_row->ip6_address) {
-        str2prefix(port_row->ip6_address, &port_prefix);
-        if (prefix_match(&port_prefix, &host_prefix))
-            return true;
-    }
-    if ((port_row->n_ip6_address_secondary) > 0) {
-        for (i = 0; i < port_row->n_ip6_address_secondary; i++) {
-            if (port_row->ip6_address_secondary[i]) {
-                str2prefix(port_row->ip6_address_secondary[i], &port_prefix);
-                if (prefix_match(&port_prefix, &host_prefix))
-                    return true;
-            }
-        }
-    }
-
-    return false;
-}
-
-/*
- * This function checkes for link state up/down notification and sets/resets
- * BGP peers session accordignly
- */
-static void
-bgp_apply_interface_state_change (struct ovsdb_idl *idl)
-{
-    const struct ovsrec_interface *interface_row = NULL;
-    struct listnode *node, *nnode, *mnode;
-    struct bgp *bgp;
-    struct peer *peer;
-    struct interface *ifp;
-    struct connected *c;
-    const struct ovsrec_port *port_row = NULL;
-    const struct ovsrec_vrf *ovs_vrf;
-
-    /*
-     * Handle interface state changes only if
-     * a bgp router instance is configured
-     */
-     OVSREC_VRF_FOR_EACH(ovs_vrf, idl)
-        if (!ovs_vrf->n_bgp_routers)
-            return;
-
-    /*
-     * Check if any table changes present.
-     * If no change just return from here
-     */
-    if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_interface_col_link_state, idl_seqno)) {
-        OVSREC_INTERFACE_FOR_EACH (interface_row, idl) {
-
-            if (OVSREC_IDL_IS_ROW_MODIFIED(interface_row, idl_seqno) &&
-            interface_row->link_state) {
-
-                if(!strcmp(interface_row->link_state, OVSREC_INTERFACE_LINK_STATE_DOWN)) {
-                    ifp = if_lookup_by_name (interface_row->name);
-                    if (!ifp)
-                        return;
-
-                    for (ALL_LIST_ELEMENTS (ifp->connected, node, nnode, c))
-                        bgp_connected_delete (c);
-
-                    /*Fast external failover*/
-                    {
-                        bgp = bgp_lookup_by_name(NULL);
-                        if (!bgp)
-                            continue;
-
-                        if (CHECK_FLAG (bgp->flags, BGP_FLAG_NO_FAST_EXT_FAILOVER))
-                            continue;
-
-                        for (ALL_LIST_ELEMENTS (bgp->peer, node, nnode, peer)) {
-                            if ((peer->ttl != 1) && (peer->gtsm_hops != 1))
-                                continue;
-
-                            if (peer->nexthop.ifp)
-                                if (!strcmp(interface_row->name, peer->nexthop.ifp->name))
-                                    BGP_EVENT_ADD (peer, BGP_Stop);
-                        }
-                    }
-                }
-                else if(!strcmp(interface_row->link_state, OVSREC_INTERFACE_LINK_STATE_UP)) {
-                    ifp = if_lookup_by_name (interface_row->name);
-                    if (ifp)
-                        for (ALL_LIST_ELEMENTS (ifp->connected, node, nnode, c))
-                            bgp_connected_add(c);
-
-                    /* Start the appropriate BGP session */
-                    port_row = bgp_ovsdb_find_port(interface_row->name);
-                    if (!port_row)
-                        continue;
-
-                    for (ALL_LIST_ELEMENTS_RO (bm->bgp, mnode, bgp)) {
-                        for (ALL_LIST_ELEMENTS (bgp->peer, node, nnode, peer)) {
-                            if (peer->host)
-                                if (bgp_ovsdb_match_peer_to_port_addr(port_row, peer->host))
-                                    BGP_EVENT_ADD (peer, BGP_Start);
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
 
 /*
  * Iterate through all the peers of the BGP and check against
@@ -3110,9 +2933,6 @@ bgp_reconfigure (struct ovsdb_idl *idl)
     bgp_apply_global_changes();
     bgp_apply_bgp_router_changes(idl);
     bgp_apply_bgp_neighbor_changes(idl);
-
-    /* Apply changes according to interface link state changes*/
-    bgp_apply_interface_state_change(idl);
 
     /* Scan active route transaction list and handle completions */
     bgp_txn_complete_processing();

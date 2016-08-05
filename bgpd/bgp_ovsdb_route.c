@@ -63,7 +63,7 @@
 #include "bgpd/bgp_community.h"
 #include "bgpd/bgp_ecommunity.h"
 
-#define MAX_ARGC         10
+#define MAX_ARGC         20
 #define MAX_ARG_LEN     256
 #define MAX_TXN_COUNT    20
 
@@ -1658,7 +1658,7 @@ policy_ovsdb_alloc_arg_list(int argcsize, int argvsize)
 
     for (i = 0; i < argcsize; i ++)
       {
-        parmv[i] = xmalloc(sizeof(char) * argvsize);
+        parmv[i] = xcalloc(argvsize, sizeof(char));
         if (!(parmv[i])) {
             policy_ovsdb_free_arg_list(&parmv, argcsize);
             return NULL;
@@ -1800,9 +1800,8 @@ policy_rt_map_match_ovsdb_apply_changes(
 
             if (tmp) {
                 VLOG_DBG("Value was set with: %s", tmp);
-                strcpy(argv[(*argc)++], match_name);
-                strcpy(argv[(*argc)++], tmp);
-
+                strncpy(argv[(*argc)++], match_name, strlen(match_name));
+                strncpy(argv[(*argc)++], tmp, strlen(tmp));
                 int j;
                 for (j = 0; j < *argc; j++) {
                     VLOG_DBG("%s: argv[%d] %s", __FUNCTION__, j, argv[j]);
@@ -1853,8 +1852,8 @@ policy_rt_map_set_ovsdb_apply_changes(
 
             if (tmp) {
                 VLOG_DBG("Value was set with: %s", tmp);
-                strcpy(argv[(*argc)++], set_name);
-                strcpy(argv[(*argc)++], tmp);
+                strncpy(argv[(*argc)++], set_name, strlen(set_name));
+                strncpy(argv[(*argc)++], tmp, strlen(tmp));
 
                 int j;
                 for (j = 0; j < *argc; j++) {

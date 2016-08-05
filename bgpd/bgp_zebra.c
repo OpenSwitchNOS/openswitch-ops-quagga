@@ -110,7 +110,6 @@ bgp_interface_delete (int command, struct zclient *zclient,
   return 0;
 }
 
-#ifndef ENABLE_OVSDB
 static int
 bgp_interface_up (int command, struct zclient *zclient, zebra_size_t length)
 {
@@ -161,23 +160,22 @@ bgp_interface_down (int command, struct zclient *zclient, zebra_size_t length)
 
     for (ALL_LIST_ELEMENTS_RO (bm->bgp, mnode, bgp))
       {
-    if (CHECK_FLAG (bgp->flags, BGP_FLAG_NO_FAST_EXT_FAILOVER))
-      continue;
+	if (CHECK_FLAG (bgp->flags, BGP_FLAG_NO_FAST_EXT_FAILOVER))
+	  continue;
 
-    for (ALL_LIST_ELEMENTS (bgp->peer, node, nnode, peer))
-      {
-        if ((peer->ttl != 1) && (peer->gtsm_hops != 1))
-          continue;
+	for (ALL_LIST_ELEMENTS (bgp->peer, node, nnode, peer))
+	  {
+	    if ((peer->ttl != 1) && (peer->gtsm_hops != 1))
+	      continue;
 
-        if (ifp == peer->nexthop.ifp)
-          BGP_EVENT_ADD (peer, BGP_Stop);
-      }
+	    if (ifp == peer->nexthop.ifp)
+	      BGP_EVENT_ADD (peer, BGP_Stop);
+	  }
       }
   }
 
   return 0;
 }
-#endif
 
 static int
 bgp_interface_address_add (int command, struct zclient *zclient,
@@ -1109,14 +1107,13 @@ bgp_zebra_init (void)
   zclient->interface_address_delete = bgp_interface_address_delete;
   zclient->ipv4_route_add = zebra_read_ipv4;
   zclient->ipv4_route_delete = zebra_read_ipv4;
-#ifndef ENABLE_OVSDB
   zclient->interface_up = bgp_interface_up;
   zclient->interface_down = bgp_interface_down;
-#endif
 #ifdef HAVE_IPV6
   zclient->ipv6_route_add = zebra_read_ipv6;
   zclient->ipv6_route_delete = zebra_read_ipv6;
 #endif /* HAVE_IPV6 */
+
   /* Interface related init. */
   if_init ();
 

@@ -6818,7 +6818,7 @@ zebra_add_route (bool is_ipv6, struct prefix *p, int type, safi_t safi,
                    idl_nexthop->ports[0]->name);
           nexthop_ifname_add(rib, idl_nexthop->ports[0]->name);
         }
-      else
+      else if (idl_nexthop->ip_address != NULL)
         {
           memset(&ipv4_dest_addr, 0, sizeof(struct in_addr));
           memset(&ipv6_dest_addr, 0, sizeof(struct in6_addr));
@@ -6848,6 +6848,10 @@ zebra_add_route (bool is_ipv6, struct prefix *p, int type, safi_t safi,
                        count, idl_nexthop->ip_address);
               nexthop_ipv4_add(rib, &ipv4_dest_addr, NULL);
             }
+        }
+      else
+        {
+          VLOG_DBG("BAD! No nexthop ip or iface");
         }
     }
 

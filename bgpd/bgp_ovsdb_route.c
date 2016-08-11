@@ -465,7 +465,6 @@ bgp_ovsdb_set_rib_nexthop(struct ovsdb_idl_txn *txn,
     struct ovsrec_nexthop **nexthop_list;
     char nexthop_buf[INET6_ADDRSTRLEN];
     const struct ovsrec_nexthop *pnexthop = NULL;
-    bool selected;
     char pr[PREFIX_MAXLEN];
     const char *safi_str;
     prefix2str(p, pr, sizeof(pr));
@@ -500,8 +499,6 @@ bgp_ovsdb_set_rib_nexthop(struct ovsdb_idl_txn *txn,
     ovsrec_nexthop_set_ip_address(pnexthop, nexthop_buf);
     VLOG_DBG("Setting nexthop IP address %s\n", nexthop_buf);
     ovsrec_nexthop_set_type(pnexthop, safi_str);
-    selected = 1;
-    ovsrec_nexthop_set_selected(pnexthop, &selected, 1);
     nexthop_list[0] = (struct ovsrec_nexthop*) pnexthop;
     nexthop_list[0]->ip_address = xstrdup(nexthop_buf);
 
@@ -538,8 +535,6 @@ bgp_ovsdb_set_rib_nexthop(struct ovsdb_idl_txn *txn,
             VLOG_DBG("Setting nexthop IP address %s, count %d\n",
                       nexthop_buf, ii);
             ovsrec_nexthop_set_type(pnexthop, safi_str);
-            selected = 1;
-            ovsrec_nexthop_set_selected(pnexthop, &selected, 1);
             nexthop_list[ii] = (struct ovsrec_nexthop*) pnexthop;
             nexthop_list[ii]->ip_address = xstrdup(nexthop_buf);
             ii++;
@@ -611,11 +606,13 @@ bgp_ovsdb_set_local_rib_nexthop(struct ovsdb_idl_txn *txn,
     nexthop_list[0] = (struct ovsrec_bgp_nexthop *) pnexthop;
     nexthop_list[0]->ip_address = xstrdup(nexthop_buf);
     int ii = 1;
-    /* Set multipath nexthops */
-    for(mpinfo = bgp_info_mpath_first (info); mpinfo;
-        mpinfo = bgp_info_mpath_next (mpinfo))
+
+    if (nexthop_num > 1) {
+      /* Set multipath nexthops */
+        for(mpinfo = bgp_info_mpath_first (info); mpinfo;
+              mpinfo = bgp_info_mpath_next (mpinfo))
         {
-            /* Update the nexthop table. */
+                /* Update the nexthop table. */
             if (p->family == AF_INET) {
                 nexthop = &mpinfo->attr->nexthop;
                 if (nexthop->s_addr == 0) {
@@ -645,6 +642,7 @@ bgp_ovsdb_set_local_rib_nexthop(struct ovsdb_idl_txn *txn,
             nexthop_list[ii]->ip_address = xstrdup(nexthop_buf);
             ii++;
         }
+    }
     ovsrec_bgp_route_set_bgp_nexthops(rib, nexthop_list, nexthop_num);
     for (ii = 0; ii < nexthop_num; ii++)
         free(nexthop_list[ii]->ip_address);
@@ -1031,9 +1029,6 @@ bgp_lookup_global_hmap_entry(struct prefix *p,
         if(!strcmp(hmap_entry->prefix, pr) &&
                   (hmap_entry->table_type == BGP_ROUTE) &&
                         !strcmp(hmap_entry->next_hop, info->peer->host)){
-                if (hmap_entry->state != DB_SYNC) {
-                    return false;
-                }
                 return true;
         }
     }
@@ -1131,6 +1126,11 @@ bgp_ovsdb_add_local_rib_entry(struct prefix *p,
 
     /* Nexthops */
     nexthop_num = 1 + bgp_info_mpath_count (info);
+    /*BGP ROUTE table row should not have multiple nexthops */
+    if (nexthop_num > 1) {
+        nexthop_num = 1;
+    }
+
     VLOG_DBG("Setting nexthop num %d, metric %d, bgp_info_flags 0x%x\n",
              nexthop_num, info->attr->med, info->flags);
     /* Nexthop list */

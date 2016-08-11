@@ -1592,14 +1592,22 @@ bgp_process_non_selected_route_nodes (struct bgp_node *rn,
 {
     struct bgp_info *ri;
     struct prefix *p = &rn->p;
+    bool commit_outstanding_txns = true;
+
     if (!rn || !bgp)
         return;
 
     for (ri = rn->info; ri != NULL; ri = ri->next) {
-        if (!CHECK_FLAG(ri->flags, BGP_INFO_REMOVED) &&
+        if(!CHECK_FLAG(ri->flags, BGP_INFO_REMOVED) &&
             !CHECK_FLAG(ri->flags, BGP_INFO_SELECTED)) {
             if (false == bgp_lookup_global_hmap_entry(p, ri, bgp, safi)) {
+                /*Make sure that outstanding txns in idl are committed*/
+                if (commit_outstanding_txns == true) {
+                    bgp_txn_finish();
+                    commit_outstanding_txns = false;
+                }
                 bgp_ovsdb_add_local_rib_entry(p, ri, bgp, safi);
+                bgp_txn_finish();
             }
         }
     }
@@ -1621,7 +1629,6 @@ bgp_process_main (struct work_queue *wq, void *data)
   struct listnode *node, *nnode;
   struct peer *peer;
   bool local_route_sent = false;
-
   /* Best path selection. */
   bgp_best_selection (bgp, rn, &bgp->maxpaths[afi][safi], &old_and_new, safi);
   old_select = old_and_new.old;
@@ -1634,11 +1641,11 @@ bgp_process_main (struct work_queue *wq, void *data)
         {
           if (CHECK_FLAG (old_select->flags, BGP_INFO_IGP_CHANGED) ||
               CHECK_FLAG (old_select->flags, BGP_INFO_MULTIPATH_CHG)) {
+              bgp_process_non_selected_route_nodes(rn, bgp, safi);
               bgp_zebra_announce (p, old_select, bgp, safi);
           }
           UNSET_FLAG (old_select->flags, BGP_INFO_MULTIPATH_CHG);
           UNSET_FLAG (rn->flags, BGP_NODE_PROCESS_SCHEDULED);
-          bgp_process_non_selected_route_nodes(rn, bgp, safi);
           return WQ_SUCCESS;
         }
     }
@@ -1665,6 +1672,7 @@ bgp_process_main (struct work_queue *wq, void *data)
       if (new_select
 	  && new_select->type == ZEBRA_ROUTE_BGP
           && new_select->sub_type == BGP_ROUTE_NORMAL) {
+          bgp_process_non_selected_route_nodes(rn, bgp, safi);
           bgp_zebra_announce (p, new_select, bgp, safi);
       }
       else
@@ -1708,8 +1716,6 @@ bgp_process_main (struct work_queue *wq, void *data)
               }
           }
       }
-
-      bgp_process_non_selected_route_nodes(rn, bgp, safi);
 
 #endif
 

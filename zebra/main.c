@@ -43,6 +43,7 @@
 
 #ifdef ENABLE_OVSDB
 #include "zebra/zebra_ovsdb_if.h"
+#include "zebra/rt_netlink.h"
 #endif
 
 #ifdef ENABLE_OVSDB
@@ -69,7 +70,7 @@ int keep_kernel_mode = 0;
 
 #ifdef HAVE_NETLINK
 /* Receive buffer size for netlink socket */
-u_int32_t nl_rcvbufsize = 0;
+u_int32_t nl_rcvbufsize = NEW_NL_PKT_BUF_SIZE;
 #endif /* HAVE_NETLINK */
 
 /* Command line options. */

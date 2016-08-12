@@ -286,13 +286,18 @@ netlink_parse_info (int (*filter) (struct sockaddr_nl *, struct nlmsghdr *),
   int status;
   int ret = 0;
   int error;
+  char *buf;
+
+
+  buf = malloc(4*NEW_NL_PKT_BUF_SIZE);
 
   while (1)
     {
-      char buf[NL_PKT_BUF_SIZE];
+      //char buf[NL_PKT_BUF_SIZE];
       struct iovec iov = {
         .iov_base = buf,
-        .iov_len = sizeof buf
+        //.iov_len = sizeof buf
+        .iov_len = (4*NEW_NL_PKT_BUF_SIZE)
       };
       struct sockaddr_nl snl;
       struct msghdr msg = {
@@ -304,6 +309,9 @@ netlink_parse_info (int (*filter) (struct sockaddr_nl *, struct nlmsghdr *),
       struct nlmsghdr *h;
 
       status = recvmsg (nl->sock, &msg, 0);
+      zlog_debug ("%s: status/recv size of %s =%d",
+                  __FUNCTION__, nl->name, status);
+
       if (status < 0)
         {
           if (errno == EINTR)
@@ -322,7 +330,8 @@ netlink_parse_info (int (*filter) (struct sockaddr_nl *, struct nlmsghdr *),
       log_event("ZEBRA_NETLINK_ERR", EV_KV("err_desc", "%s", "EOF"),
                 EV_KV("nlsock", "%s", nl->name),
                 EV_KV("errno", "%s",""));
-#endif
+#endif;
+          free(buf);
           return -1;
         }
 
@@ -335,6 +344,7 @@ netlink_parse_info (int (*filter) (struct sockaddr_nl *, struct nlmsghdr *),
                 "length error"), EV_KV("nlsock", "%s", nl->name),
                 EV_KV("errno", "%d",msg.msg_namelen));
 #endif
+          free(buf);
           return -1;
         }
 
@@ -343,7 +353,10 @@ netlink_parse_info (int (*filter) (struct sockaddr_nl *, struct nlmsghdr *),
         {
           /* Finish of reading. */
           if (h->nlmsg_type == NLMSG_DONE)
-            return ret;
+            {
+              free(buf);
+              return ret;
+            }
 
           /* Error handling. */
           if (h->nlmsg_type == NLMSG_ERROR)
@@ -367,6 +380,7 @@ netlink_parse_info (int (*filter) (struct sockaddr_nl *, struct nlmsghdr *),
                   /* return if not a multipart message, otherwise continue */
                   if (!(h->nlmsg_flags & NLM_F_MULTI))
                     {
+                      free(buf);
                       return 0;
                     }
                   continue;
@@ -382,6 +396,7 @@ netlink_parse_info (int (*filter) (struct sockaddr_nl *, struct nlmsghdr *),
                             EV_KV("nlsock", "%s", nl->name),
                             EV_KV("errno", "%s",""));
 #endif
+                  free(buf);
                   return -1;
                 }
 
@@ -396,6 +411,7 @@ netlink_parse_info (int (*filter) (struct sockaddr_nl *, struct nlmsghdr *),
 				nl->name, safe_strerror (-errnum),
 				lookup (nlmsg_str, msg_type),
 				msg_type, err->msg.nlmsg_seq, err->msg.nlmsg_pid);
+                  free(buf);
 		  return 0;
 		}
 
@@ -403,6 +419,7 @@ netlink_parse_info (int (*filter) (struct sockaddr_nl *, struct nlmsghdr *),
 			nl->name, safe_strerror (-errnum),
 			lookup (nlmsg_str, msg_type),
 			msg_type, err->msg.nlmsg_seq, err->msg.nlmsg_pid);
+              free(buf);
               return -1;
             }
 
@@ -443,9 +460,13 @@ netlink_parse_info (int (*filter) (struct sockaddr_nl *, struct nlmsghdr *),
         {
           zlog (NULL, LOG_ERR, "%s error: data remnant size %d", nl->name,
                 status);
+          free(buf);
           return -1;
         }
     }
+
+  free(buf);
+
   return ret;
 }
 

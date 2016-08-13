@@ -26,6 +26,11 @@
 
 #define NL_PKT_BUF_SIZE 8192
 
+#ifdef ENABLE_OVSDB
+#define NL_SOCKET_BUF_SIZE     10485760
+#define NL_RECV_BUF_SIZE       (4 * 10485760)
+#endif
+
 extern int
 addattr32 (struct nlmsghdr *n, size_t maxlen, int type, int data);
 extern int

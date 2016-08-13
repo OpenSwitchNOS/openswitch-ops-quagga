@@ -78,6 +78,10 @@ extern struct zebra_privs_t zserv_privs;
 
 extern u_int32_t nl_rcvbufsize;
 
+#ifdef ENABLE_OVSDB
+extern char *rt_recvbuf;
+#endif
+
 /* Note: on netlink systems, there should be a 1-to-1 mapping between interface
    names and ifindex values. */
 static void
@@ -289,11 +293,18 @@ netlink_parse_info (int (*filter) (struct sockaddr_nl *, struct nlmsghdr *),
 
   while (1)
     {
+#ifdef ENABLE_OVSDB
+      struct iovec iov = {
+        .iov_base = rt_recvbuf,
+        .iov_len = NL_RECV_BUF_SIZE
+      };
+#else
       char buf[NL_PKT_BUF_SIZE];
       struct iovec iov = {
         .iov_base = buf,
         .iov_len = sizeof buf
       };
+#endif
       struct sockaddr_nl snl;
       struct msghdr msg = {
         .msg_name = (void *) &snl,
@@ -304,6 +315,9 @@ netlink_parse_info (int (*filter) (struct sockaddr_nl *, struct nlmsghdr *),
       struct nlmsghdr *h;
 
       status = recvmsg (nl->sock, &msg, 0);
+      zlog_debug ("%s: status/recv size of %s =%d",
+                  __FUNCTION__, nl->name, status);
+
       if (status < 0)
         {
           if (errno == EINTR)
@@ -338,8 +352,14 @@ netlink_parse_info (int (*filter) (struct sockaddr_nl *, struct nlmsghdr *),
           return -1;
         }
 
+#ifdef ENABLE_OVSDB
+      for (h = (struct nlmsghdr *) rt_recvbuf;
+           NLMSG_OK (h, (unsigned int) status);
+           h = NLMSG_NEXT (h, status))
+#else
       for (h = (struct nlmsghdr *) buf; NLMSG_OK (h, (unsigned int) status);
            h = NLMSG_NEXT (h, status))
+#endif
         {
           /* Finish of reading. */
           if (h->nlmsg_type == NLMSG_DONE)

@@ -3302,51 +3302,39 @@ zebra_l3_port_node_lookup_by_interface_name (char* interface_name)
 }
 
 /*
- * This function takes a pointer to an OVSDB interface entry and
- * updates the L3 port state. If the interface state becomes "up",
- * then the L3 port state is set to be active otherwise it will be
- * set to inactive.
+ * This function takes a the cached L3 port node and the OVSDB port
+ * node and compares if the active state OVSDB port is same as the
+ * active state cached in L3 port node. In case the compared active
+ * states are different, This function updates the active state in the
+ * cached L3 port node and sets the appropriate flags so route
+ * recalculation by backend zebra thread.
  */
 static void
-zebra_update_port_active_state (const struct ovsrec_interface *interface)
+zebra_update_port_active_state (struct zebra_l3_port* l3_port,
+                                const struct ovsrec_port* ovsrec_port)
 {
-  struct zebra_l3_port* l3_port = NULL;
-  const struct ovsrec_port* ovsrec_port = NULL;
   bool new_active_state;
 
   /*
-   * If the OVSDB interface entry pointer is null, then return.
+   * If the cached L3 port node is NULL or the OVSDB port node is NULL,
+   * then return from this function.
    */
-  if (!(interface->name))
+  if (!l3_port || !ovsrec_port)
     {
-      VLOG_ERR("The interface name is NULL");
+      VLOG_DBG("Either the L3 port node or OVSDB port node is NULL");
       return;
     }
 
   /*
-   * Search the L3 port node using the interface name.
+   * Check if the port names in cached L3 port and the OVSDB port node
+   * are same. IF they are not same then return from this function.
    */
-  l3_port =
-      zebra_l3_port_node_lookup_by_interface_name(interface->name);
-
-  /*
-   * If the port entry is null, then this L3 port does not exist in
-   * the L3 port cache. Return from this function.
-   */
-  if (!l3_port)
+  if (strcmp(l3_port->port_name, ovsrec_port->name))
     {
-      VLOG_DBG("Unable to find the port for interface %s",
-                interface->name);
+      VLOG_DBG("L3 port node %s is not same as OVSDB port node %s",
+               l3_port->port_name, ovsrec_port->name);
       return;
     }
-
-  ovsrec_port = ovsrec_port_get_for_uuid(idl,
-                            (const struct uuid *)&(l3_port->ovsrec_port_uuid));
-
-  if (!ovsrec_port) {
-    VLOG_DBG("No ovsrec port found when looked up by uuid");
-    return;
-  }
 
   /*
    * Get the new admin state from the interface entry.
@@ -3394,6 +3382,101 @@ zebra_update_port_active_state (const struct ovsrec_interface *interface)
        */
       zebra_set_if_port_active_state_changed();
     }
+}
+
+/*
+ * This function updates the active state of the cached L3 ports for
+ * an interface admin state update.
+ */
+static void
+zebra_update_port_active_state_interface_trigger
+                        (const struct ovsrec_interface *interface)
+{
+  struct zebra_l3_port* l3_port = NULL;
+  const struct ovsrec_port* ovsrec_port = NULL;
+
+  /*
+   * If the OVSDB interface entry pointer is null, then return.
+   */
+  if (!interface || !(interface->name))
+    {
+      VLOG_ERR("The interface name is NULL");
+      return;
+    }
+
+  /*
+   * Search the L3 port node using the interface name.
+   */
+  l3_port =
+      zebra_l3_port_node_lookup_by_interface_name(interface->name);
+
+  /*
+   * If the port entry is null, then this L3 port does not exist in
+   * the L3 port cache. Return from this function.
+   */
+  if (!l3_port)
+    {
+      VLOG_DBG("Unable to find the port for interface %s",
+                interface->name);
+      return;
+    }
+
+  ovsrec_port = ovsrec_port_get_for_uuid(idl,
+                      (const struct uuid *)&(l3_port->ovsrec_port_uuid));
+
+  if (!ovsrec_port) {
+    VLOG_DBG("No ovsrec port found when looked up by uuid");
+    return;
+  }
+
+  /*
+   * Update the cached L3 port active state using the active state for
+   * OVSDB port node.
+   */
+  zebra_update_port_active_state(l3_port, ovsrec_port);
+}
+
+/*
+ * This function updates the active state of the cached L3 ports for
+ * a port update when the interfaces resolving the L3 ports change.
+ */
+static void
+zebra_update_port_active_state_port_trigger
+                        (const struct ovsrec_port *port)
+{
+  struct zebra_l3_port* l3_port = NULL;
+
+  /*
+   * If the OVSDB port entry pointer is null, then return.
+   */
+  if (!port || !(port->name))
+    {
+      VLOG_DBG("The OVSDB port or its name is NULL");
+      return;
+    }
+
+  /*
+   * Look up the cached L3 port node by port name in the L3 ports cache
+   */
+  l3_port = zebra_search_port_name_in_l3_ports_hash(
+                                &zebra_cached_l3_ports, port->name);
+
+  /*
+   * If the port entry is null, then this L3 port does not exist in
+   * the L3 port cache. Return from this function.
+   */
+  if (!l3_port)
+    {
+      VLOG_DBG("No L3 port by name %s available in internal cache",
+               port->name);
+      return;
+    }
+
+  /*
+   * Update the cached L3 port active state using the active state for
+   * OVSDB port node.
+   */
+  zebra_update_port_active_state(l3_port, port);
 }
 
 /*
@@ -5046,6 +5129,7 @@ static void
 zebra_handle_interface_admin_state_changes (void)
 {
   const struct ovsrec_interface *interface_row = NULL;
+  const struct ovsrec_port *port_row = NULL;
   bool int_up = false;
   struct smap user_config;
   const char *admin_status;
@@ -5085,7 +5169,53 @@ zebra_handle_interface_admin_state_changes (void)
                * Update the L3 port cache with the interface's admin
                * state.
                */
-              zebra_update_port_active_state(interface_row);
+              zebra_update_port_active_state_interface_trigger(
+                                                        interface_row);
+            }
+
+          /*
+           * Since there are further routes to process for the
+           * main thread, we should try to see if there are
+           * MAX_ZEBRA_TXN_COUNT route updates to OVSDB at this time.
+           * In this case we should publish the route updates to OVSDB.
+           */
+          zebra_finish_txn(false);
+        }
+
+      /*
+       * Since there are no further routes to process for the main thread,
+       * we should submit all the outstanding route updates to OVSDB at this
+       * time.
+       */
+      zebra_finish_txn(true);
+    }
+
+  /*
+   * Check if any of the interface column got modified in the port
+   * table. This could have an impact of the port state of L3 ports,
+   * especially L3 lag interfaces.
+   */
+  if (OVSREC_IDL_IS_COLUMN_MODIFIED(
+                        ovsrec_port_col_interfaces, idl_seqno))
+    {
+      OVSREC_PORT_FOR_EACH (port_row, idl)
+        {
+          /*
+           * Create a transaction for any IDL route updates to OVSDB
+           * from the zebra main thread for updating the selected bit
+           * pn the connected routes.
+           */
+          zebra_create_txn();
+
+          /*
+           * Check if the port row changed.
+           */
+          if (OVSREC_IDL_IS_ROW_MODIFIED(port_row, idl_seqno))
+            {
+              VLOG_DBG("Got a port modified because of interface "
+                       "addition %s\n", port_row->name);
+
+              zebra_update_port_active_state_port_trigger(port_row);
             }
 
           /*

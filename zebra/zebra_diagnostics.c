@@ -393,10 +393,10 @@ zebra_unixctl_diag_dump (struct unixctl_conn *conn, int argc OVS_UNUSED,
   free(buf);
 }
 
-/*
+  /*
  * ovs appctl function to update the buffer length for diag dump.
  * The default length used is ZEBRA_DIAG_DUMP_BUF_LEN
- */
+   */
 static void
 zebra_diag_buff_set_len(struct unixctl_conn *conn, int argc OVS_UNUSED,
                         const char *argv[] OVS_UNUSED, void *aux OVS_UNUSED)

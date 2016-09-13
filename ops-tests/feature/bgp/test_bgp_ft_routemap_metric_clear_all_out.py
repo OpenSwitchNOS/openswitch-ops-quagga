@@ -14,6 +14,7 @@
 # under the License.
 
 from time import sleep
+from pytest import mark
 import pytest
 
 TOPOLOGY = """
@@ -417,6 +418,8 @@ def configure(sw1, sw2, sw3):
 
 
 @pytest.mark.timeout(600)
+@mark.gate
+@mark.timeout(600)
 def test_bgp_metric_clear_all_out_configuration(topology, step):
     sw1 = topology.get('sw1')
     sw2 = topology.get('sw2')

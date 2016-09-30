@@ -28,6 +28,13 @@ from __future__ import print_function, division
 from ipaddress import ip_address
 
 
+# Default timeout for all the zebra component test scripts
+ZEBRA_DEFAULT_TIMEOUT = 600
+
+# Configuration install and processing time taken by ops-zebra
+ZEBRA_TEST_SLEEP_TIME = 15
+
+
 def switch_cfg_iface(switch, port_lbl, ipv4, ipv6):
     """
     Configure and enable a switch interface

@@ -3086,7 +3086,7 @@ ovsdb_ospf_update_ifsm_state  (char* ifname, int ism_state)
 
     if (NULL == ifname)
     {
-       VLOG_DBG ("No OSPF interface found");
+       VLOG_DBG ("Invalid ifname (NULL)");
        return;
     }
     ovs_oi = find_ospf_interface_by_name(ifname);
@@ -4318,13 +4318,13 @@ modify_ospf_interface (struct ovsdb_idl *idl,
 
     if (!ovs_port || !if_name)
     {
-         VLOG_DBG ("No OSPF Port found!");
+         VLOG_DBG ("No Port found!");
          return;
     }
     ifp = if_lookup_by_name(if_name);
     if (!ifp)
     {
-         VLOG_DBG ("No OSPF Interface found!");
+         VLOG_DBG ("No kernel Interface found!");
          return;
     }
     params = IF_DEF_PARAMS (ifp);
@@ -4897,7 +4897,6 @@ ospf_apply_global_changes (void)
     }
     if (!OVSREC_IDL_ANY_TABLE_ROWS_INSERTED(ovs, idl_seqno) &&
             !OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED(ovs, idl_seqno)) {
-        VLOG_DBG ("No Open_vSwitch cfg changes");
         return;
     }
 
@@ -5008,7 +5007,6 @@ ospf_apply_ospf_router_changes (struct ovsdb_idl *idl)
     }
     if (ospf_router_first == NULL) {
             /* Check if it is a first row deletion */
-            VLOG_DBG("OSPF config empty!\n");
             /* OPS_TODO : Support for multiple instances */
             ospf_instance = ospf_lookup();
             // TODO: Delete all instance as  there is no OSPF config in DB
@@ -5044,14 +5042,12 @@ ospf_apply_ospf_area_changes (struct ovsdb_idl *idl)
     if (ospf_area_first && !OVSREC_IDL_ANY_TABLE_ROWS_INSERTED(ospf_area_first, idl_seqno)
         && !OVSREC_IDL_ANY_TABLE_ROWS_DELETED(ospf_area_first, idl_seqno)
         && !OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED(ospf_area_first, idl_seqno)) {
-            VLOG_DBG("No OSPF area changes");
             return 0;
     }
     if (ospf_area_first == NULL) {
             /* Check if it is a first row deletion */
             /* Area is created by the OSPF daemon so donothing ish */
-            VLOG_DBG("OSPF area config empty!\n");
-            return 1;
+            return 0;
         }
 
     /* Check if any row deletion */
@@ -5115,14 +5111,12 @@ ospf_apply_route_changes (struct ovsdb_idl *idl)
     if (route_first && !OVSREC_IDL_ANY_TABLE_ROWS_INSERTED(route_first, idl_seqno)
         && !OVSREC_IDL_ANY_TABLE_ROWS_DELETED(route_first, idl_seqno)
         && !OVSREC_IDL_ANY_TABLE_ROWS_MODIFIED(route_first, idl_seqno)) {
-            VLOG_DBG("No Route changes");
             return 0;
     }
 
     ospf_instance = ospf_lookup_by_instance(OSPF_DEFAULT_INSTANCE);
     if (!ospf_instance)
     {
-        VLOG_ERR ("No OSPF instance found to apply route changes");
         return 0;
     }
     /* Check if any route is deleted but AS external LSA is present
@@ -5984,7 +5978,6 @@ ospf_reconfigure(struct ovsdb_idl *idl)
     COVERAGE_INC(ospf_ovsdb_cnt);
 
     if (new_idl_seqno == idl_seqno){
-        VLOG_DBG("No config change for ospf in ovs\n");
         return;
     }
 

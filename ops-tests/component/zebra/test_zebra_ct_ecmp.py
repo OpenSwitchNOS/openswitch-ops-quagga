@@ -17,12 +17,10 @@
 # Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 # 02111-1307, USA.
 
-from helpers_routing import (
-    ZEBRA_TEST_SLEEP_TIME,
-    ZEBRA_INIT_SLEEP_TIME
+from zebra_routing import (
+    ZEBRA_DEFAULT_TIMEOUT
 )
-from time import sleep
-import pytest
+from pytest import mark
 
 TOPOLOGY = """
 #               +-------+     +-------+
@@ -43,11 +41,11 @@ TOPOLOGY = """
 [type=host name="Host 3"] hs3
 
 # Links
-sw1:if01 -- hs1:if01
+sw1:if01 -- hs1:eth1
 sw1:if03 -- sw2:if01
 sw1:if04 -- sw2:if02
-sw1:if02 -- hs2:if01
-sw2:if03 -- hs3:if01
+sw1:if02 -- hs2:eth1
+sw2:if03 -- hs3:eth1
 """
 
 
@@ -57,33 +55,38 @@ def _configure_switches(topology, step):
     sw2 = topology.get("sw2")
     assert sw2 is not None
 
-    # Test case init time sleep
-    sleep(ZEBRA_INIT_SLEEP_TIME)
+    sw1_intf1 = format(sw1.ports["if01"])
+    sw1_intf2 = format(sw1.ports["if02"])
+    sw1_intf3 = format(sw1.ports["if03"])
+    sw1_intf4 = format(sw1.ports["if04"])
+    sw2_intf1 = format(sw2.ports["if01"])
+    sw2_intf2 = format(sw2.ports["if02"])
+    sw2_intf3 = format(sw2.ports["if03"])
 
     step('1-Configuring Switches')
     # Configure switch sw1
     sw1("configure terminal")
 
     # Configure interface 1 on switch sw1
-    sw1("interface 1")
+    sw1('interface %s' % sw1_intf1)
     sw1("ip address 10.0.10.2/24")
     sw1("no shut")
     sw1("exit")
 
     # Configure interface 2 on switch sw1
-    sw1("interface 2")
+    sw1('interface %s' % sw1_intf2)
     sw1("ip address 10.0.20.2/24")
     sw1("no shut")
     sw1("exit")
 
     # Configure interface 3 on switch sw1
-    sw1("interface 3")
+    sw1('interface %s' % sw1_intf3)
     sw1("ip address 10.0.30.1/24")
     sw1("no shut")
     sw1("exit")
 
     # Configure interface 4 on switch sw1
-    sw1("interface 4")
+    sw1('interface %s' % sw1_intf4)
     sw1("ip address 10.0.40.1/24")
     sw1("no shut")
     sw1("exit")
@@ -98,22 +101,23 @@ def _configure_switches(topology, step):
     sw2("configure terminal")
 
     # Configure interface 1 on switch sw2
-    sw2("interface 1")
+    sw2('interface %s' % sw2_intf1)
     sw2("ip address 10.0.30.2/24")
     sw2("no shut")
     sw2("exit")
 
     # Configure interface 2 on switch sw2
-    sw2("interface 2")
+    sw2('interface %s' % sw2_intf2)
     sw2("ip address 10.0.40.2/24")
     sw2("no shut")
     sw2("exit")
 
     # Configure interface 3 on switch s4
-    sw2("interface 3")
+    sw2('interface %s' % sw2_intf3)
     sw2("ip address 10.0.70.2/24")
     sw2("no shut")
     sw2("exit")
+
     sw2("ip route 10.0.10.0/24 10.0.30.1")
     sw2("ip route 10.0.10.0/24 10.0.40.1")
     sw2("ip route 10.0.20.0/24 10.0.30.1")
@@ -131,15 +135,15 @@ def _configure_hosts(topology, step):
     step('2-Configuring hosts')
 
     # Configure host 1
-    hs1.libs.ip.interface('if01', addr="10.0.10.1/24", up=True)
+    hs1.libs.ip.interface('eth1', addr="10.0.10.1/24", up=True)
 
     # Configure host 2
-    hs2.libs.ip.interface('if01', addr="10.0.20.1/24", up=True)
+    hs2.libs.ip.interface('eth1', addr="10.0.20.1/24", up=True)
 
     # hs2("ip addr add 10.0.20.1/24 dev if01")
     # hs2("ip addr del 10.0.0.2/8 dev if01")
     # Configure host 3
-    hs3.libs.ip.interface('if01', addr="10.0.70.1/24", up=True)
+    hs3.libs.ip.interface('eth1', addr="10.0.70.1/24", up=True)
 
     # hs3("ip addr add 10.0.70.1/24 dev if01")
     # hs3("ip addr del 10.0.0.3/8 dev if01")
@@ -161,18 +165,21 @@ def _v4_route_ping_test(topology, step):
     assert hs1 is not None
     hs2 = topology.get("hs2")
     assert hs2 is not None
-
-    sleep(ZEBRA_TEST_SLEEP_TIME)
-
     step('3-IPv4 Ping test')
 
-    # Ping host3 from host1
-    ping = hs1.libs.ping.ping(5, '10.0.70.1')
-    assert ping['transmitted'] >= 3 and ping['received'] >= 3
+    # Ping host3 from host1, pinging twice to take care of unresolved ARPs
+    ping = hs1.libs.ping.ping(10, '10.0.70.1')
+    assert ping['received'] > 0, "Ping from Host3 to Host1 failed"
+    ping = hs1.libs.ping.ping(10, '10.0.70.1')
+    assert ping['transmitted'] == ping['received'], "Ping from Host3 to Host1"\
+                                                    " failed"
 
-    # Ping host3 from host2
-    ping = hs2.libs.ping.ping(5, '10.0.70.1')
-    assert ping['transmitted'] >= 3 and ping['received'] >= 3
+    # Ping host3 from host2, pinging twice to take care of unresolved ARPs
+    ping = hs2.libs.ping.ping(10, '10.0.70.1')
+    assert ping['received'] > 0, "Ping from Host2 to Host1 failed"
+    ping = hs2.libs.ping.ping(10, '10.0.70.1')
+    assert ping['transmitted'] == ping['received'], "Ping from Host2 to Host1"\
+                                                    " failed"
 
 
 def _v4_route_delete_ping_test(topology, step):
@@ -189,12 +196,13 @@ def _v4_route_delete_ping_test(topology, step):
     sw1("no ip route 10.0.70.0/24 10.0.30.2")
 
     # Ping host1 from host2
-    sleep(ZEBRA_TEST_SLEEP_TIME)
-    ping = hs1.libs.ping.ping(5, '10.0.70.1')
-    assert ping['transmitted'] is 5 and ping['received'] is 0
+    ping = hs1.libs.ping.ping(10, '10.0.70.1')
+    assert ping['transmitted'] is 10 and ping['received'] is 0, "Ping from "\
+        "Host1 to Host2 success"
 
 
-@pytest.mark.skipif(True, reason="Skipping since it is failing at gate in master")
+@mark.timeout(ZEBRA_DEFAULT_TIMEOUT)
+@mark.gate
 def test_zebra_ct_ecmp(topology, step):
     _configure_switches(topology, step)
     _configure_hosts(topology, step)

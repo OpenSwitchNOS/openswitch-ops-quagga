@@ -23,6 +23,7 @@ OpenSwitch Test for vlan related configurations.
 from bgp_config import BgpConfig
 from vtysh_utils import SwitchVtyshUtils
 from interface_utils import verify_turn_on_interfaces
+from pytest import mark
 
 TOPOLOGY = """
 # Nodes
@@ -303,6 +304,7 @@ def verify_no_ip_community(step):
     step("### ip community-list  configs were successfully removed ###\n")
 
 
+@mark.gate
 def test_bgp_ft_ip_community_list(topology, step):
     global switches
     ops1 = topology.get('ops1')

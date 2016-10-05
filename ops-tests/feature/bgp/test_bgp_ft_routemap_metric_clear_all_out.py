@@ -16,6 +16,7 @@
 from time import sleep
 import pytest
 from interface_utils import verify_turn_on_interfaces
+from pytest import mark
 
 TOPOLOGY = """
 #

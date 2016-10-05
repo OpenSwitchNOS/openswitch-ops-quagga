@@ -18,6 +18,7 @@ import layer3_common as lib
 from time import sleep
 from pytest import mark
 
+
 TOPOLOGY = """
 # +-------+
 # |  hs1  <---+   +--------+     +--------+

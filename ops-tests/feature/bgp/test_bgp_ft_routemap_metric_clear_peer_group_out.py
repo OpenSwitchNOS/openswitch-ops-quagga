@@ -354,6 +354,7 @@ def configure(step, switch1, switch2, switch3):
     configure_neighbor(switch3, AS_NUM3, IP_ADDR2_2, AS_NUM2)
 
 
+@mark.gate
 @mark.timeout(600)
 def test_bgp_ft_routemap_metric_clear_peer_group_out(topology, step):
     ops1 = topology.get("ops1")

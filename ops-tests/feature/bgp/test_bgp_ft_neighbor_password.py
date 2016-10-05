@@ -22,6 +22,7 @@ OpenSwitch Test for vlan related configurations.
 
 from vtysh_utils import SwitchVtyshUtils
 from interface_utils import verify_turn_on_interfaces
+from pytest import mark
 
 TOPOLOGY = """
 # +-------+
@@ -193,6 +194,7 @@ def verify_no_neighbor_password(step):
     verify_no_connection(step)
 
 
+@mark.gate
 def test_bgp_ft_neighbor_password(topology, step):
     global switches
     ops1 = topology.get('ops1')

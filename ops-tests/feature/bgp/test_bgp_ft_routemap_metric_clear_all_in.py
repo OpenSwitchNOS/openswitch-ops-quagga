@@ -20,6 +20,7 @@
 from time import sleep
 from interface_utils import verify_turn_on_interfaces
 
+from pytest import mark
 
 TOPOLOGY = """
 # +-------+         +-------+         +-------+
@@ -393,6 +394,7 @@ def configure(topology, step):
     configure_neighbor(switch3, as_num3, ip_addr2_2, as_num2)
 
 
+@mark.gate
 def test_bgp_ft_routemap_metric_clear_all_in(topology, step):
     configure(topology, step)
     verify_routemap_set_metric_clear_soft_in_all(topology, step)

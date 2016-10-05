@@ -14,9 +14,19 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-import layer3_common as lib
-from time import sleep
+from layer3_common import (switch_cfg_iface,
+                           switch_add_ipv4_route,
+                           switch_remove_ipv4_route,
+                           switch_add_ipv6_route,
+                           switch_remove_ipv6_route,
+                           host_cfg_iface,
+                           host_add_route,
+                           host_ping_expect_success,
+                           host_ping_expect_failure,
+                           ZEBRA_DEFAULT_TIMEOUT,
+                           ZEBRA_TEST_SLEEP_TIME)
 from pytest import mark
+from time import sleep
 
 TOPOLOGY = """
 # +-------+
@@ -43,7 +53,8 @@ hs3:eth0 -- ops2:if02
 """
 
 
-@mark.timeout(500)
+@mark.timeout(ZEBRA_DEFAULT_TIMEOUT)
+@mark.gate
 def test_ecmp_routing(topology, step):
     """
     Verify ecmp routing.

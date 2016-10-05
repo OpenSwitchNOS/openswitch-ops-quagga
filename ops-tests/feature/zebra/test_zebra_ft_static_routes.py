@@ -15,9 +15,20 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-import layer3_common as lib
-from time import sleep
+from layer3_common import (switch_cfg_iface,
+                           switch_add_ipv4_route,
+                           switch_remove_ipv4_route,
+                           switch_add_ipv6_route,
+                           switch_remove_ipv6_route,
+                           switch_ping_expect_success,
+                           host_cfg_iface,
+                           host_add_route,
+                           host_ping_expect_success,
+                           host_ping_expect_failure,
+                           ZEBRA_DEFAULT_TIMEOUT,
+                           ZEBRA_TEST_SLEEP_TIME)
 from pytest import mark
+from time import sleep
 
 TOPOLOGY = """
 # +-------+     +--------+     +--------+     +-------+
@@ -37,7 +48,8 @@ ops2:if01 -- hs2:eth0
 """
 
 
-@mark.timeout(500)
+@mark.timeout(ZEBRA_DEFAULT_TIMEOUT)
+@mark.gate
 def test_static_routes(topology, step):
     """
     Test for static routes.

@@ -251,6 +251,7 @@ def configure(step, switch1, switch2, switch3):
     exitcontext(switch3)
 
 
+@mark.gate
 @mark.timeout(600)
 def test_bgp_ft_redistribute(topology, step):
     ops1 = topology.get('ops1')
